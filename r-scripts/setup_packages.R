@@ -62,7 +62,7 @@ if (length(existing) > 0L) {
 }
 
 # --- Packages the pipeline needs ---------------------------------------------
-required_pkgs <- c("dplyr", "tidyr", "stringr", "readxl", "sf")
+required_pkgs <- c("dplyr", "tidyr", "stringr", "readxl", "sf", "mlogit")
 
 # --- Where to download the packages from -------------------------------------
 # By default we use the main CRAN mirror. For MAXIMUM reproducibility you can
