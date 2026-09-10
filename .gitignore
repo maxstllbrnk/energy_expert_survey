@@ -1,7 +1,34 @@
-.Rproj.user
+# --- data ---------------------------------------------------------------------
+# Nothing the pipeline reads or writes belongs in this repository: the raw
+# exports and the cleaned data sets live in the secure location, the codebook
+# and diagnostics in Dropbox (see config.R). These two lines are a safety net
+# in case anything is ever written here by accident.
+data/
+output/
+
+# --- local path overrides -----------------------------------------------------
+# Per-machine roots, so nobody has to edit tracked config.R to run the pipeline.
+config.local.R
+
+# --- renv ---------------------------------------------------------------------
+# renv.lock IS committed (it records the exact package versions).
+# The library itself is machine-specific and is not.
+renv/library/
+renv/local/
+renv/cellar/
+renv/lock/
+renv/python/
+renv/sandbox/
+renv/staging/
+
+# --- R session ----------------------------------------------------------------
 .Rhistory
 .RData
+.Rapp.history
 .Ruserdata
-r-packages
-data
-output
+.Rproj.user/
+
+# --- OS -----------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+~$*.xlsx
