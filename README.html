@@ -691,6 +691,19 @@ to <code>Keine Empfehlung</code> wherever <code>vig_rec</code> is
 text stays untouched in <code>vig_rec_other</code>. <code>NA</code> in
 <code>vig_rec</code> therefore means the vignette really was not
 answered.</li>
+<li><strong>One expert has an arm conflict:
+<code>855854_429</code>.</strong> They apparently saw the same vignette
+twice — once <strong>with</strong> and once <strong>without</strong>
+district heating — and answered in both Fernwärme branches, which the
+between-subject design rules out. They carry
+<code>arm_conflict == TRUE</code> (the only respondent who does), the
+pipeline warns about them on every run, and they keep one row per branch
+rather than a single arm, so <code>vig_arm</code> is the branch of that
+row and not a property of the expert. They <strong>did not finish the
+survey</strong> (<code>is_complete == FALSE</code>), so they are already
+outside the completer sample; if you analyse the <strong>full</strong>
+sample, consider excluding them with
+<code>filter(!arm_conflict)</code>.</li>
 <li><strong><code>Time*</code> variables are not response
 times.</strong> <code>Time1…Time5BBBB</code> are the time-preference
 staircase and are named <code>tp_*</code>; <code>Risk*</code> becomes

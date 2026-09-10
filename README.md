@@ -242,6 +242,16 @@ Before committing, `renv::status()` should say *"No issues found"*.
   is in the build report (*of which free text with no coded answer*), and the
   original text stays untouched in `vig_rec_other`. `NA` in `vig_rec` therefore
   means the vignette really was not answered.
+- **One expert has an arm conflict: `855854_429`.** They apparently saw the
+  same vignette twice — once **with** and once **without** district heating —
+  and answered in both Fernwärme branches, which the between-subject design
+  rules out. They carry `arm_conflict == TRUE` (the only respondent who does),
+  the pipeline warns about them on every run, and they keep one row per branch
+  rather than a single arm, so `vig_arm` is the branch of that row and not a
+  property of the expert. They **did not finish the survey**
+  (`is_complete == FALSE`), so they are already outside the completer sample;
+  if you analyse the **full** sample, consider excluding them with
+  `filter(!arm_conflict)`.
 - **`Time*` variables are not response times.** `Time1…Time5BBBB` are the
   time-preference staircase and are named `tp_*`; `Risk*` becomes `risk_*`.
   Response times are `time_*` (per question) and `grouptime_*` (per page). The
