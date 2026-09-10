@@ -678,6 +678,19 @@ or <code>n_vignettes_answered</code>.</li>
 technologies plus <code>Keine Empfehlung</code>, the pre-registered
 seventh option (LimeSurvey stores it as <code>-oth-</code>); the free
 text is in <code>vig_rec_other</code>.</li>
+<li><strong>Free text with no coded answer counts as
+<code>Keine Empfehlung</code>.</strong> In a handful of rows LimeSurvey
+saved the typed text into <code>vig_rec_other</code> but left the answer
+column empty, so the recommendation arrived as <code>NA</code> even
+though the expert had answered. A row carrying free text <em>is</em> the
+seventh option, so <code>04_vignettes.R</code> sets <code>vig_rec</code>
+to <code>Keine Empfehlung</code> wherever <code>vig_rec</code> is
+<code>NA</code> and <code>vig_rec_other</code> is not — currently
+<strong>5 rows, 2 experts</strong>. The count is in the build report
+(<em>of which free text with no coded answer</em>), and the original
+text stays untouched in <code>vig_rec_other</code>. <code>NA</code> in
+<code>vig_rec</code> therefore means the vignette really was not
+answered.</li>
 <li><strong><code>Time*</code> variables are not response
 times.</strong> <code>Time1…Time5BBBB</code> are the time-preference
 staircase and are named <code>tp_*</code>; <code>Risk*</code> becomes

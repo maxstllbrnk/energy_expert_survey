@@ -233,6 +233,15 @@ Before committing, `renv::status()` should say *"No issues found"*.
 - **`vig_rec` has seven levels.** The six technologies plus `Keine Empfehlung`,
   the pre-registered seventh option (LimeSurvey stores it as `-oth-`); the free
   text is in `vig_rec_other`.
+- **Free text with no coded answer counts as `Keine Empfehlung`.** In a handful
+  of rows LimeSurvey saved the typed text into `vig_rec_other` but left the
+  answer column empty, so the recommendation arrived as `NA` even though the
+  expert had answered. A row carrying free text *is* the seventh option, so
+  `04_vignettes.R` sets `vig_rec` to `Keine Empfehlung` wherever `vig_rec` is
+  `NA` and `vig_rec_other` is not — currently **5 rows, 2 experts**. The count
+  is in the build report (*of which free text with no coded answer*), and the
+  original text stays untouched in `vig_rec_other`. `NA` in `vig_rec` therefore
+  means the vignette really was not answered.
 - **`Time*` variables are not response times.** `Time1…Time5BBBB` are the
   time-preference staircase and are named `tp_*`; `Risk*` becomes `risk_*`.
   Response times are `time_*` (per question) and `grouptime_*` (per page). The

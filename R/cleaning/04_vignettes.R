@@ -9,6 +9,8 @@
 # Every respondent keeps six rows, including those who broke off before the
 # vignettes - the design attributes are known for them either way, and
 # `vig_rec` is simply NA. Filter on !is.na(vig_rec) for the choice sample.
+# Rows carrying `vig_rec_other` free text but no coded answer are the 7th
+# option "Keine Empfehlung" and are labelled as such - see below.
 # The one respondent who answered in BOTH branches keeps a row per branch and
 # carries arm_conflict = TRUE.
 #
@@ -112,6 +114,25 @@ vignettes_long <- answers |>
   filter(if_else(arm_conflict, !is.na(vig_rec), vig_arm == arm_keep)) |>
   mutate(vig_arm = if_else(arm_conflict, vig_arm, arm_final)) |>
   select(-arm_observed, -arm_routed, -arm_final, -arm_keep)
+
+# --- free text without a coded answer ----------------------------------------
+# "Sonstiges" normally arrives as "-oth-" in the answer column plus the typed
+# text in `_other`, and 02_read_stack.R labels the "-oth-" as the 7th option.
+# In a handful of rows LimeSurvey stored only the free text and left the answer
+# column empty, so the recommendation labels to NA even though the respondent
+# did answer. A row that carries free text IS the 7th option, so it gets that
+# label here. Done after the arm filter, so it only touches rows that are kept
+# and never changes which branch a respondent is assigned to.
+rec_from_other <- sum(is.na(vignettes_long$vig_rec) &
+                      !is.na(vignettes_long$vig_rec_other))
+
+vignettes_long <- vignettes_long |>
+  mutate(vig_rec = if_else(is.na(vig_rec) & !is.na(vig_rec_other),
+                           VIG_OTHER_LABEL, vig_rec))
+
+if (rec_from_other > 0)
+  message(rec_from_other, " vignette row(s) had free text but no coded answer; ",
+          "set to '", VIG_OTHER_LABEL, "'")
 
 # --- the vignette design id --------------------------------------------------
 # vignetten_kombinationen.xlsx lists the 128 combinations; joining on all nine
