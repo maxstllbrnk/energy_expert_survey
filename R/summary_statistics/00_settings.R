@@ -255,3 +255,32 @@ FIG_WIDTH  <- 16    # cm
 FIG_HEIGHT <- 10    # cm, unless a figure asks for more
 FIG_DPI    <- 300
 BASE_SIZE  <- 10    # pt
+
+
+# =============================================================================
+# report
+# =============================================================================
+# 08_report.R puts all figures of a sample on one page (bericht.html) and
+# prints it to bericht.pdf. Headings of the sections, by sub-folder:
+SECTION_LABELS <- c(
+  "01_stichprobe"             = "Stichprobe und Abbruch",
+  "02_bearbeitungszeit"       = "Bearbeitungszeit",
+  "03_karten"                 = "Regionale Verteilung",
+  "04_unternehmen"            = "Unternehmen",
+  "05_vignetten"              = "Vignetten",
+  "06_energiepreise"          = "Energiepreise und CO₂-Preis",
+  "07_heiztechnologien"       = "Heiztechnologien und Hersteller",
+  "08_praeferenzen"           = "Zeit- und Risikopräferenzen",
+  "09_dienstleistungen_markt" = "Dienstleistungen, Markt und Kunden",
+  "10_person"                 = "Persönliche Angaben"
+)
+
+# The PDF is printed by the first of these browsers that is installed. Add the
+# path of yours if it is somewhere else; with none, only bericht.html is written.
+REPORT_BROWSERS <- c(
+  "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+  "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
+  "C:/Program Files/Google/Chrome/Application/chrome.exe",
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
+)

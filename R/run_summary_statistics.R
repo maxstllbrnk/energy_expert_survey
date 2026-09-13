@@ -14,6 +14,7 @@
 #
 #   SUMMARY_DIR/
 #     alle_befragten/                 every expert, including break-offs
+#       bericht.html, bericht.pdf     ALL figures of the sample on one page
 #       tabellen.xlsx                 the numbers behind the figures, all groups
 #       alle_berufsgruppen/
 #         01_stichprobe/              Berufsgruppe, completion, drop-out
@@ -61,9 +62,10 @@ for (s in seq_len(nrow(SAMPLES))) {
   sample_dir  <- file.path(SUMMARY_DIR, sample_spec$folder)
 
   # Output of an earlier run is removed first, so that a figure which is no
-  # longer produced cannot sit among the current ones looking current.
+  # longer produced cannot sit among the current ones looking current. Dropbox
+  # can keep the emptied folder itself alive while it syncs, hence no warning.
   unlink(sample_dir, recursive = TRUE)
-  dir.create(sample_dir, recursive = TRUE)
+  dir.create(sample_dir, recursive = TRUE, showWarnings = FALSE)
 
   dat <- load_analysis_data(completers_only = sample_spec$completers_only)
 
@@ -85,6 +87,7 @@ for (s in seq_len(nrow(SAMPLES))) {
   }
 
   source("R/summary_statistics/07_tables.R")
+  source("R/summary_statistics/08_report.R")
 }
 
 message("\nSummary statistics -> ", normalizePath(SUMMARY_DIR))
