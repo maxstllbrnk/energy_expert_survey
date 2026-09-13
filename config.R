@@ -90,10 +90,15 @@ GEODATA_DIR     <- file.path(PUBLIC_DATA_DIR, "geodata")
 PLZ_LOOKUP_FILE <- file.path(GEODATA_DIR, "plz_bundesland.csv")   # postcode -> federal state
 BKG_DIR         <- file.path(GEODATA_DIR, "bkg_vg2500")           # official boundaries, for maps
 BUNDESLAND_SHP  <- file.path(BKG_DIR, "vg2500", "VG2500_LAN.shp") # the 16 state polygons
+GEONAMES_FILE   <- file.path(GEODATA_DIR, "geonames", "DE.txt")    # postcode coordinates, for maps
 
-# Codebook and build diagnostics. Later summary statistics, tables and figures
-# belong under OUTPUT_DIR too, each in their own sub-folder.
-REPORT_DIR <- file.path(OUTPUT_DIR, "reports_cleaning")
+# Codebook and build diagnostics, written by R/run_cleaning.R.
+REPORT_DIR    <- file.path(OUTPUT_DIR, "reports_cleaning")
+CODEBOOK_FILE <- file.path(REPORT_DIR, "codebook.csv")
+
+# Figures and tables describing the data, written by R/run_summary_statistics.R.
+# Aggregates only - no respondent-level data - so they can live in Dropbox.
+SUMMARY_DIR <- file.path(OUTPUT_DIR, "summary_statistics")
 
 # =============================================================================
 # survey design constants
