@@ -46,7 +46,7 @@ DROPBOX (DROPBOX_DIR)                  …/Heating Transition/analysis_survey
       build_report.xlsx
       preferences_report.xlsx
     summary_statistics/                  ← written by R/run_summary_statistics.R
-      alle_befragten/, completer/          figures + tabellen.xlsx, see "Summary statistics"
+      alle_befragten/, completer/          bericht.html/.pdf, tabellen.xlsx, figures; see "Summary statistics"
 
 PROJECT (this folder, on GitHub)
   config.R                    the three roots and the paths derived from them
@@ -72,6 +72,8 @@ PROJECT (this folder, on GitHub)
     05_preferences.R            time and risk preferences
     06_maps.R                   maps by federal state and by postcode
     07_tables.R                 tabellen.xlsx
+    08_report.R                 bericht.html + bericht.pdf: all figures of a sample on one page
+    report.css                  the look of that page
   R/geodata/
     build_plz_bundesland.R      run ONCE: downloads and builds the postcode lookup
   tests/selftest.R            checks on the cleaned output
@@ -487,6 +489,15 @@ Continuous variables are histograms showing the mean (solid line) and median
 how many outliers were removed, and which sample and group the figure shows, so
 a figure copied into a slide still says what it is.
 
+**To look through everything at once, open `bericht.html` or `bericht.pdf`** in
+a sample folder: every figure of that sample on one page, one chapter per group,
+sorted by questionnaire section, with links to jump between them and the rules
+below at the top. The HTML shows the PNG files next to it, so it only works
+inside its folder; the PDF is self-contained and is the one to send around. The
+PDF is printed by a headless Chrome or Edge (the paths in `REPORT_BROWSERS`,
+`00_settings.R`). Where neither is installed, only the HTML is written — open it
+and print it to PDF from the browser.
+
 `tabellen.xlsx` in each sample folder holds the numbers behind the figures, all
 groups in one table (column `gruppe`): mean, sd, quartiles and `n_entfernt` for
 continuous variables, counts and shares for categorical ones, recommendation,
@@ -571,6 +582,7 @@ they left at the energy prices).
 | samples or groups | `SAMPLES` in `00_settings.R`; the Berufsgruppe rule in `R/prepare_analysis_data.R` |
 | colours, figure size | the end of `00_settings.R` |
 | how one kind of figure looks | its function in `01_plot_functions.R` — all figures of that kind follow |
+| the report page: section headings, browser used for the PDF, layout | `SECTION_LABELS`, `REPORT_BROWSERS` in `00_settings.R`; `report.css` |
 
 ### Using the prepared data in an analysis
 
