@@ -1,0 +1,104 @@
+/* =============================================================================
+   report.css  -  the look of bericht.html (inlined by 08_report.R)
+   =============================================================================
+   Same ink and accent colours as the figures (00_settings.R). On screen the
+   figures sit in as many columns as fit; printed to A4 they sit in two, and
+   every group starts on a new page.
+   ============================================================================= */
+
+:root {
+  --ink:     #0b0b0b;
+  --ink-2:   #52514e;
+  --ink-3:   #898781;
+  --line:    #e1e0d9;
+  --ground:  #f9f9f7;
+  --surface: #ffffff;
+  --accent:  #2a78d6;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font: 15px/1.5 "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+}
+
+header, section { max-width: 1280px; margin: 0 auto; padding: 0 24px; }
+
+/* --- header ------------------------------------------------------------------ */
+header { padding-top: 40px; padding-bottom: 24px; }
+h1     { margin: 0 0 4px; font-size: 28px; font-weight: 650; letter-spacing: -0.01em; }
+.sample { margin: 0 0 24px; color: var(--ink-2); }
+
+.numbers { display: flex; flex-wrap: wrap; gap: 36px; margin-bottom: 24px; }
+.numbers div    { display: flex; flex-direction: column; }
+.numbers .value { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.numbers .label { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+
+/* --- navigation -------------------------------------------------------------- */
+nav   { display: flex; flex-wrap: wrap; gap: 8px; }
+nav a {
+  padding: 5px 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 13px;
+  text-decoration: none;
+}
+nav a:hover { border-color: var(--accent); color: var(--ink); }
+
+/* --- notes ------------------------------------------------------------------- */
+.notes dl { display: grid; grid-template-columns: 170px 1fr; gap: 6px 16px; margin: 0; font-size: 14px; }
+.notes dt { font-weight: 600; }
+.notes dd { margin: 0; color: var(--ink-2); }
+.notes a  { color: var(--accent); }
+
+/* --- groups and sections ------------------------------------------------------ */
+h2    { margin: 0 0 12px; font-size: 22px; font-weight: 650; }
+h2 .n { margin-left: 8px; font-size: 14px; font-weight: 400; color: var(--ink-3); }
+h3    { margin: 32px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line);
+        font-size: 17px; font-weight: 600; }
+
+.notes, .group { margin-top: 40px; padding-top: 32px; border-top: 1px solid var(--line); }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+figure {
+  margin: 0;
+  padding: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+figure img { display: block; width: 100%; height: auto; }
+figcaption {
+  margin-top: 6px;
+  font: 11px/1.4 Consolas, ui-monospace, monospace;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+
+/* --- print / PDF ----------------------------------------------------------------- */
+@media print {
+  @page { size: A4; margin: 12mm; }
+
+  body            { background: white; font-size: 11px; }
+  header, section { max-width: none; padding-left: 0; padding-right: 0; }
+  header          { padding-top: 0; }
+  h1              { font-size: 22px; }
+  .notes dl       { font-size: 11px; }
+
+  .group          { break-before: page; margin-top: 0; padding-top: 0; border-top: none; }
+  h2, h3          { break-after: avoid; }
+  .grid           { grid-template-columns: 1fr 1fr; gap: 8px; }
+  figure          { break-inside: avoid; padding: 0; border: none; }
+  figcaption      { font-size: 7px; }
+}

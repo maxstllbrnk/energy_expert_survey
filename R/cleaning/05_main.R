@@ -65,6 +65,7 @@ checks <- tribble(
   "  of which reached the vignettes",    as.character(sum(survey_main$reached_vignettes)),
   "vignette rows",                       as.character(nrow(vignettes_long)),
   "  with a recommendation",             as.character(sum(!is.na(vignettes_long$vig_rec))),
+  "    of which free text with no coded answer", as.character(rec_from_other),
   "  matched to a design combination",   as.character(sum(!is.na(vignettes_long$vignette_id))),
   "respondents with 6 vignette rows",    as.character(sum(table(vignettes_long$resp_uid) == 6)),
   "respondents answering in both branches (should be 0-1)",
