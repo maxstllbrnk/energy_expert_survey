@@ -1,7 +1,8 @@
-# Energieberater vignette survey — data cleaning
+# Energieberater vignette survey — data cleaning and summary statistics
 
 Turns the raw LimeSurvey exports of the Energieberater expert survey into three
-clean data sets. Twelve mailing waves, including the two soft-launch waves.
+clean data sets, and describes them in figures and tables. Twelve mailing waves,
+including the two soft-launch waves.
 
 The survey shows each expert **six vignettes** describing a household and its
 existing heating system, and asks which heating technology they would recommend.
@@ -44,6 +45,8 @@ DROPBOX (DROPBOX_DIR)                  …/Heating Transition/analysis_survey
       codebook.{xlsx,csv}
       build_report.xlsx
       preferences_report.xlsx
+    summary_statistics/                  ← written by R/run_summary_statistics.R
+      alle_befragten/, completer/          figures + tabellen.xlsx, see "Summary statistics"
 
 PROJECT (this folder, on GitHub)
   config.R                    the three roots and the paths derived from them
@@ -57,16 +60,31 @@ PROJECT (this folder, on GitHub)
     04_vignettes.R              DATA SET 2
     05_main.R                   DATA SET 3 + build report
   R/add_preferences.R         the GPS time- and risk-preference scores
+  R/prepare_analysis_data.R   shared analysis decisions: Berufsgruppe, last question
+                              answered, loads both data sets with the preference scores
+  R/run_summary_statistics.R  entry point for the summary statistics
+  R/summary_statistics/
+    00_settings.R               samples, groups, outlier rule, what is plotted, labels
+    01_plot_functions.R         the shared look and one function per kind of figure
+    02_sample.R                 Berufsgruppe, completion, drop-out, response times
+    03_questions.R              one figure per question
+    04_vignettes.R              recommendations, times and costs, per Fernwärme arm
+    05_preferences.R            time and risk preferences
+    06_maps.R                   maps by federal state and by postcode
+    07_tables.R                 tabellen.xlsx
   R/geodata/
     build_plz_bundesland.R      run ONCE: downloads and builds the postcode lookup
   tests/selftest.R            checks on the cleaned output
   renv.lock                   the exact package versions
 ```
 
-Analysis scripts go in `R/analysis/`, with their own runner (`R/run_analysis.R`)
-alongside `R/run_cleaning.R`. Keep cleaning and analysis separate: the cleaning
-pipeline should not change when an analysis does. Their tables and figures
-belong under `output_dropbox/`, each in their own sub-folder next to
+Analyses go in a folder of their own under `R/`, with their own runner next to
+`R/run_cleaning.R` - as `R/summary_statistics/` does with
+`R/run_summary_statistics.R`. Keep cleaning and analysis separate: the cleaning
+pipeline should not change when an analysis does. Decisions every analysis
+shares (the Berufsgruppe, the preference scores) live in
+`R/prepare_analysis_data.R`, so all analyses make them the same way. Tables and
+figures belong under `output_dropbox/`, each in their own sub-folder next to
 `reports_cleaning/`.
 
 ## What you get
@@ -78,6 +96,7 @@ belong under `output_dropbox/`, each in their own sub-folder next to
 | `preferences.*` | secure (`CLEAN_DATA_DIR`) | one row per expert | time- and risk-preference scores — from `R/add_preferences.R`, not from the pipeline |
 | `codebook.xlsx` | Dropbox (`REPORT_DIR`) | one row per variable | question text · LimeSurvey question id · analysis variable name |
 | `build_report.xlsx` | Dropbox (`REPORT_DIR`) | — | run diagnostics — **read this after every run** |
+| `summary_statistics/` | Dropbox (`SUMMARY_DIR`) | — | figures and tables describing the data — from `R/run_summary_statistics.R`, see [Summary statistics](#summary-statistics) |
 
 The two data sets are written as `.rds` (keeps factors, dates and `NA` exactly —
 use this for analysis), `.csv` (portable) and `.xlsx` (for looking at).
@@ -96,6 +115,7 @@ renv::restore()                          # once per computer — install the rec
 source("R/geodata/build_plz_bundesland.R")  # ONCE ever — downloads the postcode geodata
 source("R/run_cleaning.R")               # build all three data sets
 source("tests/selftest.R")               # checks on the result
+source("R/run_summary_statistics.R")     # figures and tables, see "Summary statistics"
 ```
 
 From a terminal, in the project folder:
@@ -406,8 +426,8 @@ library(sf)
 states <- st_read(BUNDESLAND_SHP) |> dplyr::filter(GF == 9)   # GF 9 = land area
 ```
 
-`sf` is not in `renv.lock` — nothing in the pipeline needs it. Install it and
-`renv::snapshot()` when you start on the maps.
+`sf` is in `renv.lock` because the summary statistics draw maps with it
+(`R/summary_statistics/06_maps.R`); the cleaning pipeline itself does not need it.
 
 ### Rebuilding
 
@@ -417,3 +437,148 @@ cleaning pipeline afterwards.
 ```bash
 Rscript R/geodata/build_plz_bundesland.R refresh
 ```
+
+## Summary statistics
+
+`R/run_summary_statistics.R` describes the cleaned data in figures and tables:
+one figure per question, the vignette recommendations, drop-out, response
+times, time and risk preferences, and maps. Titles are the German question
+text.
+
+```r
+source("R/run_summary_statistics.R")     # a few minutes; run R/run_cleaning.R first
+```
+
+It reads the cleaned data from the secure location and writes only figures and
+aggregate tables, to `output_dropbox/summary_statistics/`. Each run replaces the
+previous output, so nothing stale is left behind.
+
+### What you get
+
+Every figure is produced for **two samples × four groups**:
+
+| Sample folder | Who |
+|---|---|
+| `alle_befragten/` | every expert in `survey_main`, including break-offs |
+| `completer/` | submitted questionnaires only (`is_complete`); no drop-out figures |
+
+| Group folder | Who |
+|---|---|
+| `alle_berufsgruppen/` | everyone in the sample |
+| `shk_handwerk/`, `schornsteinfeger/`, `energieberater/` | one Berufsgruppe, see below |
+
+Inside each group folder the figures are sorted by questionnaire section:
+
+| Folder | Contents |
+|---|---|
+| `01_stichprobe/` | Berufsgruppe, completion, vignettes answered, drop-out |
+| `02_bearbeitungszeit/` | time for the whole questionnaire and per section |
+| `03_karten/` | experts per federal state and per postcode |
+| `04_unternehmen/` | Q0a–Q6a |
+| `05_vignetten/` | recommendations (overall, by position, by each vignette attribute, by Berufsgruppe), response time per vignette, expected cost by technology — always per Fernwärme arm |
+| `06_energiepreise/` | Q15–Q18b |
+| `07_heiztechnologien/` | Q11b–Q11c (SHK firms only) |
+| `08_praeferenzen/` | time and risk preferences: the first choice as asked, and the score |
+| `09_dienstleistungen_markt/` | Q8, Q10a–b, Q19a–c, Q7, Q28 |
+| `10_person/` | Q20–Q24 |
+
+Continuous variables are histograms showing the mean (solid line) and median
+(dashed); categorical variables are bar charts of shares. Every caption states n,
+how many outliers were removed, and which sample and group the figure shows, so
+a figure copied into a slide still says what it is.
+
+`tabellen.xlsx` in each sample folder holds the numbers behind the figures, all
+groups in one table (column `gruppe`): mean, sd, quartiles and `n_entfernt` for
+continuous variables, counts and shares for categorical ones, recommendation,
+cost and response-time statistics per arm, and a sheet `hinweise` stating the
+rules below.
+
+A question shown to only some experts produces no figure for a group that never
+saw it (fewer than `MIN_N` = 10 answers): Q11b was only shown to SHK firms, Q8
+and Q10 only to Energieberatung and Schornsteinfeger firms.
+
+### Berufsgruppe
+
+Q2 allows several ticks, so each expert is assigned to **one** group, by priority:
+
+1. **SHK-Handwerk** — ticked *Sanitär-, Heizungs-, Klimatechnik*
+2. **Schornsteinfeger** — ticked *Schornsteinfeger*, but not SHK
+3. **Energieberater** — ticked *Energieberatungsbüro* **or** *Architektur- /
+   Bauingenieurbüro / sonstiges Ingenieurbüro*, but neither trade
+
+The trades take priority over energy advice: an SHK firm that also offers energy
+advice counts as SHK-Handwerk, a chimney sweep who also advises as
+Schornsteinfeger. Architecture and engineering offices count as Energieberater.
+Experts who ticked only *Sonstiges* are `Keine Zuordnung`, those who skipped Q2
+are `NA`; both appear only in `alle_berufsgruppen/`.
+
+On the current data: **617 SHK-Handwerk, 670 Schornsteinfeger, 2,460
+Energieberater**, 177 Keine Zuordnung, 252 without an answer to Q2. The sheet
+`berufsgruppen_zuordnung` in `tabellen.xlsx` lists every combination of ticks and
+the group it became.
+
+The rule is `add_berufsgruppe()` in `R/prepare_analysis_data.R`. Use that
+function in every analysis rather than deriving the groups again.
+
+### Outliers
+
+Free numeric answers contain typos that stretch a histogram's axis until the
+distribution is a single bar. Before a continuous variable is plotted **or**
+summarised, two rules are applied, in this order:
+
+1. **`VALID_RANGE`** — impossible values are dropped: birth years outside
+   1920–2010 and training years outside 1930–2026 (the bounds the build report
+   flags).
+2. **`TRIM_QUANTILES`** — of the remaining values, those below the 0.5th and
+   above the 99.5th percentile are dropped.
+
+Both are at the top of `R/summary_statistics/00_settings.R`;
+`TRIM_QUANTILES <- c(0, 1)` switches trimming off. Every histogram says in its
+caption how many values were removed, the mean and median it shows are those of
+the remaining values, and `tabellen.xlsx` applies the same rule. The data are
+never changed. The preference scores are bounded by construction and are not
+trimmed.
+
+The rule catches typos, not unit errors: around 1 % of the energy prices look
+like euro rather than cent per kWh (0.11 instead of 11), more than the 0.5 %
+the quantile rule cuts. How to treat those is an analysis decision.
+
+### Drop-out
+
+LimeSurvey's `meta_lastpage` counts pages including those hidden by routing, so
+the same page number stands for different questions for different experts. It
+is plotted as recorded (`abbruch_lastpage.png`), but the other drop-out figures
+use the response times instead: a question has a time exactly when the expert
+submitted its page, so **the last question with a time is the last question
+answered**. `add_last_question()` in `R/prepare_analysis_data.R` adds it as
+`last_question`, based on the questionnaire order in `QUESTIONNAIRE`.
+
+- `abbruch_nach_frage.png` — break-offs by the last question answered
+- `verbleib_nach_abschnitt.png` — the share of all experts who got at least as
+  far as each section
+
+On the current data the two largest groups of break-offs answered Q6a last
+(219 — they left when the vignettes began) and the cost question last (116 —
+they left at the energy prices).
+
+### Changing things
+
+| To change | Edit |
+|---|---|
+| which questions are plotted, axis labels, bin widths | `HISTOGRAMS`, `BARS`, `MULTIPLE_CHOICE`, `RANKINGS` in `00_settings.R` |
+| titles, subtitles, shortened answer labels | `TITLES`, `SUBTITLES`, `SHORT_LABELS` in `00_settings.R` |
+| outlier rule, minimum n | `VALID_RANGE`, `TRIM_QUANTILES`, `MIN_N` in `00_settings.R` |
+| samples or groups | `SAMPLES` in `00_settings.R`; the Berufsgruppe rule in `R/prepare_analysis_data.R` |
+| colours, figure size | the end of `00_settings.R` |
+| how one kind of figure looks | its function in `01_plot_functions.R` — all figures of that kind follow |
+
+### Using the prepared data in an analysis
+
+```r
+source("R/prepare_analysis_data.R")                 # also loads config.R
+dat <- load_analysis_data(completers_only = TRUE)
+dat$main        # one row per expert, plus berufsgruppe, last_question, tp_* and risk_* scores
+dat$vignettes   # one row per expert x vignette, plus berufsgruppe
+```
+
+The preference z-scores are standardised on the sample that is loaded.
