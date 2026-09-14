@@ -1128,14 +1128,9 @@ Bauingenieurbüro / sonstiges Ingenieurbüro</em>, but neither trade</li>
 <p>The trades take priority over energy advice: an SHK firm that also
 offers energy advice counts as SHK-Handwerk, a chimney sweep who also
 advises as Schornsteinfeger. Architecture and engineering offices count
-as Energieberater. Experts who ticked only <em>Sonstiges</em> are
-<code>Keine Zuordnung</code>, those who skipped Q2 are <code>NA</code>;
-both appear only in <code>alle_berufsgruppen/</code>.</p>
-<p>On the current data: <strong>617 SHK-Handwerk, 670 Schornsteinfeger,
-2,460 Energieberater</strong>, 177 Keine Zuordnung, 252 without an
-answer to Q2. The sheet <code>berufsgruppen_zuordnung</code> in
-<code>tabellen.xlsx</code> lists every combination of ticks and the
-group it became.</p>
+as Energieberater. Experts who ticked only <em>Sonstiges</em> also count
+as Energieberater, those who skipped Q2 are <code>NA</code>; both appear
+only in <code>alle_berufsgruppen/</code>.</p>
 <p>The rule is <code>add_berufsgruppe()</code> in
 <code>R/prepare_analysis_data.R</code>. Use that function in every
 analysis rather than deriving the groups again.</p>

@@ -520,13 +520,8 @@ Q2 allows several ticks, so each expert is assigned to **one** group, by priorit
 The trades take priority over energy advice: an SHK firm that also offers energy
 advice counts as SHK-Handwerk, a chimney sweep who also advises as
 Schornsteinfeger. Architecture and engineering offices count as Energieberater.
-Experts who ticked only *Sonstiges* are `Keine Zuordnung`, those who skipped Q2
+Experts who ticked only *Sonstiges* also count as Energieberater, those who skipped Q2
 are `NA`; both appear only in `alle_berufsgruppen/`.
-
-On the current data: **617 SHK-Handwerk, 670 Schornsteinfeger, 2,460
-Energieberater**, 177 Keine Zuordnung, 252 without an answer to Q2. The sheet
-`berufsgruppen_zuordnung` in `tabellen.xlsx` lists every combination of ticks and
-the group it became.
 
 The rule is `add_berufsgruppe()` in `R/prepare_analysis_data.R`. Use that
 function in every analysis rather than deriving the groups again.
