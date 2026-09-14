@@ -1091,6 +1091,16 @@ median (dashed); categorical variables are bar charts of shares. Every
 caption states n, how many outliers were removed, and which sample and
 group the figure shows, so a figure copied into a slide still says what
 it is.</p>
+<p>Ranking questions (Q7, Q28) get two figures. The first shows the
+share of experts naming each option, stacked by rank. The second
+(<code>…_gewichte.png</code>) turns each expert’s ranking into weights
+that sum to 1: of k options named, rank r gets (k + 1 − r) / (k(k +
+1)/2) — 3/6, 2/6, 1/6 for three options, 2/3, 1/3 for two, 1 for one —
+and options not named get 0. A bar is the mean weight over the experts
+who ranked at least one option, so the bars sum to 100 % and an expert
+who names fewer options counts as much as one who names all. The rule is
+<code>ranking_weights()</code> in
+<code>R/summary_statistics/01_plot_functions.R</code>.</p>
 <p><strong>To look through everything at once, open
 <code>bericht.html</code> or <code>bericht.pdf</code></strong> in a
 sample folder: every figure of that sample on one page, one chapter per
@@ -1104,8 +1114,9 @@ it to PDF from the browser.</p>
 <p><code>tabellen.xlsx</code> in each sample folder holds the numbers
 behind the figures, all groups in one table (column
 <code>gruppe</code>): mean, sd, quartiles and <code>n_entfernt</code>
-for continuous variables, counts and shares for categorical ones,
-recommendation, cost and response-time statistics per arm, and a sheet
+for continuous variables, counts and shares for categorical ones, the
+mean ranking weights (<code>rangfolge_gewichte</code>), recommendation,
+cost and response-time statistics per arm, and a sheet
 <code>hinweise</code> stating the rules below.</p>
 <p>A question shown to only some experts produces no figure for a group
 that never saw it (fewer than <code>MIN_N</code> = 10 answers): Q11b was
@@ -1123,13 +1134,14 @@ Klimatechnik</em></li>
 <em>Schornsteinfeger</em>, but not SHK</li>
 <li><strong>Energieberater</strong> — ticked
 <em>Energieberatungsbüro</em> <strong>or</strong> <em>Architektur- /
-Bauingenieurbüro / sonstiges Ingenieurbüro</em>, but neither trade</li>
+Bauingenieurbüro / sonstiges Ingenieurbüro</em>, <strong>or</strong>
+<em>Sonstiges</em>, but neither trade</li>
 </ol>
 <p>The trades take priority over energy advice: an SHK firm that also
 offers energy advice counts as SHK-Handwerk, a chimney sweep who also
 advises as Schornsteinfeger. Architecture and engineering offices count
 as Energieberater. Experts who ticked only <em>Sonstiges</em> also count
-as Energieberater, those who skipped Q2 are <code>NA</code>; both appear
+as Energieberater, those who skipped Q2 are <code>NA</code>, and appear
 only in <code>alle_berufsgruppen/</code>.</p>
 <p>The rule is <code>add_berufsgruppe()</code> in
 <code>R/prepare_analysis_data.R</code>. Use that function in every

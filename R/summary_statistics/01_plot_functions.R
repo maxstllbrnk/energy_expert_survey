@@ -8,6 +8,7 @@
 #   plot_bar()              a categorical variable
 #   plot_multiple_choice()  "tick all that apply": share choosing each option
 #   plot_ranking()          a ranking question: mentions per option and rank
+#   plot_ranking_weights()  a ranking question: mean weight per option
 #   plot_stacked()          100 % stacked bars: one categorical variable by another
 #   save_figure()           writes a figure into the current output folder
 #
@@ -256,14 +257,51 @@ plot_multiple_choice <- function(data, variables, title = question_text(variable
 }
 
 # --- a ranking question ----------------------------------------------------------
+# Every figure and table reads a ranking the same way: one row per expert x
+# option they named, with the rank they gave it and the weight their ranking
+# puts on it. An expert who names k options gives the option on rank r the
+# weight (k + 1 - r) / (k (k + 1) / 2) - 3/6, 2/6, 1/6 for three options,
+# 2/3, 1/3 for two, 1 for one - so every expert's weights sum to 1, however
+# many options they named. Options not named get no row, i.e. weight 0. Ranks
+# are counted among the options named, so a skipped rank leaves no gap.
+#
+# `by` keeps further columns that identify an expert: in 07_tables.R the same
+# expert appears once per gruppe.
+ranking_weights <- function(data, variables, by = character()) {
+  data %>%
+    select(all_of(by), resp_uid, all_of(variables)) %>%
+    mutate(across(all_of(variables), as.character)) %>%
+    pivot_longer(all_of(variables), names_to = "rank", values_to = "option",
+                 values_drop_na = TRUE) %>%
+    mutate(rank = as.integer(str_extract(rank, "[0-9]+$"))) %>%
+    mutate(k      = n(),
+           weight = (k + 1 - min_rank(rank)) / (k * (k + 1) / 2),
+           .by = all_of(c(by, "resp_uid"))) %>%
+    select(-k)
+}
+
+# The mean weight of each option over the n experts who named at least one
+# option. The means of all options sum to 1.
+mean_ranking_weights <- function(data, variables, by = character()) {
+  ranking_weights(data, variables, by) %>%
+    mutate(n = n_distinct(resp_uid), .by = all_of(by)) %>%
+    summarise(weight = sum(weight) / first(n), .by = all_of(c(by, "n", "option")))
+}
+
+# "3 Nennungen: 3/6, 2/6, 1/6 · 2 Nennungen: 2/3, 1/3 · 1 Nennung: 1"
+weight_rule <- function(n_ranks) {
+  map_chr(n_ranks:1, function(k) {
+    if (k == 1) return("1 Nennung: 1")
+    str_c(k, " Nennungen: ", str_c(k:1, "/", k * (k + 1) / 2, collapse = ", "))
+  }) %>%
+    str_c(collapse = " · ")
+}
+
 # One bar per option: the share of experts naming it, split by the rank they
 # gave it. Options named most often overall come first.
 plot_ranking <- function(data, variables, title = question_text(variables[1])) {
-  mentions <- data %>%
-    select(resp_uid, all_of(variables)) %>%
-    mutate(across(-resp_uid, as.character)) %>%
-    pivot_longer(-resp_uid, names_to = "rank", values_to = "option", values_drop_na = TRUE) %>%
-    mutate(rank = str_c("Rang ", str_extract(rank, "[0-9]+$")))
+  mentions <- ranking_weights(data, variables) %>%
+    mutate(rank = str_c("Rang ", rank))
   n_experts <- n_distinct(mentions$resp_uid)
   if (n_experts < MIN_N) return(NULL)
 
@@ -280,6 +318,27 @@ plot_ranking <- function(data, variables, title = question_text(variables[1])) {
     labs(title = wrap_title(title),
          subtitle = "Anteil der Befragten, die die Option nennen, nach vergebenem Rang",
          x = "Anteil der Befragten", y = NULL, caption = make_caption(n_experts)) +
+    theme(panel.grid.major.y = element_blank())
+}
+
+# One bar per option: the mean weight experts put on it, largest first. The
+# bars sum to 100 %, and an expert who named fewer options counts as much as
+# one who named all.
+plot_ranking_weights <- function(data, variables, title = question_text(variables[1])) {
+  weights <- mean_ranking_weights(data, variables)
+  if (nrow(weights) == 0 || weights$n[1] < MIN_N) return(NULL)
+
+  subtitle <- str_c("Mittleres Gewicht je Option. Die Rangfolge jedes Befragten ist in Gewichte ",
+                    "umgerechnet, die sich zu 100 % summieren (", weight_rule(length(variables)), ")")
+
+  ggplot(weights, aes(x = weight, y = fct_reorder(option, weight))) +
+    geom_col(fill = COL_BAR, width = 0.7) +
+    geom_text(aes(label = percent_de(weight)), hjust = -0.2, size = LABEL_SIZE,
+              color = INK_SECONDARY) +
+    scale_x_continuous(labels = percent_de, expand = expansion(mult = c(0, 0.12))) +
+    scale_y_discrete(labels = scales::label_wrap(45)) +
+    labs(title = wrap_title(title), subtitle = wrap_subtitle(subtitle),
+         x = "Mittleres Gewicht", y = NULL, caption = make_caption(weights$n[1])) +
     theme(panel.grid.major.y = element_blank())
 }
 

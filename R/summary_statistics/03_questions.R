@@ -28,9 +28,13 @@ pwalk(MULTIPLE_CHOICE, function(file, section, variables) {
 })
 
 # --- rankings ----------------------------------------------------------------------
+# Mentions by rank, then the mean weights - written in this order, so that the
+# report shows the two figures of a question next to each other.
 pwalk(RANKINGS, function(file, section, variables) {
   plot_ranking(sm, variables) %>%
     save_figure(section, file, height = 11)
+  plot_ranking_weights(sm, variables) %>%
+    save_figure(section, str_c(file, "_gewichte"), height = 11)
 })
 
 # --- Q17: expected price development, all energy carriers in one figure --------

@@ -489,6 +489,15 @@ Continuous variables are histograms showing the mean (solid line) and median
 how many outliers were removed, and which sample and group the figure shows, so
 a figure copied into a slide still says what it is.
 
+Ranking questions (Q7, Q28) get two figures. The first shows the share of
+experts naming each option, stacked by rank. The second (`…_gewichte.png`)
+turns each expert's ranking into weights that sum to 1: of k options named,
+rank r gets (k + 1 − r) / (k(k + 1)/2) — 3/6, 2/6, 1/6 for three options,
+2/3, 1/3 for two, 1 for one — and options not named get 0. A bar is the mean
+weight over the experts who ranked at least one option, so the bars sum to
+100 % and an expert who names fewer options counts as much as one who names
+all. The rule is `ranking_weights()` in `R/summary_statistics/01_plot_functions.R`.
+
 **To look through everything at once, open `bericht.html` or `bericht.pdf`** in
 a sample folder: every figure of that sample on one page, one chapter per group,
 sorted by questionnaire section, with links to jump between them and the rules
@@ -500,7 +509,8 @@ and print it to PDF from the browser.
 
 `tabellen.xlsx` in each sample folder holds the numbers behind the figures, all
 groups in one table (column `gruppe`): mean, sd, quartiles and `n_entfernt` for
-continuous variables, counts and shares for categorical ones, recommendation,
+continuous variables, counts and shares for categorical ones, the mean ranking
+weights (`rangfolge_gewichte`), recommendation,
 cost and response-time statistics per arm, and a sheet `hinweise` stating the
 rules below.
 
