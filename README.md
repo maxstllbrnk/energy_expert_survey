@@ -515,13 +515,13 @@ Q2 allows several ticks, so each expert is assigned to **one** group, by priorit
 1. **SHK-Handwerk** — ticked *Sanitär-, Heizungs-, Klimatechnik*
 2. **Schornsteinfeger** — ticked *Schornsteinfeger*, but not SHK
 3. **Energieberater** — ticked *Energieberatungsbüro* **or** *Architektur- /
-   Bauingenieurbüro / sonstiges Ingenieurbüro*, but neither trade
+   Bauingenieurbüro / sonstiges Ingenieurbüro*, **or** *Sonstiges*, but neither trade
 
 The trades take priority over energy advice: an SHK firm that also offers energy
 advice counts as SHK-Handwerk, a chimney sweep who also advises as
 Schornsteinfeger. Architecture and engineering offices count as Energieberater.
 Experts who ticked only *Sonstiges* also count as Energieberater, those who skipped Q2
-are `NA`; both appear only in `alle_berufsgruppen/`.
+are `NA`, and appear only in `alle_berufsgruppen/`.
 
 The rule is `add_berufsgruppe()` in `R/prepare_analysis_data.R`. Use that
 function in every analysis rather than deriving the groups again.
