@@ -38,8 +38,7 @@ source("R/add_preferences.R")   # add_preference_scores(); sources config.R itse
 #   2. Schornsteinfeger  ticked "Schornsteinfeger", but not SHK
 #   3. Energieberater    ticked "Energieberatungsbüro" or
 #                        "Architektur- / Bauingenieurbüro / sonstiges
-#                        Ingenieurbüro", but neither trade
-#   -  Keine Zuordnung   answered Q2, but ticked none of these ("Sonstiges")
+#                        Ingenieurbüro", or filled in "Sonstige" but neither trade
 #   -  NA                did not answer Q2
 #
 # So the trades take priority over energy advice, SHK over Schornsteinfeger,
