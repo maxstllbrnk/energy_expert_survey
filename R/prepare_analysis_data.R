@@ -60,12 +60,12 @@ add_berufsgruppe <- function(main) {
         firm_cat_chimney      == "Ja" ~ "Schornsteinfeger",
         firm_cat_energyadvice == "Ja" ~ "Energieberater",
         firm_cat_engineering  == "Ja" ~ "Energieberater",
+        !is.na(firm_cat_other)        ~ "Energieberater",
         TRUE                          ~ "Keine Zuordnung"
       ),
       berufsgruppe = factor(berufsgruppe, levels = c(BERUFSGRUPPEN, "Keine Zuordnung"))
     )
 }
-
 
 # =============================================================================
 # the questionnaire, in the order it is shown
