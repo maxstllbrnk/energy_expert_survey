@@ -134,7 +134,9 @@ MULTIPLE_CHOICE <- tribble(
                                                                  "cpd_energyadvice", "cpd_begfunding", "cpd_other")
 )
 
-# Ranking questions -> mentions per option, stacked by rank.
+# Ranking questions -> two figures each: mentions per option, stacked by rank,
+# and <file>_gewichte, the mean weight per option (see ranking_weights() in
+# 01_plot_functions.R).
 RANKINGS <- tribble(
   ~file,                      ~section,                    ~variables,
   "Q7_kundengruppen",         "09_dienstleistungen_markt", c("cust_rank1", "cust_rank2"),

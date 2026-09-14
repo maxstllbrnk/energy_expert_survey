@@ -90,6 +90,16 @@ categorical_vars <- c("berufsgruppe", BARS$variable, unlist(MULTIPLE_CHOICE$vari
 kategoriale_variablen <- map(categorical_vars, ~ count_answers(main_by_group, .x)) %>%
   list_rbind()
 
+# --- rankings --------------------------------------------------------------------------
+# The mean weights shown in the *_gewichte figures.
+rangfolge_gewichte <- pmap(RANKINGS, function(file, section, variables) {
+  mean_ranking_weights(main_by_group, variables, by = "gruppe") %>%
+    arrange(gruppe, desc(weight)) %>%
+    transmute(abbildung = str_c(file, "_gewichte"), frage = question_text(variables[1]),
+              gruppe, option, n, gewicht = weight)
+}) %>%
+  list_rbind()
+
 # --- vignettes -----------------------------------------------------------------------
 vignetten_empfehlungen <- vignettes_by_group %>%
   count(arm, gruppe, empfehlung = vig_rec) %>%
@@ -118,6 +128,12 @@ hinweise <- tribble(
                              "n_entfernt zählt beides; alle Kennzahlen beziehen sich auf die übrigen Werte. ",
                              "Nicht getrimmt: ", str_c(NOT_TRIMMED, collapse = ", "), ". ",
                              "Einstellungen in R/summary_statistics/00_settings.R."),
+  "Rangfolgen",        str_c("Abbildungen *_gewichte und Blatt rangfolge_gewichte: Die Rangfolge jedes Befragten ",
+                             "wird in Gewichte umgerechnet, die sich zu 1 summieren. Bei k Nennungen erhält ",
+                             "Rang r das Gewicht (k + 1 − r) / (k (k + 1) / 2), also ", weight_rule(3), ". ",
+                             "Nicht genannte Optionen erhalten 0. gewicht ist der Mittelwert über die n ",
+                             "Befragten mit mindestens einer Nennung; je Gruppe summieren sich die Gewichte zu 1. ",
+                             "Siehe ranking_weights() in R/summary_statistics/01_plot_functions.R."),
   "Bearbeitungszeit",  "bearbeitungszeit_min: Gesamtzeit laut LimeSurvey, nur abgeschlossene Fragebögen.",
   "Vignetten",         "Getrennt nach Fernwärme-Arm (Q6a). Die Kostenfrage bezieht sich nur auf die letzte Vignette.",
   "Erstellt",          str_c(format(Sys.time(), "%Y-%m-%d %H:%M"), " mit R/run_summary_statistics.R")
@@ -129,6 +145,7 @@ write_xlsx(
        berufsgruppen_zuordnung = berufsgruppen_zuordnung,
        stetige_variablen       = stetige_variablen,
        kategoriale_variablen   = kategoriale_variablen,
+       rangfolge_gewichte      = rangfolge_gewichte,
        vignetten_empfehlungen  = vignetten_empfehlungen,
        vignetten_kosten        = vignetten_kosten,
        vignetten_zeit          = vignetten_zeit),
