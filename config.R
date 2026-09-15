@@ -71,6 +71,15 @@ if (file.exists("config.local.R")) {
 # --- secure ------------------------------------------------------------------
 SYNTAX_DIR <- file.path(RAW_DIR, "limesurvey-syntax")  # 12 LimeSurvey R syntax exports
 
+# The sampling frame: every expert and firm that was contacted, with e-mail,
+# postcode and the sample they were drawn from (DENA / Schornsteinfeger / SHK).
+# It is the denominator of the response rate - see R/run_ruecklauf.R. Personal
+# data (e-mail addresses), so it stays in the secure location. Deliberately NOT
+# in the required list below, for the same reason as the geodata: the cleaning
+# pipeline does not need it, and only the response-rate analysis fails without it.
+FRAME_FILE <- file.path(dirname(RAW_DIR), "260915_scraped_data",
+                        "260513_allexperts_unique_PLZ.rds")
+
 # --- Dropbox -----------------------------------------------------------------
 PUBLIC_DATA_DIR <- file.path(DROPBOX_DIR, "public_data_dropbox")  # non-sensitive inputs
 OUTPUT_DIR      <- file.path(DROPBOX_DIR, "output_dropbox")       # everything we produce
