@@ -109,6 +109,10 @@ CODEBOOK_FILE <- file.path(REPORT_DIR, "codebook.csv")
 # Aggregates only - no respondent-level data - so they can live in Dropbox.
 SUMMARY_DIR <- file.path(OUTPUT_DIR, "summary_statistics")
 
+# The report and figures of the first policy brief, written by the scripts in
+# R/first_policy_brief/. The figures are copied from SUMMARY_DIR.
+FIRST_POLICY_BRIEF_DIR <- file.path(OUTPUT_DIR, "first_policy_brief")
+
 # =============================================================================
 # survey design constants
 # =============================================================================

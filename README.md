@@ -47,6 +47,9 @@ DROPBOX (DROPBOX_DIR)                  …/Heating Transition/analysis_survey
       preferences_report.xlsx
     summary_statistics/                  ← written by R/run_summary_statistics.R
       alle_befragten/, completer/          bericht.html/.pdf, tabellen.xlsx, figures; see "Summary statistics"
+    first_policy_brief/                  ← written by R/first_policy_brief/
+      bericht_abbildungen.html/.pdf        the figures of the brief; see "First policy brief"
+      abbildungen/                         the same figures as PNG
 
 PROJECT (this folder, on GitHub)
   config.R                    the three roots and the paths derived from them
@@ -74,6 +77,8 @@ PROJECT (this folder, on GitHub)
     07_tables.R                 tabellen.xlsx
     08_report.R                 bericht.html + bericht.pdf: all figures of a sample on one page
     report.css                  the look of that page
+  R/first_policy_brief/       everything that belongs to the first policy brief
+    01_figure_report.R          its figures, picked from the summary statistics, in one report
   R/geodata/
     build_plz_bundesland.R      run ONCE: downloads and builds the postcode lookup
   tests/selftest.R            checks on the cleaned output
@@ -99,6 +104,7 @@ figures belong under `output_dropbox/`, each in their own sub-folder next to
 | `codebook.xlsx` | Dropbox (`REPORT_DIR`) | one row per variable | question text · LimeSurvey question id · analysis variable name |
 | `build_report.xlsx` | Dropbox (`REPORT_DIR`) | — | run diagnostics — **read this after every run** |
 | `summary_statistics/` | Dropbox (`SUMMARY_DIR`) | — | figures and tables describing the data — from `R/run_summary_statistics.R`, see [Summary statistics](#summary-statistics) |
+| `first_policy_brief/` | Dropbox (`FIRST_POLICY_BRIEF_DIR`) | — | the figures of the first policy brief in one report — from `R/first_policy_brief/01_figure_report.R`, see [First policy brief](#first-policy-brief) |
 
 The two data sets are written as `.rds` (keeps factors, dates and `NA` exactly —
 use this for analysis), `.csv` (portable) and `.xlsx` (for looking at).
@@ -118,6 +124,7 @@ source("R/geodata/build_plz_bundesland.R")  # ONCE ever — downloads the postco
 source("R/run_cleaning.R")               # build all three data sets
 source("tests/selftest.R")               # checks on the result
 source("R/run_summary_statistics.R")     # figures and tables, see "Summary statistics"
+source("R/first_policy_brief/01_figure_report.R")   # the figures of the first policy brief
 ```
 
 From a terminal, in the project folder:
@@ -599,3 +606,35 @@ dat$vignettes   # one row per expert x vignette, plus berufsgruppe
 ```
 
 The preference z-scores are standardised on the sample that is loaded.
+
+## First policy brief
+
+`R/first_policy_brief/` holds the scripts of the first policy brief, and
+`output_dropbox/first_policy_brief/` what they write. The first script collects
+the figures the brief uses into one report:
+
+```r
+source("R/first_policy_brief/01_figure_report.R")   # seconds; run R/run_summary_statistics.R first
+```
+
+Nothing is plotted: the figures are copied from `output_dropbox/summary_statistics/`,
+so they are exactly the figures of the summary statistics. Re-run the script
+whenever those change.
+
+| File | What it is |
+|---|---|
+| `bericht_abbildungen.html`, `.pdf` | the selected figures, one chapter per section of the brief, with the rules behind them at the top |
+| `abbildungen/` | the same figures as PNG, named by their number in the report: `abb_4_07_….png` is Abbildung 4.7 |
+
+**To add or remove a figure**, edit `FIGURES` at the top of the script. Each line
+is one figure: its section and its path inside `summary_statistics/` (printed
+under every figure of a `bericht.html` there). Delete a line, or put a `#` in
+front of it, to drop that figure. The section headings and their order are in
+`SECTIONS`, just above. If a path does not exist, the script stops before writing
+anything and names the closest file in that folder.
+
+Figures are numbered in the order of the list, so adding or removing one renumbers
+the figures after it.
+
+Each run empties `abbildungen/` and nothing else, so other files for the brief
+can sit next to it in `first_policy_brief/`.
