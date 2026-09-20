@@ -49,7 +49,7 @@ DROPBOX (DROPBOX_DIR)                  …/Heating Transition/analysis_survey
       alle_befragten/, completer/          bericht.html/.pdf, tabellen.xlsx, figures; see "Summary statistics"
     first_policy_brief/                  ← written by R/first_policy_brief/
       bericht_abbildungen.html/.pdf        the figures of the brief; see "First policy brief"
-      abbildungen/                         the same figures as PNG
+      abbildungen/                         the same figures as PNG and SVG
 
 PROJECT (this folder, on GitHub)
   config.R                    the three roots and the paths derived from them
@@ -624,7 +624,12 @@ whenever those change.
 | File | What it is |
 |---|---|
 | `bericht_abbildungen.html`, `.pdf` | the selected figures, one chapter per section of the brief, with the rules behind them at the top |
-| `abbildungen/` | the same figures as PNG, named by their number in the report: `abb_4_07_….png` is Abbildung 4.7 |
+| `abbildungen/` | the same figures as PNG and SVG, named by their number in the report: `abb_4_07_….png` and `abb_4_07_….svg` are Abbildung 4.7 |
+
+The SVGs keep their text as text, so it can be edited in a layout program. They
+are written by the summary statistics next to every PNG. Summary statistics from
+before that have none, and the script then stops and asks for a new run of
+`R/run_summary_statistics.R`.
 
 **To add or remove a figure**, edit `FIGURES` at the top of the script. Each line
 is one figure: its section and its path inside `summary_statistics/` (printed

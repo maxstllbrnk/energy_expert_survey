@@ -388,7 +388,9 @@ plot_stacked <- function(data, y, fill, colors, title, subtitle = NULL, facet = 
 # =============================================================================
 # saving
 # =============================================================================
-# Writes <out_dir>/<section>/<name>.png. Does nothing for NULL, so that
+# Writes <out_dir>/<section>/<name>.png and <name>.svg. The SVG is for the
+# policy briefs: svglite keeps the text as text, so it stays editable. Does
+# nothing for NULL, so that
 #   plot_bar(...) %>% save_figure(...)
 # simply skips a figure that had too few answers.
 save_figure <- function(plot, section, name, height = FIG_HEIGHT) {
@@ -398,4 +400,7 @@ save_figure <- function(plot, section, name, height = FIG_HEIGHT) {
   ggsave(file.path(folder, str_c(name, ".png")), plot,
          width = FIG_WIDTH, height = height, units = "cm", dpi = FIG_DPI,
          device = ragg::agg_png, bg = "white")
+  ggsave(file.path(folder, str_c(name, ".svg")), plot,
+         width = FIG_WIDTH, height = height, units = "cm",
+         device = svglite::svglite, bg = "white")
 }
