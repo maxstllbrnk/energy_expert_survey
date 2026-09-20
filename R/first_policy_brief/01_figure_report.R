@@ -11,8 +11,9 @@
 #   FIRST_POLICY_BRIEF_DIR/          output_dropbox/first_policy_brief/
 #     bericht_abbildungen.html       the figures, one chapter per section
 #     bericht_abbildungen.pdf        the same page printed to A4, for sharing
-#     abbildungen/                   the figures as PNG, numbered as in the
-#                                    report: abb_4_07_*.png is Abbildung 4.7
+#     abbildungen/                   the figures as PNG and SVG, numbered as in
+#                                    the report: abb_4_07_*.png/.svg is
+#                                    Abbildung 4.7
 #
 # Nothing is plotted here. The figures are copied from SUMMARY_DIR, so they are
 # exactly those of the summary statistics: run R/run_summary_statistics.R first,
@@ -127,8 +128,9 @@ if (length(unknown_sections))
        str_c(unknown_sections, collapse = ", "), call. = FALSE)
 
 figures <- FIGURES %>%
-  mutate(figure = str_c(str_remove(figure, "\\.png$"), ".png"),
-         source = file.path(SUMMARY_DIR, figure))
+  mutate(figure     = str_c(str_remove(figure, "\\.png$"), ".png"),
+         source     = file.path(SUMMARY_DIR, figure),
+         svg_source = str_replace(source, "\\.png$", ".svg"))
 
 # A path that does not exist stops the run and names the closest file in the
 # same folder, which usually makes the typo obvious.
@@ -145,6 +147,15 @@ if (nrow(missing)) {
        call. = FALSE)
 }
 
+# The SVG of every figure is written next to its PNG by save_figure(). Summary
+# statistics from before that was added have none: run them again.
+missing_svg <- figures %>% filter(!file.exists(svg_source))
+if (nrow(missing_svg))
+  stop("These figures have no SVG in ", SUMMARY_DIR, ":\n",
+       str_c("  ", str_replace(missing_svg$figure, "\\.png$", ".svg"), collapse = "\n"),
+       "\n\nRun R/run_summary_statistics.R again, which writes every figure as PNG and SVG.",
+       call. = FALSE)
+
 # --- 4. number the figures --------------------------------------------------------
 # Abbildung <section>.<figure>, counting only sections that have figures. The
 # copied file starts with the same number and, unless it shows all experts, ends
@@ -160,7 +171,8 @@ figures <- figures %>%
          file   = str_c("abb_", section_no, "_", sprintf("%02d", figure_no), "_",
                         str_remove(basename(figure), "\\.png$"),
                         if_else(group == "alle_berufsgruppen", "", str_c("_", group)),
-                        ".png"))
+                        ".png"),
+         svg_file = str_replace(file, "\\.png$", ".svg"))
 
 # --- 5. copy the figures ----------------------------------------------------------
 # abbildungen/ is emptied first, so that a figure taken off the list cannot stay
@@ -173,6 +185,10 @@ dir.create(figure_dir, recursive = TRUE, showWarnings = FALSE)
 copied <- file.copy(figures$source, file.path(figure_dir, figures$file), overwrite = TRUE)
 if (!all(copied))
   stop("Could not copy: ", str_c(figures$figure[!copied], collapse = ", "), call. = FALSE)
+
+copied <- file.copy(figures$svg_source, file.path(figure_dir, figures$svg_file), overwrite = TRUE)
+if (!all(copied))
+  stop("Could not copy the SVG of: ", str_c(figures$figure[!copied], collapse = ", "), call. = FALSE)
 
 # --- 6. the report page -----------------------------------------------------------
 esc   <- htmltools::htmlEscape
@@ -200,7 +216,7 @@ notes <- bind_rows(
   tibble(thema   = "Abbildungen",
          hinweis = str_c("Ausgewählt aus output_dropbox/summary_statistics, Stand ", stand, ". ",
                          "Unter jeder Abbildung steht, wo sie dort liegt; ihre Fußzeile nennt ",
-                         "Stichprobe und Gruppe. Als PNG im Ordner abbildungen/, benannt nach ihrer Nummer.")),
+                         "Stichprobe und Gruppe. Als PNG und SVG im Ordner abbildungen/, benannt nach ihrer Nummer.")),
   rules,
   tibble(thema   = c("Tabellen", "Erstellt"),
          hinweis = c("Die Zahlen hinter den Abbildungen stehen in tabellen.xlsx in output_dropbox/summary_statistics/<Stichprobe>/.",
