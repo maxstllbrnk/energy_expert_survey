@@ -24,6 +24,10 @@
 # tests and 5 x 3 = 15 pairwise tests. Within each of these families the
 # p-values are corrected for multiple testing (Holm).
 #
+# Effect sizes: mutual information and Cramer's V for the G-test (how to read
+# them: see part 3), epsilon-squared and the probability of superiority for the
+# rank tests (part 4).
+#
 # Part 5 recomputes the statistics with DescTools, rcompanion and effsize and
 # stops if any number differs, and runs a Brunner-Munzel test as a robustness
 # check of the pairwise comparisons.
@@ -146,10 +150,63 @@ summary_groups <- long %>%
 # with (rows - 1) * (columns - 1) = 8 degrees of freedom. That approximation
 # gets unreliable when some expected counts are small (rule of thumb: below 5),
 # which happens for the rare "niedriger" answers. So we also compute a
-# simulated p-value that needs no approximation: draw N_SIM random tables with
+# simulated p-value that does not rely on the asymptotic chi-squared
+# approximation. It is itself a Monte Carlo approximation whose precision
+# depends on N_SIM. For this purpose draw N_SIM random tables with
 # the same row and column totals as the real one (i.e. tables in which the
 # groups do NOT differ), and count how often their G is at least as large as
 # the real G.
+#
+# HOW BIG IS THE DIFFERENCE? Two effect sizes
+# With about 2,400 experts per fuel, even tiny differences give tiny p-values.
+# The p-value only says THAT the groups differ. The effect sizes say by HOW
+# MUCH, and they are what to quote in the brief.
+#
+# Cramer's V: the usual effect size for a table of counts. It rescales
+# Pearson's chi-squared statistic X^2 = sum( (observed - expected)^2 / expected )
+# to lie between 0 and 1:
+#
+#     V = sqrt( X^2 / (N * (min(rows, columns) - 1)) )
+#
+#   0     the groups have exactly the same answer distribution
+#   1     the berufsgruppe fully determines the answer (each group gives its
+#         own answers, which no other group gives)
+#
+# Cohen (1988) gives benchmarks that depend on min(rows, columns) - 1. Here it
+# is min(3, 5) - 1 = 2, so
+#
+#   about 0.07  small     about 0.21  medium     about 0.35  large
+#
+# (Cohen's w of 0.1 / 0.3 / 0.5, divided by sqrt(2).) The benchmarks are rough
+# conventions, not laws: a "small" V can still matter if it moves a policy
+# message. V is slightly too large in small samples, which does not matter
+# with N in the thousands.
+#
+# Mutual information (mutual_info, in nats): how much knowing an expert's
+# berufsgruppe tells us about their answer, i.e. by how much it reduces the
+# uncertainty (entropy) of the answer. As said above, it is also the
+# size-weighted average KL divergence of each group's distribution from the
+# pooled one.
+#
+#   0     knowing the group tells us nothing about the answer
+#   max   the entropy of the answers, reached if the group determines the
+#         answer. For five answers that is at most log(5) = 1.61 nats, and
+#         less when most experts pick the same answer
+#
+# There are no conventional benchmarks for mutual information. Two ways to put
+# it in context:
+#   - Divide it by the entropy of the answers to get the SHARE of the
+#     uncertainty about the answer that the group explains (Theil's
+#     uncertainty coefficient).
+#   - For small effects, mutual information is roughly X^2 / (2N), so here
+#     mutual_info is roughly V^2 (because min(rows, columns) - 1 = 2).
+#     Cohen's benchmarks for V then translate into about 0.005 (small),
+#     0.045 (medium) and 0.125 (large) nats.
+#
+# The two measures tell the same story in different units: V on the familiar
+# chi-squared scale, mutual information on the KL-divergence scale the G-test
+# is built on. Neither says which group expects higher prices; that is what
+# part 4 is for.
 
 # G for a table of counts. Cells with 0 are left out, because
 # 0 * log(0) is taken to be 0.
@@ -172,7 +229,11 @@ g_test <- function(group, answer) {
   # Random tables with the same margins; r2dtable() is base R.
   G_sim <- sapply(r2dtable(N_SIM, rowSums(tab), colSums(tab)), g_statistic)
 
+  # Cramer's V, from Pearson's chi-squared statistic (see above).
   expected <- outer(rowSums(tab), colSums(tab)) / sum(tab)
+  X2 <- sum((tab - expected)^2 / expected)
+  cramers_v <- sqrt(X2 / (sum(tab) * (min(dim(tab)) - 1)))
+
   tibble(
     n             = sum(tab),
     G             = G,
@@ -181,7 +242,8 @@ g_test <- function(group, answer) {
     p_sim         = (1 + sum(G_sim >= G)) / (1 + N_SIM),
     cells_below_5 = sum(expected < 5),
     min_expected  = min(expected),
-    mutual_info   = G / (2 * sum(tab))
+    mutual_info   = G / (2 * sum(tab)),
+    cramers_v     = cramers_v
   )
 }
 
@@ -290,6 +352,7 @@ pair_results <- bind_rows(pair_results) %>%
 # they disagree:
 #
 #   G                DescTools::GTest()           (no continuity correction)
+#   Cramer's V       DescTools::CramerV()         (no bias correction)
 #   epsilon-squared  rcompanion::epsilonSquared()
 #   prob_1_higher    effsize::VD.A()              (Vargha-Delaney A)
 #
@@ -310,7 +373,9 @@ for (f in levels(long$fuel)) {
   check_g[[f]] <- tibble(
     fuel        = f,
     G_script    = g_results$G[g_results$fuel == f],
-    G_DescTools = unname(DescTools::GTest(tab)$statistic)
+    G_DescTools = unname(DescTools::GTest(tab)$statistic),
+    V_script    = g_results$cramers_v[g_results$fuel == f],
+    V_DescTools = DescTools::CramerV(tab)
   )
   check_kw[[f]] <- tibble(
     fuel                  = f,
@@ -344,6 +409,7 @@ check_pairs <- bind_rows(check_pairs)
 
 stopifnot(
   isTRUE(all.equal(check_g$G_script, check_g$G_DescTools)),
+  isTRUE(all.equal(check_g$V_script, check_g$V_DescTools)),
   isTRUE(all.equal(check_kw$epsilon_sq_script, check_kw$epsilon_sq_rcompanion)),
   isTRUE(all.equal(check_pairs$prob_1_higher, check_pairs$prob_effsize_VD.A)),
   isTRUE(all.equal(check_pairs$prob_1_higher, check_pairs$prob_brunnermunzel))
