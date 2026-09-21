@@ -110,7 +110,8 @@ CODEBOOK_FILE <- file.path(REPORT_DIR, "codebook.csv")
 SUMMARY_DIR <- file.path(OUTPUT_DIR, "summary_statistics")
 
 # The report and figures of the first policy brief, written by the scripts in
-# R/first_policy_brief/. The figures are copied from SUMMARY_DIR.
+# R/first_policy_brief/. The figures are copied from SUMMARY_DIR, except the few
+# the brief draws itself (R/first_policy_brief/00_figures.R).
 FIRST_POLICY_BRIEF_DIR <- file.path(OUTPUT_DIR, "first_policy_brief")
 
 # =============================================================================

@@ -78,6 +78,7 @@ PROJECT (this folder, on GitHub)
     08_report.R                 bericht.html + bericht.pdf: all figures of a sample on one page
     report.css                  the look of that page
   R/first_policy_brief/       everything that belongs to the first policy brief
+    00_figures.R                the few figures it needs in another form (sourced by the report)
     01_figure_report.R          its figures, picked from the summary statistics, in one report
   R/geodata/
     build_plz_bundesland.R      run ONCE: downloads and builds the postcode lookup
@@ -617,9 +618,16 @@ the figures the brief uses into one report:
 source("R/first_policy_brief/01_figure_report.R")   # seconds; run R/run_summary_statistics.R first
 ```
 
-Nothing is plotted: the figures are copied from `output_dropbox/summary_statistics/`,
-so they are exactly the figures of the summary statistics. Re-run the script
-whenever those change.
+Most figures are copied from `output_dropbox/summary_statistics/`, so they are
+exactly the figures of the summary statistics. Re-run the script whenever those
+change. The few the brief needs in another form are drawn afresh on every run by
+`00_figures.R`, with the same plot functions and rules, and go into
+`abbildungen/` like all the others:
+
+| Figure | What is different from the summary statistics |
+|---|---|
+| `Q10b_SQ001_adv_share_hp`, `Q11b_WP_mix25_hp` | bins of 10 instead of 5 percentage points. Most experts answered in multiples of 10, so with bins of 5 every other bar is nearly empty |
+| `empfehlungen_nach_baujahr_ohne_1970_unsaniert` | without the vignettes of a 1970 house that was never renovated (200 kWh/m²). The design has no unrenovated 2000 house, so otherwise the two years differ in renovation as well as in age |
 
 | File | What it is |
 |---|---|
@@ -627,19 +635,22 @@ whenever those change.
 | `abbildungen/` | the same figures as PNG and SVG, named by their number in the report: `abb_4_07_….png` and `abb_4_07_….svg` are Abbildung 4.7 |
 
 The SVGs keep their text as text, so it can be edited in a layout program. They
-are written by the summary statistics next to every PNG. Summary statistics from
-before that have none, and the script then stops and asks for a new run of
-`R/run_summary_statistics.R`.
+are written next to every PNG by `save_figure()`, in the summary statistics as in
+`00_figures.R`. Summary statistics from before that have none, and the script
+then stops and asks for a new run of `R/run_summary_statistics.R`.
 
 **To add or remove a figure**, edit `FIGURES` at the top of the script. Each line
 is one figure: its section and its path inside `summary_statistics/` (printed
-under every figure of a `bericht.html` there). Delete a line, or put a `#` in
-front of it, to drop that figure. The section headings and their order are in
+under every figure of a `bericht.html` there), or `eigene/<group>/<file>` for a
+figure `00_figures.R` draws. Delete a line, or put a `#` in front of it, to drop
+that figure. The section headings and their order are in
 `SECTIONS`, just above. If a path does not exist, the script stops before writing
 anything and names the closest file in that folder.
 
 Figures are numbered in the order of the list, so adding or removing one renumbers
-the figures after it.
+the figures after it. The file name ends with the Berufsgruppe; a figure of all
+experts only gets `_alle_berufsgruppen` when the list also has that question for
+a Berufsgruppe, as for Q19a.
 
 Each run empties `abbildungen/` and nothing else, so other files for the brief
 can sit next to it in `first_policy_brief/`.
