@@ -15,9 +15,12 @@
 #                                    the report: abb_4_07_*.png/.svg is
 #                                    Abbildung 4.7
 #
-# Nothing is plotted here. The figures are copied from SUMMARY_DIR, so they are
-# exactly those of the summary statistics: run R/run_summary_statistics.R first,
-# and this script again whenever the summary statistics change.
+# The figures are copied from SUMMARY_DIR, so they are exactly those of the
+# summary statistics: run R/run_summary_statistics.R first, and this script
+# again whenever the summary statistics change. The only exceptions are the few
+# figures the brief needs in another form. 00_figures.R draws them afresh on
+# every run, from the cleaned data, and they are copied into abbildungen/ like
+# the others.
 #
 # TO ADD OR REMOVE A FIGURE, edit FIGURES in part 2 below. To rename, add or
 # reorder a section, edit SECTIONS in part 1. Nothing else needs changing.
@@ -27,8 +30,10 @@ if (!file.exists("config.R"))
   stop("Run this from the project root (the folder containing config.R).\n",
        "In RStudio, open energy_expert_survey.Rproj first.", call. = FALSE)
 
-source("R/prepare_analysis_data.R")            # also loads config.R
-source("R/summary_statistics/00_settings.R")   # REPORT_BROWSERS, which print the PDF
+source("R/prepare_analysis_data.R")                 # also loads config.R
+source("R/summary_statistics/00_settings.R")        # REPORT_BROWSERS, which print the PDF
+source("R/summary_statistics/01_plot_functions.R")  # the plot functions, for 00_figures.R
+source("R/first_policy_brief/00_figures.R")         # draws the brief's own figures
 
 
 # =============================================================================
@@ -62,6 +67,8 @@ SECTIONS <- c(
 # The easiest way to find a path: open bericht.html in SUMMARY_DIR/<sample>,
 # where it is printed under every figure. ".png" at the end may be left out.
 #
+# A figure that 00_figures.R draws for the brief itself is eigene/<group>/<file>.
+#
 #   remove a figure   delete its line, or put a # in front of it
 #   add a figure      copy a line and change the path
 #   reorder           move lines; within a section, figures follow this order
@@ -87,6 +94,7 @@ FIGURES <- tribble(
   "unternehmen", "completer/alle_berufsgruppen/09_dienstleistungen_markt/Q7_kundengruppen",
   "unternehmen", "completer/alle_berufsgruppen/09_dienstleistungen_markt/Q7_kundengruppen_gewichte",
 
+  "hemmnisse",   "completer/alle_berufsgruppen/09_dienstleistungen_markt/Q19a_hemmnisse_erneuerbare",
   "hemmnisse",   "completer/shk_handwerk/09_dienstleistungen_markt/Q19a_hemmnisse_erneuerbare",
   "hemmnisse",   "completer/schornsteinfeger/09_dienstleistungen_markt/Q19a_hemmnisse_erneuerbare",
   "hemmnisse",   "completer/energieberater/09_dienstleistungen_markt/Q19a_hemmnisse_erneuerbare",
@@ -98,8 +106,8 @@ FIGURES <- tribble(
   "hemmnisse",   "completer/energieberater/09_dienstleistungen_markt/Q28_kriterien_der_kunden_gewichte",
 
   "heizungen",   "completer/alle_berufsgruppen/09_dienstleistungen_markt/Q10a_adv_households",
-  "heizungen",   "completer/alle_berufsgruppen/09_dienstleistungen_markt/Q10b_SQ001_adv_share_hp",
-  "heizungen",   "completer/shk_handwerk/07_heiztechnologien/Q11b_WP_mix25_hp",
+  "heizungen",   "eigene/alle_berufsgruppen/Q10b_SQ001_adv_share_hp",
+  "heizungen",   "eigene/shk_handwerk/Q11b_WP_mix25_hp",
 
   "preise",      "completer/shk_handwerk/06_energiepreise/Q17_preisentwicklung",
   "preise",      "completer/schornsteinfeger/06_energiepreise/Q17_preisentwicklung",
@@ -110,7 +118,7 @@ FIGURES <- tribble(
   "vignetten",   "completer/alle_berufsgruppen/05_vignetten/empfehlungen_nach_einkommen",
   "vignetten",   "completer/alle_berufsgruppen/05_vignetten/empfehlungen_nach_bestehende_heizung",
   "vignetten",   "completer/alle_berufsgruppen/05_vignetten/empfehlungen_nach_ersatzzeitpunkt",
-  "vignetten",   "completer/alle_berufsgruppen/05_vignetten/empfehlungen_nach_baujahr",
+  "vignetten",   "eigene/alle_berufsgruppen/empfehlungen_nach_baujahr_ohne_1970_unsaniert",
   "vignetten",   "completer/alle_berufsgruppen/05_vignetten/empfehlungen_nach_sanierungsstand",
   "vignetten",   "completer/alle_berufsgruppen/05_vignetten/empfehlungen_nach_waermeverteilung",
   "vignetten",   "completer/alle_berufsgruppen/05_vignetten/empfehlungen_nach_berufsgruppe",
@@ -127,9 +135,12 @@ if (length(unknown_sections))
   stop("FIGURES uses sections that are not in SECTIONS: ",
        str_c(unknown_sections, collapse = ", "), call. = FALSE)
 
+# A path starting with eigene/ was just drawn into tempdir() by 00_figures.R,
+# every other one is in SUMMARY_DIR.
 figures <- FIGURES %>%
   mutate(figure     = str_c(str_remove(figure, "\\.png$"), ".png"),
-         source     = file.path(SUMMARY_DIR, figure),
+         own        = str_starts(figure, "eigene/"),
+         source     = file.path(if_else(own, tempdir(), SUMMARY_DIR), figure),
          svg_source = str_replace(source, "\\.png$", ".svg"))
 
 # A path that does not exist stops the run and names the closest file in the
@@ -141,9 +152,10 @@ if (nrow(missing)) {
     if (length(candidates) == 0) return("(no such folder)")
     str_c("(closest: ", candidates[which.min(adist(basename(path), candidates))], ")")
   })
-  stop("These figures are not in ", SUMMARY_DIR, ":\n",
+  stop("These figures do not exist:\n",
        str_c("  ", missing$figure, "  ", closest, collapse = "\n"),
-       "\n\nCorrect the path in FIGURES, or run R/run_summary_statistics.R first.",
+       "\n\nCorrect the path in FIGURES, or run R/run_summary_statistics.R first. ",
+       "A path starting with eigene/ must be one that R/first_policy_brief/00_figures.R draws.",
        call. = FALSE)
 }
 
@@ -158,19 +170,21 @@ if (nrow(missing_svg))
 
 # --- 4. number the figures --------------------------------------------------------
 # Abbildung <section>.<figure>, counting only sections that have figures. The
-# copied file starts with the same number and, unless it shows all experts, ends
-# with its Berufsgruppe, so the three versions of a question can be told apart.
+# copied file starts with the same number and ends with its Berufsgruppe, so the
+# versions of a question can be told apart. A figure of all experts only gets
+# alle_berufsgruppen when the list also has the question for a Berufsgruppe.
 figures <- figures %>%
   mutate(section = factor(section, levels = names(SECTIONS)),
          order   = row_number()) %>%
   arrange(section, order) %>%
   mutate(section_no = as.integer(droplevels(section))) %>%
   mutate(figure_no = row_number(), .by = section) %>%
+  mutate(name  = str_remove(basename(figure), "\\.png$"),
+         group = str_split_i(figure, "/", 2)) %>%
+  mutate(by_group = any(group != "alle_berufsgruppen"), .by = name) %>%
   mutate(number = str_c(section_no, ".", figure_no),
-         group  = str_split_i(figure, "/", 2),
-         file   = str_c("abb_", section_no, "_", sprintf("%02d", figure_no), "_",
-                        str_remove(basename(figure), "\\.png$"),
-                        if_else(group == "alle_berufsgruppen", "", str_c("_", group)),
+         file   = str_c("abb_", section_no, "_", sprintf("%02d", figure_no), "_", name,
+                        if_else(group == "alle_berufsgruppen" & !by_group, "", str_c("_", group)),
                         ".png"),
          svg_file = str_replace(file, "\\.png$", ".svg"))
 
@@ -192,7 +206,7 @@ if (!all(copied))
 
 # --- 6. the report page -----------------------------------------------------------
 esc   <- htmltools::htmlEscape
-stand <- format(max(file.mtime(figures$source)), "%Y-%m-%d")   # newest figure used
+stand <- format(max(file.mtime(figures$source[!figures$own])), "%Y-%m-%d")   # newest summary figure used
 
 # How many experts, from the tables of the summary statistics.
 stichprobe <- read_excel(file.path(SUMMARY_DIR, "alle_befragten", "tabellen.xlsx"), sheet = "stichprobe")
@@ -215,19 +229,22 @@ rules <- read_excel(file.path(SUMMARY_DIR, "completer", "tabellen.xlsx"), sheet 
 notes <- bind_rows(
   tibble(thema   = "Abbildungen",
          hinweis = str_c("Ausgewählt aus output_dropbox/summary_statistics, Stand ", stand, ". ",
-                         "Unter jeder Abbildung steht, wo sie dort liegt; ihre Fußzeile nennt ",
-                         "Stichprobe und Gruppe. Als PNG und SVG im Ordner abbildungen/, benannt nach ihrer Nummer.")),
+                         "Unter jeder Abbildung steht, wo sie dort liegt, oder dass sie für den Brief eigens ",
+                         "gezeichnet ist; ihre Fußzeile nennt Stichprobe und Gruppe. Als PNG und SVG im Ordner ",
+                         "abbildungen/, benannt nach ihrer Nummer.")),
   rules,
   tibble(thema   = c("Tabellen", "Erstellt"),
-         hinweis = c("Die Zahlen hinter den Abbildungen stehen in tabellen.xlsx in output_dropbox/summary_statistics/<Stichprobe>/.",
+         hinweis = c("Die Zahlen hinter den Abbildungen der deskriptiven Statistik stehen in tabellen.xlsx in output_dropbox/summary_statistics/<Stichprobe>/.",
                      str_c(format(Sys.time(), "%Y-%m-%d %H:%M"), " mit R/first_policy_brief/01_figure_report.R")))
 )
 
-# One figure: its number, and its path in SUMMARY_DIR so it can be found there.
+# One figure: its number, and its path so it can be found in SUMMARY_DIR - or,
+# for one of 00_figures.R, that it was drawn there.
 figures <- figures %>%
-  mutate(html = str_c('<figure><img src="abbildungen/', file, '" alt="Abbildung ', number, '">',
-                      '<figcaption><strong>Abbildung ', number, '</strong> · ', esc(figure),
-                      '</figcaption></figure>'))
+  mutate(origin = if_else(own, "für den Brief eigens gezeichnet (R/first_policy_brief/00_figures.R)", figure),
+         html   = str_c('<figure><img src="abbildungen/', file, '" alt="Abbildung ', number, '">',
+                        '<figcaption><strong>Abbildung ', number, '</strong> · ', esc(origin),
+                        '</figcaption></figure>'))
 
 sections <- figures %>%
   summarise(html = str_c(html, collapse = "\n"), n = n(), .by = c(section_no, section)) %>%
