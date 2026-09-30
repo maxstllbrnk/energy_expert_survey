@@ -10,6 +10,10 @@ output/
 # Per-machine roots, so nobody has to edit tracked config.R to run the pipeline.
 config.local.R
 
+# --- Claude Code --------------------------------------------------------------
+# Claude Code's local rules and settings stay on this machine.
+.claude/
+
 # --- renv ---------------------------------------------------------------------
 # renv.lock IS committed (it records the exact package versions).
 # The library itself is machine-specific and is not.
