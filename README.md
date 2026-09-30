@@ -50,6 +50,8 @@ DROPBOX (DROPBOX_DIR)                  …/Heating Transition/analysis_survey
     first_policy_brief/                  ← written by R/first_policy_brief/
       bericht_abbildungen.html/.pdf        the figures of the brief; see "First policy brief"
       abbildungen/                         the same figures as PNG and SVG
+      preiserwartungen_tests.xlsx          do the Berufsgruppen expect different energy prices?
+      rc_logit_<arm>_ref_<outcome>/        (mixed) logit models of the recommendations, one folder per run
 
 PROJECT (this folder, on GitHub)
   config.R                    the three roots and the paths derived from them
@@ -80,6 +82,11 @@ PROJECT (this folder, on GitHub)
   R/first_policy_brief/       everything that belongs to the first policy brief
     00_figures.R                the few figures it needs in another form (sourced by the report)
     01_figure_report.R          its figures, picked from the summary statistics, in one report
+    02_kl_divergence_prices.R   do the Berufsgruppen expect different energy prices? (Q17)
+    03_rc_logit_with_ame.R      (mixed) logit models of the recommended technology, with AMEs
+    03_run_all_specifications.R
+                                runs 03_rc_logit_with_ame.R for both Fernwärme arms and two
+                                reference outcomes
   R/geodata/
     build_plz_bundesland.R      run ONCE: downloads and builds the postcode lookup
   tests/selftest.R            checks on the cleaned output
@@ -105,7 +112,7 @@ figures belong under `output_dropbox/`, each in their own sub-folder next to
 | `codebook.xlsx` | Dropbox (`REPORT_DIR`) | one row per variable | question text · LimeSurvey question id · analysis variable name |
 | `build_report.xlsx` | Dropbox (`REPORT_DIR`) | — | run diagnostics — **read this after every run** |
 | `summary_statistics/` | Dropbox (`SUMMARY_DIR`) | — | figures and tables describing the data — from `R/run_summary_statistics.R`, see [Summary statistics](#summary-statistics) |
-| `first_policy_brief/` | Dropbox (`FIRST_POLICY_BRIEF_DIR`) | — | the figures of the first policy brief in one report — from `R/first_policy_brief/01_figure_report.R`, see [First policy brief](#first-policy-brief) |
+| `first_policy_brief/` | Dropbox (`FIRST_POLICY_BRIEF_DIR`) | — | the figures of the first policy brief in one report, the tests of the price expectations and the logit models of the recommendations — from the scripts in `R/first_policy_brief/`, see [First policy brief](#first-policy-brief) |
 
 The two data sets are written as `.rds` (keeps factors, dates and `NA` exactly —
 use this for analysis), `.csv` (portable) and `.xlsx` (for looking at).
@@ -126,6 +133,8 @@ source("R/run_cleaning.R")               # build all three data sets
 source("tests/selftest.R")               # checks on the result
 source("R/run_summary_statistics.R")     # figures and tables, see "Summary statistics"
 source("R/first_policy_brief/01_figure_report.R")   # the figures of the first policy brief
+source("R/first_policy_brief/02_kl_divergence_prices.R")    # tests of the price expectations
+source("R/first_policy_brief/03_run_all_specifications.R")  # logit models of the recommendations; slow
 ```
 
 From a terminal, in the project folder:
@@ -194,7 +203,7 @@ result on any machine and in a year's time.
 
 Three pieces:
 
-- **`renv.lock`** — the manifest: R 4.6.1 plus 102 packages with exact versions.
+- **`renv.lock`** — the manifest: R 4.6.1 plus 129 packages with exact versions.
   This is the contract. **Committed to git.**
 - **`renv/library/`** — the packages themselves, private to this project.
   Machine-specific, so **not committed**.
@@ -611,8 +620,10 @@ The preference z-scores are standardised on the sample that is loaded.
 ## First policy brief
 
 `R/first_policy_brief/` holds the scripts of the first policy brief, and
-`output_dropbox/first_policy_brief/` what they write. The first script collects
-the figures the brief uses into one report:
+`output_dropbox/first_policy_brief/` what they write: a report with the figures
+the brief uses, [tests of the price expectations](#price-expectations-by-berufsgruppe)
+and [logit models of the recommendations](#logit-models-of-the-recommendations).
+The first script collects the figures the brief uses into one report:
 
 ```r
 source("R/first_policy_brief/01_figure_report.R")   # seconds; run R/run_summary_statistics.R first
@@ -654,3 +665,120 @@ a Berufsgruppe, as for Q19a.
 
 Each run empties `abbildungen/` and nothing else, so other files for the brief
 can sit next to it in `first_policy_brief/`.
+
+### Price expectations by Berufsgruppe
+
+`02_kl_divergence_prices.R` asks whether SHK-Handwerk, Schornsteinfeger and
+Energieberater expect different price developments for the five fuels of Q17
+(gas, heat-pump electricity, district heating, heating oil, pellets), answered
+on a five-point scale from *mehr als 10% niedriger* to *mehr als 10% höher*.
+
+```r
+source("R/first_policy_brief/02_kl_divergence_prices.R")   # seconds
+```
+
+The sample is the completers, without experts who have no Berufsgruppe; an
+expert who skipped a fuel drops out for that fuel only. Each fuel gets three
+tests, from the broadest question to the most specific:
+
+| Test | Question | Effect size | Holm correction across |
+|---|---|---|---|
+| G-test of independence | are the full answer distributions different? Ignores the order of the answers | Cramér's V | the 5 fuels |
+| Kruskal–Wallis | does at least one group answer systematically higher or lower on the ordered scale? | ε² = H / (n − 1) | the 5 fuels |
+| pairwise Wilcoxon rank-sum | which pairs of groups differ, and which of the two answers higher? | `prob_1_higher` = P(group 1 higher) + ½ P(same answer) | the 15 comparisons (5 fuels × 3 pairs) |
+
+The G statistic is 2N times the mutual information between group and answer —
+the KL divergence of the joint distribution from independence, hence the name
+of the script. Some expected counts are below 5, so besides the chi-squared
+p-value the script simulates 10,000 tables with the same margins (`r2dtable`)
+and the Holm correction uses that simulated p-value; the seed is fixed, so it is
+reproducible.
+
+The output is `first_policy_brief/preiserwartungen_tests.xlsx`:
+
+| Sheet | Contents |
+|---|---|
+| `readme` | the three tests, their effect sizes and the Holm correction, explained |
+| `anteile` | share of each answer, per fuel and group |
+| `gruppen` | n, mean and median score, share expecting a price increase |
+| `g_test`, `kruskal_wallis`, `paarvergleiche` | one sheet per test; `significant_holm` marks a Holm-adjusted p-value below 0.05, `direction` says which group of a pair tends to answer higher |
+
+Read the tests alongside `anteile`: with samples this large, small differences
+are significant. The same experts answer all five fuels, so compare groups
+within a fuel rather than p-values across fuels. The mean score treats the
+answers as equally spaced and is descriptive only; the tests do not assume it.
+The fuels, answer labels, pairs, significance level and number of simulated
+tables are set at the top of the script.
+
+### Logit models of the recommendations
+
+`03_rc_logit_with_ame.R` models which technology an expert recommends for a
+vignette (`vig_rec`) as a function of the seven vignette attributes: the
+couple's age, income, current heating, how soon it must be replaced, year of
+construction, heat demand and heat distribution. Every attribute gets one
+coefficient per technology, relative to a reference outcome.
+
+The sample is the completers of one Fernwärme arm (`SELECTED_FW_ARM`): in `fw`
+the outcomes are the six technologies and *Keine Empfehlung*, in `nofw` the same
+without Fernwärme. Each expert makes up to six choices. Three models are
+estimated with `mlogit`:
+
+| Model | What it is |
+|---|---|
+| `mnl` | multinomial logit |
+| `mixed` | mixed logit: the constants of the technologies are normally distributed across experts, independently of each other; an expert keeps the same draw for all six vignettes. 1,000 Halton draws per expert |
+| `mixed_corr` | the same, with correlated constants (full covariance matrix) |
+
+What the script reports:
+
+- **Standard errors** clustered by expert (sandwich estimator, with the
+  small-sample factor G/(G − 1)). The mixed logits need a numerical Hessian,
+  which is most of the runtime. Standard deviations and correlations of the
+  constants get delta-method standard errors; a standard deviation gets no test
+  against zero, because zero lies on the boundary of the parameter space.
+- **Average marginal effects** at a reference vignette — every attribute at its
+  first level in `ATTRIBUTE_LEVELS`: a couple in their mid-40s, 65,000 € gross a
+  year, a gas heating that must be replaced in the next years, built 1970,
+  120 kWh/m², radiators. Each AME is the change in the probability of a
+  recommendation when one attribute is switched, averaged over 1,000 draws of
+  the random constants. Standard errors and percentile intervals by
+  Krinsky–Robb (1,000 draws of the coefficient vector); a delta-method
+  comparison is printed as a check.
+- **Fit**: McFadden R², a likelihood-ratio test against a model with constants
+  only, and for the mixed logits one against the multinomial logit.
+
+Along the way the script checks itself and stops if a check fails: its
+covariance matrix of the constants and its multinomial-logit probabilities must
+reproduce those of `mlogit`, the AMEs must sum to zero across the outcomes, and
+the numerical Hessian must be positive definite.
+
+```r
+source("R/first_policy_brief/03_rc_logit_with_ame.R")        # one run, with the arm and reference set at its top
+source("R/first_policy_brief/03_run_all_specifications.R")   # all four runs; slow
+```
+
+`03_run_all_specifications.R` runs the main script four times, for the arms
+`fw` and `nofw` with *Keine Empfehlung* and *Wärmepumpe* as the reference
+outcome. Each run gets its own environment and passes its settings in
+`RUN_SETTINGS`; a run that fails is recorded in the printed table of runs, and
+the loop moves on to the next.
+
+Each run writes to its own folder, `first_policy_brief/rc_logit_<arm>_ref_<outcome>/`,
+e.g. `rc_logit_fw_ref_keine_empfehlung/`, so no run overwrites another. All
+labels are in German.
+
+| Folder | Contents |
+|---|---|
+| `tabellen/` | `tab_rcl_mnl.tex`, `tab_rcl_mixed.tex`, `tab_rcl_mixed_corr.tex`: one LaTeX table per model. The document needs `\usepackage[T1]{fontenc}`, `\usepackage[ngerman]{babel}`, `booktabs` and `threeparttable` |
+| `abbildungen/` | `abb_ame_<outcome>.svg`: the AMEs of the three models with 95 % Krinsky–Robb intervals, one figure per outcome |
+| `excel/` | `rc_logit_ergebnisse.xlsx`: coefficients, marginal effects and fit, one sheet each |
+| `modelle/` | the three fitted models and their cluster-robust covariance matrices as `.rds`, so they can be reloaded without estimating again |
+
+These figures are SVG only and drawn by the script itself, not with the plot
+functions of the summary statistics. `01_figure_report.R` empties only the
+top-level `abbildungen/`, so it leaves these folders alone.
+
+The number of draws, the arm, the reference outcome and the attribute levels
+are set at the top of `03_rc_logit_with_ame.R`. `mlogit` is attached in
+`config.R`, so every script that sources it needs the package installed —
+`renv::restore()` takes care of that.
