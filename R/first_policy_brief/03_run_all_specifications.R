@@ -13,10 +13,14 @@
 # Runtime: the sum of the four runs; the correlated mixed logit and its
 # numerical Hessian take most of it.
 
+if (!file.exists("config.R"))
+  stop("Run this from the project root (the folder containing config.R).\n",
+       "In RStudio, open energy_expert_survey.Rproj first.", call. = FALSE)
+
 source(file.path("R", "prepare_analysis_data.R"))   # load_analysis_data()
 
 # The main script, relative to the working directory (the project folder)
-MAIN_SCRIPT <- "03_rc_logit_with_ame.R"
+MAIN_SCRIPT <- file.path("R", "first_policy_brief", "03_rc_logit_with_ame.R")
 
 # The two arms as coded in vig_arm, read from the data
 ARMS <- sort(unique(load_analysis_data(completers_only = TRUE)$vignettes$vig_arm))
