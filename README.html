@@ -426,6 +426,11 @@ DROPBOX (DROPBOX_DIR)                  …/Heating Transition/analysis_survey
       preferences_report.xlsx
     summary_statistics/                  ← written by R/run_summary_statistics.R
       alle_befragten/, completer/          bericht.html/.pdf, tabellen.xlsx, figures; see &quot;Summary statistics&quot;
+    first_policy_brief/                  ← written by R/first_policy_brief/
+      bericht_abbildungen.html/.pdf        the figures of the brief; see &quot;First policy brief&quot;
+      abbildungen/                         the same figures as PNG and SVG
+      preiserwartungen_tests.xlsx          do the Berufsgruppen expect different energy prices?
+      rc_logit_&lt;arm&gt;_ref_&lt;outcome&gt;/        (mixed) logit models of the recommendations, one folder per run
 
 PROJECT (this folder, on GitHub)
   config.R                    the three roots and the paths derived from them
@@ -453,6 +458,14 @@ PROJECT (this folder, on GitHub)
     07_tables.R                 tabellen.xlsx
     08_report.R                 bericht.html + bericht.pdf: all figures of a sample on one page
     report.css                  the look of that page
+  R/first_policy_brief/       everything that belongs to the first policy brief
+    00_figures.R                the few figures it needs in another form (sourced by the report)
+    01_figure_report.R          its figures, picked from the summary statistics, in one report
+    02_kl_divergence_prices.R   do the Berufsgruppen expect different energy prices? (Q17)
+    03_rc_logit_with_ame.R      (mixed) logit models of the recommended technology, with AMEs
+    03_run_all_specifications.R
+                                runs 03_rc_logit_with_ame.R for both Fernwärme arms and two
+                                reference outcomes
   R/geodata/
     build_plz_bundesland.R      run ONCE: downloads and builds the postcode lookup
   tests/selftest.R            checks on the cleaned output
@@ -525,6 +538,14 @@ make them the same way. Tables and figures belong under
 <td>figures and tables describing the data — from
 <code>R/run_summary_statistics.R</code>, see <a href="#summary-statistics">Summary statistics</a></td>
 </tr>
+<tr class="odd">
+<td><code>first_policy_brief/</code></td>
+<td>Dropbox (<code>FIRST_POLICY_BRIEF_DIR</code>)</td>
+<td>—</td>
+<td>the figures of the first policy brief in one report, the tests of
+the price expectations and the logit models of the recommendations —
+from the scripts in <code>R/first_policy_brief/</code>, see <a href="#first-policy-brief">First policy brief</a></td>
+</tr>
 </tbody>
 </table>
 <p>The two data sets are written as <code>.rds</code> (keeps factors,
@@ -544,7 +565,10 @@ respondent-level and stay behind.</p>
 source(&quot;R/geodata/build_plz_bundesland.R&quot;)  # ONCE ever — downloads the postcode geodata
 source(&quot;R/run_cleaning.R&quot;)               # build all three data sets
 source(&quot;tests/selftest.R&quot;)               # checks on the result
-source(&quot;R/run_summary_statistics.R&quot;)     # figures and tables, see &quot;Summary statistics&quot;</code></pre>
+source(&quot;R/run_summary_statistics.R&quot;)     # figures and tables, see &quot;Summary statistics&quot;
+source(&quot;R/first_policy_brief/01_figure_report.R&quot;)   # the figures of the first policy brief
+source(&quot;R/first_policy_brief/02_kl_divergence_prices.R&quot;)    # tests of the price expectations
+source(&quot;R/first_policy_brief/03_run_all_specifications.R&quot;)  # logit models of the recommendations; slow</code></pre>
 <p>From a terminal, in the project folder:</p>
 <pre class="bash"><code>Rscript R/run_cleaning.R &amp;&amp; Rscript tests/selftest.R</code></pre>
 <p><strong>Before the first run</strong>, open <code>config.R</code> and
@@ -607,7 +631,7 @@ pipeline gives the same result on any machine and in a year’s time.</p>
 <p>Three pieces:</p>
 <ul>
 <li><strong><code>renv.lock</code></strong> — the manifest: R 4.6.1 plus
-102 packages with exact versions. This is the contract.
+129 packages with exact versions. This is the contract.
 <strong>Committed to git.</strong></li>
 <li><strong><code>renv/library/</code></strong> — the packages
 themselves, private to this project. Machine-specific, so <strong>not
@@ -1257,6 +1281,326 @@ dat$main        # one row per expert, plus berufsgruppe, last_question, tp_* and
 dat$vignettes   # one row per expert x vignette, plus berufsgruppe</code></pre>
 <p>The preference z-scores are standardised on the sample that is
 loaded.</p>
+</div>
+</div>
+<div id="first-policy-brief" class="section level2">
+<h2>First policy brief</h2>
+<p><code>R/first_policy_brief/</code> holds the scripts of the first
+policy brief, and <code>output_dropbox/first_policy_brief/</code> what
+they write: a report with the figures the brief uses, <a href="#price-expectations-by-berufsgruppe">tests of the price
+expectations</a> and <a href="#logit-models-of-the-recommendations">logit models of the
+recommendations</a>. The first script collects the figures the brief
+uses into one report:</p>
+<pre class="r"><code>source(&quot;R/first_policy_brief/01_figure_report.R&quot;)   # seconds; run R/run_summary_statistics.R first</code></pre>
+<p>Most figures are copied from
+<code>output_dropbox/summary_statistics/</code>, so they are exactly the
+figures of the summary statistics. Re-run the script whenever those
+change. The few the brief needs in another form are drawn afresh on
+every run by <code>00_figures.R</code>, with the same plot functions and
+rules, and go into <code>abbildungen/</code> like all the others:</p>
+<table>
+<colgroup>
+<col width="50%" />
+<col width="50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Figure</th>
+<th>What is different from the summary statistics</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>Q10b_SQ001_adv_share_hp</code>,
+<code>Q11b_WP_mix25_hp</code></td>
+<td>bins of 10 instead of 5 percentage points. Most experts answered in
+multiples of 10, so with bins of 5 every other bar is nearly empty</td>
+</tr>
+<tr class="even">
+<td><code>empfehlungen_nach_baujahr_ohne_1970_unsaniert</code></td>
+<td>without the vignettes of a 1970 house that was never renovated (200
+kWh/m²). The design has no unrenovated 2000 house, so otherwise the two
+years differ in renovation as well as in age</td>
+</tr>
+</tbody>
+</table>
+<table>
+<colgroup>
+<col width="50%" />
+<col width="50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>File</th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>bericht_abbildungen.html</code>, <code>.pdf</code></td>
+<td>the selected figures, one chapter per section of the brief, with the
+rules behind them at the top</td>
+</tr>
+<tr class="even">
+<td><code>abbildungen/</code></td>
+<td>the same figures as PNG and SVG, named by their number in the
+report: <code>abb_4_07_….png</code> and <code>abb_4_07_….svg</code> are
+Abbildung 4.7</td>
+</tr>
+</tbody>
+</table>
+<p>The SVGs keep their text as text, so it can be edited in a layout
+program. They are written next to every PNG by
+<code>save_figure()</code>, in the summary statistics as in
+<code>00_figures.R</code>. Summary statistics from before that have
+none, and the script then stops and asks for a new run of
+<code>R/run_summary_statistics.R</code>.</p>
+<p><strong>To add or remove a figure</strong>, edit <code>FIGURES</code>
+at the top of the script. Each line is one figure: its section and its
+path inside <code>summary_statistics/</code> (printed under every figure
+of a <code>bericht.html</code> there), or
+<code>eigene/&lt;group&gt;/&lt;file&gt;</code> for a figure
+<code>00_figures.R</code> draws. Delete a line, or put a <code>#</code>
+in front of it, to drop that figure. The section headings and their
+order are in <code>SECTIONS</code>, just above. If a path does not
+exist, the script stops before writing anything and names the closest
+file in that folder.</p>
+<p>Figures are numbered in the order of the list, so adding or removing
+one renumbers the figures after it. The file name ends with the
+Berufsgruppe; a figure of all experts only gets
+<code>_alle_berufsgruppen</code> when the list also has that question
+for a Berufsgruppe, as for Q19a.</p>
+<p>Each run empties <code>abbildungen/</code> and nothing else, so other
+files for the brief can sit next to it in
+<code>first_policy_brief/</code>.</p>
+<div id="price-expectations-by-berufsgruppe" class="section level3">
+<h3>Price expectations by Berufsgruppe</h3>
+<p><code>02_kl_divergence_prices.R</code> asks whether SHK-Handwerk,
+Schornsteinfeger and Energieberater expect different price developments
+for the five fuels of Q17 (gas, heat-pump electricity, district heating,
+heating oil, pellets), answered on a five-point scale from <em>mehr als
+10% niedriger</em> to <em>mehr als 10% höher</em>.</p>
+<pre class="r"><code>source(&quot;R/first_policy_brief/02_kl_divergence_prices.R&quot;)   # seconds</code></pre>
+<p>The sample is the completers, without experts who have no
+Berufsgruppe; an expert who skipped a fuel drops out for that fuel only.
+Each fuel gets three tests, from the broadest question to the most
+specific:</p>
+<table>
+<colgroup>
+<col width="25%" />
+<col width="25%" />
+<col width="25%" />
+<col width="25%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Test</th>
+<th>Question</th>
+<th>Effect size</th>
+<th>Holm correction across</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>G-test of independence</td>
+<td>are the full answer distributions different? Ignores the order of
+the answers</td>
+<td>Cramér’s V</td>
+<td>the 5 fuels</td>
+</tr>
+<tr class="even">
+<td>Kruskal–Wallis</td>
+<td>does at least one group answer systematically higher or lower on the
+ordered scale?</td>
+<td>ε² = H / (n − 1)</td>
+<td>the 5 fuels</td>
+</tr>
+<tr class="odd">
+<td>pairwise Wilcoxon rank-sum</td>
+<td>which pairs of groups differ, and which of the two answers
+higher?</td>
+<td><code>prob_1_higher</code> = P(group 1 higher) + ½ P(same
+answer)</td>
+<td>the 15 comparisons (5 fuels × 3 pairs)</td>
+</tr>
+</tbody>
+</table>
+<p>The G statistic is 2N times the mutual information between group and
+answer — the KL divergence of the joint distribution from independence,
+hence the name of the script. Some expected counts are below 5, so
+besides the chi-squared p-value the script simulates 10,000 tables with
+the same margins (<code>r2dtable</code>) and the Holm correction uses
+that simulated p-value; the seed is fixed, so it is reproducible.</p>
+<p>The output is
+<code>first_policy_brief/preiserwartungen_tests.xlsx</code>:</p>
+<table>
+<colgroup>
+<col width="50%" />
+<col width="50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Sheet</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>readme</code></td>
+<td>the three tests, their effect sizes and the Holm correction,
+explained</td>
+</tr>
+<tr class="even">
+<td><code>anteile</code></td>
+<td>share of each answer, per fuel and group</td>
+</tr>
+<tr class="odd">
+<td><code>gruppen</code></td>
+<td>n, mean and median score, share expecting a price increase</td>
+</tr>
+<tr class="even">
+<td><code>g_test</code>, <code>kruskal_wallis</code>,
+<code>paarvergleiche</code></td>
+<td>one sheet per test; <code>significant_holm</code> marks a
+Holm-adjusted p-value below 0.05, <code>direction</code> says which
+group of a pair tends to answer higher</td>
+</tr>
+</tbody>
+</table>
+<p>Read the tests alongside <code>anteile</code>: with samples this
+large, small differences are significant. The same experts answer all
+five fuels, so compare groups within a fuel rather than p-values across
+fuels. The mean score treats the answers as equally spaced and is
+descriptive only; the tests do not assume it. The fuels, answer labels,
+pairs, significance level and number of simulated tables are set at the
+top of the script.</p>
+</div>
+<div id="logit-models-of-the-recommendations" class="section level3">
+<h3>Logit models of the recommendations</h3>
+<p><code>03_rc_logit_with_ame.R</code> models which technology an expert
+recommends for a vignette (<code>vig_rec</code>) as a function of the
+seven vignette attributes: the couple’s age, income, current heating,
+how soon it must be replaced, year of construction, heat demand and heat
+distribution. Every attribute gets one coefficient per technology,
+relative to a reference outcome.</p>
+<p>The sample is the completers of one Fernwärme arm
+(<code>SELECTED_FW_ARM</code>): in <code>fw</code> the outcomes are the
+six technologies and <em>Keine Empfehlung</em>, in <code>nofw</code> the
+same without Fernwärme. Each expert makes up to six choices. Three
+models are estimated with <code>mlogit</code>:</p>
+<table>
+<colgroup>
+<col width="50%" />
+<col width="50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Model</th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>mnl</code></td>
+<td>multinomial logit</td>
+</tr>
+<tr class="even">
+<td><code>mixed</code></td>
+<td>mixed logit: the constants of the technologies are normally
+distributed across experts, independently of each other; an expert keeps
+the same draw for all six vignettes. 1,000 Halton draws per expert</td>
+</tr>
+<tr class="odd">
+<td><code>mixed_corr</code></td>
+<td>the same, with correlated constants (full covariance matrix)</td>
+</tr>
+</tbody>
+</table>
+<p>What the script reports:</p>
+<ul>
+<li><strong>Standard errors</strong> clustered by expert (sandwich
+estimator, with the small-sample factor G/(G − 1)). The mixed logits
+need a numerical Hessian, which is most of the runtime. Standard
+deviations and correlations of the constants get delta-method standard
+errors; a standard deviation gets no test against zero, because zero
+lies on the boundary of the parameter space.</li>
+<li><strong>Average marginal effects</strong> at a reference vignette —
+every attribute at its first level in <code>ATTRIBUTE_LEVELS</code>: a
+couple in their mid-40s, 65,000 € gross a year, a gas heating that must
+be replaced in the next years, built 1970, 120 kWh/m², radiators. Each
+AME is the change in the probability of a recommendation when one
+attribute is switched, averaged over 1,000 draws of the random
+constants. Standard errors and percentile intervals by Krinsky–Robb
+(1,000 draws of the coefficient vector); a delta-method comparison is
+printed as a check.</li>
+<li><strong>Fit</strong>: McFadden R², a likelihood-ratio test against a
+model with constants only, and for the mixed logits one against the
+multinomial logit.</li>
+</ul>
+<p>Along the way the script checks itself and stops if a check fails:
+its covariance matrix of the constants and its multinomial-logit
+probabilities must reproduce those of <code>mlogit</code>, the AMEs must
+sum to zero across the outcomes, and the numerical Hessian must be
+positive definite.</p>
+<pre class="r"><code>source(&quot;R/first_policy_brief/03_rc_logit_with_ame.R&quot;)        # one run, with the arm and reference set at its top
+source(&quot;R/first_policy_brief/03_run_all_specifications.R&quot;)   # all four runs; slow</code></pre>
+<p><code>03_run_all_specifications.R</code> runs the main script four
+times, for the arms <code>fw</code> and <code>nofw</code> with <em>Keine
+Empfehlung</em> and <em>Wärmepumpe</em> as the reference outcome. Each
+run gets its own environment and passes its settings in
+<code>RUN_SETTINGS</code>; a run that fails is recorded in the printed
+table of runs, and the loop moves on to the next.</p>
+<p>Each run writes to its own folder,
+<code>first_policy_brief/rc_logit_&lt;arm&gt;_ref_&lt;outcome&gt;/</code>,
+e.g. <code>rc_logit_fw_ref_keine_empfehlung/</code>, so no run
+overwrites another. All labels are in German.</p>
+<table>
+<colgroup>
+<col width="50%" />
+<col width="50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Folder</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>tabellen/</code></td>
+<td><code>tab_rcl_mnl.tex</code>, <code>tab_rcl_mixed.tex</code>,
+<code>tab_rcl_mixed_corr.tex</code>: one LaTeX table per model. The
+document needs <code>\usepackage[T1]{fontenc}</code>,
+<code>\usepackage[ngerman]{babel}</code>, <code>booktabs</code> and
+<code>threeparttable</code></td>
+</tr>
+<tr class="even">
+<td><code>abbildungen/</code></td>
+<td><code>abb_ame_&lt;outcome&gt;.svg</code>: the AMEs of the three
+models with 95 % Krinsky–Robb intervals, one figure per outcome</td>
+</tr>
+<tr class="odd">
+<td><code>excel/</code></td>
+<td><code>rc_logit_ergebnisse.xlsx</code>: coefficients, marginal
+effects and fit, one sheet each</td>
+</tr>
+<tr class="even">
+<td><code>modelle/</code></td>
+<td>the three fitted models and their cluster-robust covariance matrices
+as <code>.rds</code>, so they can be reloaded without estimating
+again</td>
+</tr>
+</tbody>
+</table>
+<p>These figures are SVG only and drawn by the script itself, not with
+the plot functions of the summary statistics.
+<code>01_figure_report.R</code> empties only the top-level
+<code>abbildungen/</code>, so it leaves these folders alone.</p>
+<p>The number of draws, the arm, the reference outcome and the attribute
+levels are set at the top of <code>03_rc_logit_with_ame.R</code>.
+<code>mlogit</code> is attached in <code>config.R</code>, so every
+script that sources it needs the package installed —
+<code>renv::restore()</code> takes care of that.</p>
 </div>
 </div>
 </div>
