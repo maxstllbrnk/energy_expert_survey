@@ -25,6 +25,7 @@
 library(tidyverse)
 library(readxl)
 library(writexl)
+library(mlogit)
 
 # =============================================================================
 # the three roots  <- EDIT THESE
