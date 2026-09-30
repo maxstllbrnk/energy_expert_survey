@@ -25,6 +25,7 @@
 library(tidyverse)
 library(readxl)
 library(writexl)
+library(mlogit)
 
 # =============================================================================
 # the three roots  <- EDIT THESE
@@ -109,9 +110,11 @@ CODEBOOK_FILE <- file.path(REPORT_DIR, "codebook.csv")
 # Aggregates only - no respondent-level data - so they can live in Dropbox.
 SUMMARY_DIR <- file.path(OUTPUT_DIR, "summary_statistics")
 
-# The report and figures of the first policy brief, written by the scripts in
-# R/first_policy_brief/. The figures are copied from SUMMARY_DIR, except the few
-# the brief draws itself (R/first_policy_brief/00_figures.R).
+# Everything for the first policy brief, written by the scripts in
+# R/first_policy_brief/: the figure report (its figures are copied from
+# SUMMARY_DIR, except the few the brief draws itself in 00_figures.R), the tests
+# of the price expectations (preiserwartungen_tests.xlsx), and the logit models
+# of the recommendations (one rc_logit_<arm>_ref_<outcome>/ folder per run).
 FIRST_POLICY_BRIEF_DIR <- file.path(OUTPUT_DIR, "first_policy_brief")
 
 # =============================================================================
