@@ -1,7 +1,7 @@
 # =============================================================================
 # run_cleaning.R  -  build the three clean data sets from the raw exports
 # =============================================================================
-# In RStudio: open Energy-experts.Rproj, open this file, click "Source".
+# In RStudio: open energy_expert_survey.Rproj, open this file, click "Source".
 # In a terminal, from the project folder:   Rscript R/run_cleaning.R
 #
 # First time on a new computer, install the recorded package versions:
@@ -13,13 +13,14 @@
 # config.R. Raw data is only ever read, never modified, and nothing is written
 # into this project folder.
 #
-# Analysis scripts belong in R/analysis/, driven by their own runner - this
-# file is only about turning the raw exports into clean data.
+# Each analysis belongs in a folder of its own under R/ (R/summary_statistics/,
+# R/first_policy_brief/, ...) - this file is only about turning the raw exports
+# into clean data.
 # =============================================================================
 
 if (!file.exists("config.R"))
   stop("Run this from the project root (the folder containing config.R).\n",
-       "In RStudio, open Energy-experts.Rproj first.", call. = FALSE)
+       "In RStudio, open energy_expert_survey.Rproj first.", call. = FALSE)
 
 source("config.R")
 source("R/cleaning/00_functions.R")

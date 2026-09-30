@@ -3,6 +3,10 @@
 #                                  recommend? (Mixed) multinomial logit models
 ################################################################################
 
+if (!file.exists("config.R"))
+  stop("Run this from the project root (the folder containing config.R).\n",
+       "In RStudio, open energy_expert_survey.Rproj first.", call. = FALSE)
+
 source(file.path("R", "prepare_analysis_data.R"))   # load_analysis_data()
 
 # 1. Settings ------------------------------------------------------------------
@@ -17,13 +21,15 @@ n_draws_ame <- 1000
 # Draws for AME Krinsky-Robb Standard Errors 
 n_draws_kr <- 1000
 
-# Estimate for the experts who have "Fernwärme" in their choice set or not
-SELECTED_FW_ARM = "fw"
+# Estimate for the experts who have "Fernwärme" in their choice set ("fw") or
+# not ("nofw")
+SELECTED_FW_ARM <- "fw"
 
-# The seven possible recommendations; the reference outcome comes first
+# The possible recommendations, seven in the fw arm and six in the nofw arm
+# (no Fernwärme); the reference outcome comes first
 REFERENCE_OUTCOME <- "Keine Empfehlung"
 
-# 05_run_all_specifications.R runs this script for several arms and reference
+# 03_run_all_specifications.R runs this script for several arms and reference
 # outcomes: it passes them in RUN_SETTINGS, which then replaces the two
 # values above. Run on its own, the script uses the values above.
 if (exists("RUN_SETTINGS", inherits = FALSE)) {
@@ -76,8 +82,8 @@ design_formula <- ~ att_couple_age + att_income + att_current_heating +
 analysis_data <- load_analysis_data(completers_only = TRUE)
 vignettes_all <- analysis_data$vignettes
 
-# District heating is an option only in the fw arm (between-subject), so the
-# models are estimated on that arm, where all seven outcomes are available
+# District heating is an option only in the fw arm (between-subject), so each
+# arm is estimated on its own: the one set in SELECTED_FW_ARM
 decisions <- vignettes_all %>%
   filter(vig_arm == SELECTED_FW_ARM)
 if (nrow(decisions) == 0) stop("No vignettes for the arm ", SELECTED_FW_ARM)
@@ -163,17 +169,19 @@ summary(vignette_weights)
 # (1) Multinomial logit
 m_mnl <- mlogit(choice_formula, data = choice_data, reflevel = REFERENCE_OUTCOME)
 
-# The regressors of the design matrix times the six technologies must be
-# exactly the coefficients of the model (setequal(): same elements, in any order)
+# The regressors of the design matrix times the outcomes other than the
+# reference must be exactly the coefficients of the model (setequal(): same
+# elements, in any order)
 terms <- colnames(model.matrix(design_formula, decisions))
 expected_coefs <- outer(terms, RECOMMENDATIONS[RECOMMENDATIONS != REFERENCE_OUTCOME], paste, sep = ":")
+stopifnot(setequal(expected_coefs, names(coef(m_mnl))))
 
 rpar_names <- names(coef(m_mnl))[grep("Intercept",names(coef(m_mnl)))]
 
-# (2) Mixed logit: every coefficient normally distributed across experts,
-# independently of the others; each expert keeps one draw for all six vignettes.
-# R = 40 pseudo-random draws per expert is mlogit's default; the stored
-# correlated model was estimated with it.
+# (2) Mixed logit: the constants (ASCs) are normally distributed across experts,
+# independently of each other; the coefficients of the attributes are fixed.
+# Each expert keeps one draw for all six vignettes (panel = TRUE). halton = NA
+# uses Halton draws with mlogit's default primes, n_draws_model per expert.
 random_parameters <- rep("n", length(rpar_names))
 names(random_parameters) <- rpar_names
 
@@ -283,7 +291,7 @@ V_mixed_corr <- vcov_cluster_robust(models$mixed_corr, cluster = "resp_uid", h =
 # R = n_draws_ame draws z_1, ..., z_R:
 #
 #   P_j(x) = 1/R * sum_r exp(u_j(x, r)) / sum_k exp(u_k(x, r))
-#   u_j(x, r) = x' beta_j + (L z_r)_j     for the six technologies
+#   u_j(x, r) = x' beta_j + (L z_r)_j     for the other outcomes (technologies)
 #   u_0(x, r) = 0                         for the reference outcome
 #
 # beta_j holds the coefficients of technology j; for the mixed logits its
@@ -331,7 +339,7 @@ standard_draws <- matrix(rnorm(n_draws_ame * length(rpar_names)),
 
 # 6.3 Probabilities and AMEs for one coefficient vector --------------------------
 
-#' Probabilities of the seven recommendations for each vignette in X, averaged
+#' Probabilities of the recommendations for each vignette in X, averaged
 #' over the random ASCs, and the AMEs (each variation minus the reference
 #' vignette). Section 7 evaluates it again at many
 #' draws of the coefficient vector to get standard errors.
@@ -395,10 +403,11 @@ ame_at_reference <- function(theta, X, standard_draws, rpar_names) {
     # utility of each technology at the mean ASCs, x' beta: one number per technology
     mean_utility <- as.vector(X[v, ] %*% beta)
     # utility for each draw: copy x' beta into every row and add that draw's
-    # ASC deviations (n_draws rows x 6 technologies)
+    # ASC deviations (n_draws rows x one column per technology)
     utility <- matrix(mean_utility, nrow = n_draws, ncol = length(technologies),
                       byrow = TRUE) + asc_deviations
-    # the reference outcome has utility 0: first column (n_draws x 7)
+    # the reference outcome has utility 0: first column (n_draws rows x one
+    # column per outcome)
     utility <- cbind(0, utility)
     # logit probabilities for each draw; each row sums to one. Subtracting each
     # row's largest utility before exp() avoids overflow; it cancels in the ratio.
@@ -740,7 +749,7 @@ TECHNOLOGY_LABELS <- c(
 )
 
 # Table column headers, hyphenated over two lines (\\ is a line break in
-# LaTeX), so that six columns fit the text width
+# LaTeX), so that up to six columns fit the text width
 TECHNOLOGY_COLUMN_HEADERS <- c(
   "Keine Empfehlung" = "Keine\\\\Empfehlung",
   "Wärmepumpe" = "Wärme-\\\\pumpe",
@@ -814,7 +823,7 @@ stopifnot(
   all(ame_table$vignette %in% names(VARIATION_LABELS))
 )
 
-# The six technologies: the table columns
+# The outcomes other than the reference: the table columns
 technologies <- RECOMMENDATIONS[RECOMMENDATIONS != REFERENCE_OUTCOME]
 stopifnot(all(technologies %in% names(TECHNOLOGY_COLUMN_HEADERS)))
 
@@ -824,7 +833,8 @@ stopifnot(all(technologies %in% names(TECHNOLOGY_COLUMN_HEADERS)))
 # predicts the observed share of each recommendation for every vignette. Its
 # log-likelihood follows from the choice counts n_j alone:
 #   logL_0 = sum_j n_j log(n_j / N)
-#   R^2 = 1 - logL / logL_0,   LR = 2 (logL - logL_0),   df = parameters - 6.
+#   R^2 = 1 - logL / logL_0,   LR = 2 (logL - logL_0),
+#   df = parameters - (outcomes - 1).
 # These are computed here from the formulas, because mlogit stores logL_0
 # differently across versions (1.1: attribute "null" of model$logLik; 2.0:
 # element "null" of the vector model$logLik). A check compares the result with
