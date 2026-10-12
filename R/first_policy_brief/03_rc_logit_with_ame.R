@@ -12,14 +12,21 @@ source(file.path("R", "prepare_analysis_data.R"))   # load_analysis_data()
 # 1. Settings ------------------------------------------------------------------
 
 # Draws model estimation
-n_draws_model <- 1000
+n_draws_model <- 2000
 
 # Draws of the coefficient vector used to average the predicted probabilities
-# over the distribution of the random coefficients (marginal effects)
-n_draws_ame <- 1000
+# over the distribution of the random coefficients (marginal effects). The
+# simulation error of one probability is about 1.1 percentage points with
+# 1,000 draws and about 0.1 with 100,000. Check 6.5 (e) shows the largest
+# change between two independent sets of draws, which is somewhat larger.
+n_draws_ame <- 100000
+
+# Draws for checks 6.5 (b) and (c), which evaluate every observed vignette and
+# need no more precision than this
+n_draws_check <- 1000
 
 # Draws for AME Krinsky-Robb Standard Errors 
-n_draws_kr <- 1000
+n_draws_kr <- 10000
 
 # Estimate for the experts who have "Fernwärme" in their choice set ("fw") or
 # not ("nofw")
@@ -27,7 +34,7 @@ SELECTED_FW_ARM <- "fw"
 
 # The possible recommendations, seven in the fw arm and six in the nofw arm
 # (no Fernwärme); the reference outcome comes first
-REFERENCE_OUTCOME <- "Keine Empfehlung"
+REFERENCE_OUTCOME <- "Wärmepumpe"
 
 # 03_run_all_specifications.R runs this script for several arms and reference
 # outcomes: it passes them in RUN_SETTINGS, which then replaces the two
@@ -411,7 +418,13 @@ ame_at_reference <- function(theta, X, standard_draws, rpar_names) {
     utility <- cbind(0, utility)
     # logit probabilities for each draw; each row sums to one. Subtracting each
     # row's largest utility before exp() avoids overflow; it cancels in the ratio.
-    exp_utility <- exp(utility - apply(utility, 1, max))
+    # Each row's largest utility: the elementwise maximum over the columns
+    # (same result as apply(utility, 1, max), but much faster)
+    row_max <- utility[, 1]
+    for (k in 2:ncol(utility)) {
+      row_max <- pmax(row_max, utility[, k])
+    }
+    exp_utility <- exp(utility - row_max)
     prob_draws <- exp_utility / rowSums(exp_utility)
     # average over the draws, i.e. over experts
     probabilities[v, ] <- colMeans(prob_draws)
@@ -446,9 +459,14 @@ L_uncorr <- ame_estimates$mixed$L
 stopifnot(max(abs(abs(diag(L_uncorr)) - stdev(models$mixed)[rpar_names])) < 1e-8)
 
 # (b) MNL: at the observed vignettes, the function reproduces mlogit's
-#     probabilities exactly (only $probabilities is used here)
+#     probabilities exactly (only $probabilities is used here). Checks (b)
+#     and (c) evaluate every observed vignette, so they use only the first
+#     n_draws_check draws: for the MNL every draw gives the same probability,
+#     and (c) is a comparison up to simulation noise anyway
 X_observed <- model.matrix(design_formula, decisions)
-p_own <- ame_at_reference(coef(models$mnl), X_observed, standard_draws,
+standard_draws_observed <- standard_draws[seq_len(min(n_draws_check, n_draws_ame)), ,
+                                          drop = FALSE]
+p_own <- ame_at_reference(coef(models$mnl), X_observed, standard_draws_observed,
                           rpar_names)$probabilities
 p_mlogit <- fitted(models$mnl, type = "probabilities")[, RECOMMENDATIONS]
 stopifnot(max(abs(p_own - p_mlogit)) < 1e-8)
@@ -457,8 +475,8 @@ stopifnot(max(abs(p_own - p_mlogit)) < 1e-8)
 #     the ASCs, but with its own draws (R per expert), so they agree with ours
 #     only up to simulation noise: the difference should be small
 for (model_name in c("mixed", "mixed_corr")) {
-  p_own <- ame_at_reference(coef(models[[model_name]]), X_observed, standard_draws,
-                            rpar_names)$probabilities
+  p_own <- ame_at_reference(coef(models[[model_name]]), X_observed,
+                            standard_draws_observed, rpar_names)$probabilities
   p_mlogit <- fitted(models[[model_name]], type = "probabilities")[, RECOMMENDATIONS]
   cat(model_name, ": mean absolute difference to mlogit's probabilities:",
       round(mean(abs(p_own - p_mlogit)), 4), "\n")
@@ -469,15 +487,22 @@ for (model_name in names(ame_estimates)) {
   stopifnot(all(abs(rowSums(ame_estimates[[model_name]]$ame)) < 1e-12))
 }
 
-# (e) Simulation noise: other draws should change the AMEs by much less than
-#     their standard errors (section 7); otherwise increase n_draws_ame
+# (e) Simulation noise: other draws should change the AMEs and the
+#     probabilities at the reference vignette by much less than their standard
+#     errors (section 7), i.e. by well under 0.5 percentage points; otherwise
+#     increase n_draws_ame. Printed, not stopped: the models are saved only in
+#     section 8.6, so a stop here would discard the estimation.
 set.seed(20261002)
 standard_draws_check <- matrix(rnorm(n_draws_ame * length(rpar_names)),
                                nrow = n_draws_ame, ncol = length(rpar_names))
-ame_check <- ame_at_reference(coef(models$mixed_corr), X_ame, standard_draws_check,
-                              rpar_names)$ame
-cat("Largest change of an AME with other draws (mixed_corr):",
-    round(max(abs(ame_check - ame_estimates$mixed_corr$ame)), 4), "\n")
+result_check <- ame_at_reference(coef(models$mixed_corr), X_ame, standard_draws_check,
+                                 rpar_names)
+cat("Largest change with other draws (mixed_corr), in percentage points: AME",
+    round(100 * max(abs(result_check$ame - ame_estimates$mixed_corr$ame)), 2),
+    "| probability at the reference vignette",
+    round(100 * max(abs(result_check$probabilities["Reference vignette", ] -
+                          ame_estimates$mixed_corr$probabilities["Reference vignette", ])), 2),
+    "\n")
 
 # 6.6 Results as a table ---------------------------------------------------------
 # One row per model x variation x outcome: the probability at the reference
@@ -627,7 +652,8 @@ for (model_name in names(models)) {
 #   3. the standard deviation of the S AMEs is the standard error; their 2.5%
 #      and 97.5% quantiles are a percentile confidence interval
 # The point estimate stays the AME at theta_hat from section 6, not the mean of
-# the draws. Runtime: n_draws_kr evaluations of ame_at_reference() per model.
+# the draws. Runtime: n_draws_kr evaluations of ame_at_reference() per model,
+# about 0.4 seconds each with n_draws_ame = 100,000.
 
 set.seed(20261003)
 kr_se <- list()        # standard errors per model, kept for the checks below
@@ -1163,6 +1189,45 @@ for (outcome_name in RECOMMENDATIONS) {
           plot.title.position = "plot")
   
   file_name <- paste0("abb_ame_", OUTCOME_FILE_NAMES[[outcome_name]], ".svg")
+  ggsave(file.path(output_dirs$figures, file_name), plot, width = 8, height = 5)
+  
+  # Create graph with only the RC logit with correlation estimates
+  plot_data <- figure_data %>% filter(outcome == outcome_name,
+                                      model == "Mixed Logit mit korrelierten Konstanten")
+  # Subtitle: probability of this outcome at the reference vignette, per model,
+  # e.g. "40,2 % (Multinomiales Logit)"
+  baseline <- plot_data %>% distinct(model, p_reference) %>% arrange(model)
+  baseline_text <- paste0(formatC(baseline$p_reference, format = "f", digits = 1,
+                                  decimal.mark = ","),
+                          " % (", baseline$model, ")")
+  subtitle <- paste0("Wahrscheinlichkeit bei der Referenzvignette:\n",
+                     paste(baseline_text, collapse = ", "))
+  
+  # coord_flip() puts the variations on the vertical axis; position_dodge()
+  # places the three models next to each other within each variation, in the
+  # order of `group`: reversed, so that the first model is at the top
+  plot <- ggplot(plot_data, aes(x = variation, y = ame, ymin = ci_low, ymax = ci_high,
+                                colour = model, shape = model,
+                                group = factor(model, levels = rev(MODEL_LABELS)))) +
+    geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
+    geom_pointrange(position = position_dodge(width = 0.6), size = 0.4) +
+    coord_flip() +
+    scale_y_continuous(labels = scales::label_number(decimal.mark = ",", big.mark = ".")) +
+    scale_colour_manual(values = c("#0072B2", "#D55E00", "#009E73")) +
+    scale_shape_manual(values = c(16, 17, 15)) +
+    labs(title = TECHNOLOGY_LABELS[[outcome_name]],
+         subtitle = subtitle,
+         x = NULL,
+         y = "Veränderung der Wahrscheinlichkeit in Prozentpunkten (95-%-Konfidenzintervall)",
+         colour = NULL, shape = NULL) +
+    theme_minimal(base_size = 11) +
+    theme(legend.position = "bottom",
+          panel.grid.minor = element_blank(),
+          plot.subtitle = element_text(size = 9),
+          axis.title.x = element_text(size = 10),
+          plot.title.position = "plot")
+  
+  file_name <- paste0("abb_ame_rc_corr_", OUTCOME_FILE_NAMES[[outcome_name]], ".svg")
   ggsave(file.path(output_dirs$figures, file_name), plot, width = 8, height = 5)
 }
 
