@@ -275,6 +275,19 @@ ATTRIBUTE_SOURCE <- c(image = "bild", couple_age = "ehepaar_alter",
                       heat_distribution = "heizsystem",
                       renovation = "sanierungsstand_waermebedarf")
 
+# Federal state -> its NUTS1 code, the first three characters of every NUTS3
+# code in that state (Eurostat, NUTS 2024). Fixed here, so that checks of
+# nuts3 (Eurostat) against bundesland (GeoNames/BKG) compare the codes
+# themselves. Names as in the BKG state table.
+BUNDESLAND_NUTS1 <- c(
+  "Schleswig-Holstein" = "DEF", "Hamburg" = "DE6", "Niedersachsen" = "DE9",
+  "Bremen" = "DE5", "Nordrhein-Westfalen" = "DEA", "Hessen" = "DE7",
+  "Rheinland-Pfalz" = "DEB", "Baden-Württemberg" = "DE1", "Bayern" = "DE2",
+  "Saarland" = "DEC", "Berlin" = "DE3", "Brandenburg" = "DE4",
+  "Mecklenburg-Vorpommern" = "DE8", "Sachsen" = "DED",
+  "Sachsen-Anhalt" = "DEE", "Thüringen" = "DEG"
+)
+
 # LimeSurvey question code -> analysis variable name.
 var_name <- function(qid) {
   map_chr(qid, function(q) {

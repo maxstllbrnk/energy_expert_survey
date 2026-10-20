@@ -1,18 +1,19 @@
 # =============================================================================
 # 03_recode.R  -  repairs and flags on the stacked data
 # =============================================================================
-# Four things, all ADDITIVE - originals are never overwritten:
+# Five things, all ADDITIVE - originals are never overwritten:
 #
 #   1. postcode      LimeSurvey stores Q0 as a number, so 01067 arrives as 1067.
 #                    Adds plz (5-char string) and plz_valid.
 #   2. bundesland    the federal state, looked up from plz.
-#   3. "Sonstiges"   LimeSurvey writes "-oth-" into the answer column and the
+#   3. nuts3         the NUTS3 region, looked up from plz in Eurostat's list.
+#   4. "Sonstiges"   LimeSurvey writes "-oth-" into the answer column and the
 #                    typed text into <question>_other. "-oth-" is not an answer
 #                    code, so it labels to NA and looks like a nonresponse.
 #                    Q6 and Q22 are recovered here from their free text.
 #                    (The vignettes are handled in 02_read_stack.R, where
 #                    "-oth-" becomes the 7th option "Keine Empfehlung".)
-#   4. flags         completeness and the Fernwaerme branch.
+#   5. flags         completeness and the Fernwaerme branch.
 # =============================================================================
 
 # --- 1. postcode -------------------------------------------------------------
@@ -29,7 +30,49 @@ survey_wide <- survey_wide |>
   ) |>
   select(-.zip_num)
 
-# --- 2. bundesland -----------------------------------------------------------
+
+# --- 2. nuts3 ----------------------------------------------------------------
+# The NUTS3 region (Kreis or kreisfreie Stadt) of the company, for merging
+# regional data such as heating degree days. The lookup is Eurostat's
+# postcode -> NUTS correspondence (GISCO; postcodes 2025, NUTS 2024), which puts
+# every postcode in exactly one NUTS3 region - so there is no border or prefix
+# rule: a postcode is either in the list or not.
+#
+# The list holds only geographic postcodes. P.O.-box and large-customer
+# postcodes are valid and keep plz and bundesland (from GeoNames, section 2),
+# but get no NUTS3 region: of the 10,812 postcodes in the GeoNames lookup,
+# 2,502 are not in Eurostat's list. `plz_in_nuts_list` records which case
+# applies (NA when there is no plz).
+if (!file.exists(PLZ_NUTS3_FILE)) {
+  
+  survey_wide <- survey_wide |>
+    mutate(nuts3 = NA_character_, plz_in_nuts_list = NA)
+  message("NOTE: nuts3 is NA - ", PLZ_NUTS3_FILE, " does not exist.")
+  
+} else {
+  
+  # Semicolon-separated, every value in single quotes ('DEF09';'25495'), which
+  # is what keeps the leading zeros; the quotes are removed here.
+  plz_nuts3 <- read_delim(PLZ_NUTS3_FILE, delim = ";",
+                          col_types = cols(.default = col_character())) |>
+    transmute(plz = str_remove_all(CODE, "'"), nuts3 = str_remove_all(NUTS3, "'"))
+  stopifnot(!anyDuplicated(plz_nuts3$plz),
+            all(str_detect(plz_nuts3$plz, "^[0-9]{5}$")))
+  
+  in_list <- match(survey_wide$plz, plz_nuts3$plz)
+  
+  survey_wide <- survey_wide |>
+    mutate(
+      nuts3            = plz_nuts3$nuts3[in_list],
+      plz_in_nuts_list = if_else(is.na(plz), NA, !is.na(in_list))
+    )
+  
+  message("NUTS3: ", sum(!is.na(survey_wide$nuts3)), " of ",
+          sum(!is.na(survey_wide$plz)), " valid postcodes are in Eurostat's list")
+}
+
+
+# --- 3. bundesland -----------------------------------------------------------
 # The questionnaire never asks for the federal state, only for the postcode, but
 # the state is worth having as an expert characteristic: heating stock, district
 # heating coverage and building age all differ sharply between states.
@@ -105,7 +148,7 @@ if (!file.exists(PLZ_LOOKUP_FILE)) {
           sum(survey_wide$bundesland_source == "unmatched"), " postcode(s) in no known range)")
 }
 
-# --- 3. "Sonstiges" free text ------------------------------------------------
+# --- 4. "Sonstiges" free text ------------------------------------------------
 # Q6, service radius. Levels: bis 20 km < bis 50 km < bis 100 km < bundesweit.
 #   - "gar nicht" / "keine"      -> its own level, this is a real answer
 #   - a distance in km           -> the matching band (largest if several given;
@@ -181,7 +224,7 @@ survey_wide <- survey_wide |>
   add_recode("dem_education", "dem_education_other", recode_education,
              extra_levels = "Sonstiges")
 
-# --- 4. flags ----------------------------------------------------------------
+# --- 5. flags ----------------------------------------------------------------
 # The Fernwaerme branch is between-subject: Q6a routes each respondent into
 # exactly one of the two. `arm_conflict` catches the (rare) exception rather
 # than hiding it.

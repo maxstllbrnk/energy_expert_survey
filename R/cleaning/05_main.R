@@ -77,7 +77,9 @@ checks <- tribble(
 recode_summary <- bind_rows(
   survey_main |> count(variable = "firm_radius", source = firm_radius_recode_source),
   survey_main |> count(variable = "dem_education", source = dem_education_recode_source),
-  survey_main |> summarise(variable = "plz", source = "valid postcode", n = sum(!is.na(plz)))
+  survey_main |> summarise(variable = "plz", source = "valid postcode", n = sum(!is.na(plz))),
+  survey_main |> summarise(variable = "nuts3", source = "postcode in Eurostat's list",
+                           n = sum(!is.na(nuts3)))
 )
 
 # --- data quality: FLAGGED, NEVER ALTERED -------------------------------------
@@ -133,7 +135,22 @@ data_quality <- bind_rows(
          examples = str_c(head(sort(unique(
            survey_main$plz[survey_main$bundesland_source == "plz_border"])), 8), collapse = ", "),
          note = str_c("Postcodes are Deutsche Post routing areas and a few cross a ",
-                      "state border. Assigned to the state holding most of the postcode."))
+                      "state border. Assigned to the state holding most of the postcode.")),
+  # No examples in the two nuts3 rows: a large-customer postcode belongs to a
+  # single organisation and can identify the firm, and this report is on Dropbox
+  tibble(variable = "nuts3", rule = "postcode not in Eurostat's list",
+         n = sum(!coalesce(survey_main$plz_in_nuts_list, TRUE)),
+         examples = "",
+         note = str_c("A valid postcode, but not in Eurostat's list of geographic postcodes - ",
+                      "mostly P.O.-box or large-customer postcodes. nuts3 is NA; ",
+                      "plz and bundesland are kept.")),
+  tibble(variable = "nuts3", rule = "Kreis (nuts3) outside the state (bundesland)",
+         n = sum(str_sub(survey_main$nuts3, 1, 3) !=
+                   BUNDESLAND_NUTS1[as.character(survey_main$bundesland)], na.rm = TRUE),
+         examples = "",
+         note = str_c("nuts3 comes from Eurostat, bundesland from GeoNames/BKG, and the two ",
+                      "lookups disagree for a few postcodes (README, section NUTS3). Use one ",
+                      "of the two consistently in an analysis."))
 )
 
 write_xlsx(

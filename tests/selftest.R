@@ -138,6 +138,34 @@ if (!file.exists(PLZ_LOOKUP_FILE)) {
      mean(region_ok) > 0.9, str_c("mean share ", sprintf("%.3f", mean(region_ok))))
 }
 
+cat("\n===== nuts3 =====\n")
+if (!file.exists(PLZ_NUTS3_FILE)) {
+  cat("skipped - ", PLZ_NUTS3_FILE, " does not exist\n")
+} else {
+  ok("nuts3 is set exactly when plz is in Eurostat's list",
+     all(is.na(sm$nuts3) == !coalesce(sm$plz_in_nuts_list, FALSE)))
+  ok("plz_in_nuts_list is NA exactly when plz is NA",
+     all(is.na(sm$plz_in_nuts_list) == is.na(sm$plz)))
+  ok("nuts3 codes are German NUTS3 codes (DE + 3 characters)",
+     all(str_detect(na.omit(sm$nuts3), "^DE[1-9A-G][0-9A-Z]{2}$")))
+  # The first three characters of a German NUTS3 code (NUTS1) are the federal
+  # state (BUNDESLAND_NUTS1). nuts3 (Eurostat) and bundesland (GeoNames/BKG) may
+  # differ only where the two lookups differ: postcodes that straddle a state
+  # line, states from the prefix rule, and three postcodes that Eurostat puts
+  # in another state than GeoNames (README, section NUTS3). Anything else means
+  # one of the lookups or the state names have changed.
+  ok("every bundesland level has a NUTS1 code",
+     all(levels(sm$bundesland) %in% names(BUNDESLAND_NUTS1)))
+  nuts3_differs <- !is.na(sm$nuts3) & !is.na(sm$bundesland) &
+    str_sub(sm$nuts3, 1, 3) != BUNDESLAND_NUTS1[as.character(sm$bundesland)]
+  known_case <- sm$bundesland_source %in% c("plz_border", "plz_prefix") |
+    sm$plz %in% c("22113", "26954", "64754")
+  ok("nuts3 lies in bundesland, apart from the known cases",
+     !any(nuts3_differs & !known_case),
+     str_c(sum(nuts3_differs), " differ, ",
+           sum(nuts3_differs & !known_case), " of them not a known case"))
+}
+
 cat("\n===== preference staircases =====\n")
 # The scores are built outside the pipeline, but the RAW answers live here and
 # the two properties everything downstream rests on can be checked on them.

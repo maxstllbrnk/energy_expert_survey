@@ -88,6 +88,12 @@ derived <- tribble(
   str_c("How bundesland was reached: plz / plz_border (postcode straddles a state ",
         "line) / plz_prefix (matched on the first three digits) / unmatched / no_postcode."),
   "Q0", "bundesland_source", "firm", "survey_main",
+  str_c("NUTS3 region (Kreis) of the company, looked up from plz in Eurostat's ",
+        "postcode-to-NUTS list (postcodes 2025, NUTS 2024). NA if plz is not in the list."),
+  "Q0", "nuts3", "firm", "survey_main",
+  str_c("TRUE/FALSE: is plz in Eurostat's postcode-to-NUTS list? FALSE mostly for ",
+        "P.O.-box and large-customer postcodes. NA without plz."),
+  "Q0", "plz_in_nuts_list", "firm", "survey_main",
 
   "Q6 with 'Sonstiges' free text mapped back onto a level where unambiguous.",
   "Q6", "firm_radius_recoded", "firm", "survey_main",

@@ -36,12 +36,12 @@ library(mlogit)
 # --- 1. SECURE ---------------------------------------------------------------
 # INPUT: the twelve raw exports (survey_<id>_R_data_file.csv, soft-launch waves
 # included) plus a limesurvey-syntax/ sub-folder with the twelve syntax files.
-RAW_DIR <- "I:/Projekte/Stiftungs- und Industrieprojekte/SFB UniMA/Daten/Umfrage Energieexperten/260909_raw_energy_expert_survey_data"
+RAW_DIR        <- "I:/Projekte/Stiftungs- und Industrieprojekte/SFB UniMA/Daten/energy_experts_survey/wave_1_2026/260909_raw_energy_expert_survey_data"
 
 # OUTPUT: the cleaned analysis data sets. One row per respondent and one per
 # respondent x vignette, so this is respondent-level data and stays out of
 # Dropbox. Created automatically if it does not exist.
-CLEAN_DATA_DIR <- "I:/Projekte/Stiftungs- und Industrieprojekte/SFB UniMA/Daten/Umfrage Energieexperten/260909_cleaned_energy_expert_survey_data"
+CLEAN_DATA_DIR <- "I:/Projekte/Stiftungs- und Industrieprojekte/SFB UniMA/Daten/energy_experts_survey/wave_1_2026/260909_cleaned_energy_expert_survey_data"
 
 # --- 2. DROPBOX --------------------------------------------------------------
 # Everything the coauthors need. The path differs per machine - this is the one
@@ -72,6 +72,11 @@ if (file.exists("config.local.R")) {
 # --- secure ------------------------------------------------------------------
 SYNTAX_DIR <- file.path(RAW_DIR, "limesurvey-syntax")  # 12 LimeSurvey R syntax exports
 
+# The fitted models of R/analysis/01_run_specifications.R. An mlogit model
+# contains its estimation data, one row per expert x vignette, so the models
+# stay on the secure drive; their aggregate results go to RC_LOGIT_DIR below.
+RC_LOGIT_MODEL_DIR <- file.path(CLEAN_DATA_DIR, "rc_logit_models")
+
 # The sampling frame: every expert and firm that was contacted, with e-mail,
 # postcode and the sample they were drawn from (DENA / Schornsteinfeger / SHK).
 # It is the denominator of the response rate - see R/run_ruecklauf.R. Personal
@@ -87,6 +92,11 @@ OUTPUT_DIR      <- file.path(DROPBOX_DIR, "output_dropbox")       # everything w
 
 VERSAND_FILE  <- file.path(PUBLIC_DATA_DIR, "LimeSurvey_Versanduebersicht_010726.xlsx")  # batch overview
 VIGNETTE_FILE <- file.path(PUBLIC_DATA_DIR, "vignetten_kombinationen.xlsx")              # vignette design matrix
+
+# Eurostat's postcode -> NUTS3 correspondence (GISCO; postcodes 2025, NUTS 2024),
+# read by 03_recode.R to add `nuts3`. Like the geodata below, deliberately NOT
+# in the required list: without it, `nuts3` is NA with a message.
+PLZ_NUTS3_FILE <- file.path(PUBLIC_DATA_DIR, "pc2025_DE_NUTS-2024_v1.0.csv")       # postcode -> NUTS3
 
 # --- geodata (Dropbox, downloaded once) --------------------------------------
 # Built by R/geodata/build_plz_bundesland.R, which downloads the two open data
@@ -116,6 +126,12 @@ SUMMARY_DIR <- file.path(OUTPUT_DIR, "summary_statistics")
 # of the price expectations (preiserwartungen_tests.xlsx), and the logit models
 # of the recommendations (one rc_logit_<arm>_ref_<outcome>/ folder per run).
 FIRST_POLICY_BRIEF_DIR <- file.path(OUTPUT_DIR, "first_policy_brief")
+
+# The mixed logit models of the recommendations beyond the policy brief,
+# written by the scripts in R/analysis/: aggregate results (coefficients,
+# covariance matrices, marginal effects, fit), tables and figures, one
+# rc_logit_<arm>_ref_<outcome>/ folder per run.
+RC_LOGIT_DIR <- file.path(OUTPUT_DIR, "rc_logit_heterogeneity")
 
 # =============================================================================
 # survey design constants
