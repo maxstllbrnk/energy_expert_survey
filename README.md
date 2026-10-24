@@ -870,7 +870,8 @@ and (5), and prices with one coefficient per Berufsgruppe) are in commit
 
 All have the eight attribute dummies as regressors, with one fixed coefficient
 per technology, as in the policy brief. In (4) the Berufsgruppe shifts the
-means of the constants (reference category: SHK-Handwerk), with one covariance
+means of the constants (reference category: Energieberater, October 2026; the
+earlier version and the policy brief used the SHK-Handwerk), with one covariance
 matrix for all. In (6) every Berufsgruppe has its own means and covariance
 matrix. Every expert belongs to one Berufsgruppe, so the covariances between
 two groups' constants never enter the likelihood: they are set to zero as a
@@ -878,9 +879,12 @@ normalisation, not as an assumption (the Cholesky elements that link two
 groups are fixed through `constPar`).
 
 (4i) and (6i) let the effect of every attribute differ by Berufsgruppe: 16
-interactions (the Schornsteinfeger and the Energieberater times the eight
+interactions (the SHK-Handwerk and the Schornsteinfeger times the eight
 attribute dummies), each with one coefficient per technology, the difference
-to the SHK-Handwerk. In (6i) the Berufsgruppen share no parameter, so it is a
+to the Energieberater; the attribute coefficients themselves are then the
+Energieberater's. To use another reference group, list the other two groups
+in `GROUP_SHIFTS` and `GROUP_X_ATTRIBUTES` (section 3 of
+`01_run_specifications.R`). In (6i) the Berufsgruppen share no parameter, so it is a
 separate model per Berufsgruppe, estimated together. A Berufsgruppe's
 interactions rest on its experts alone, so those of a small Berufsgruppe are
 estimated imprecisely (the script prints the experts per Berufsgruppe).

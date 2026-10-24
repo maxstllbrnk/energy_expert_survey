@@ -272,8 +272,10 @@ for (attribute in names(REFERENCE_LEVELS)) {
 #'   <dummy>                       one per row of ATTRIBUTE_DUMMIES
 #'   is_shk, is_schornsteinfeger,  one per Berufsgruppe
 #'   is_energieberater
-#'   is_<group>_x_<dummy>          Schornsteinfeger or Energieberater times an
-#'                                 attribute dummy
+#'   is_<group>_x_<dummy>          a Berufsgruppe's dummy times an attribute
+#'                                 dummy, for all three; the models use those
+#'                                 of the groups besides the reference group
+#'                                 (GROUP_X_ATTRIBUTES, section 3)
 add_regressors <- function(data) {
   for (k in seq_len(nrow(ATTRIBUTE_DUMMIES))) {
     is_level <- data[[ATTRIBUTE_DUMMIES$attribute[k]]] == ATTRIBUTE_DUMMIES$level[k]
@@ -285,7 +287,7 @@ add_regressors <- function(data) {
       is_schornsteinfeger = if_else(berufsgruppe == "Schornsteinfeger", 1, 0),
       is_energieberater = if_else(berufsgruppe == "Energieberater", 1, 0)
     )
-  for (group in c("is_schornsteinfeger", "is_energieberater")) {
+  for (group in c("is_shk", "is_schornsteinfeger", "is_energieberater")) {
     for (dummy in ATTRIBUTE_DUMMIES$dummy) {
       data[[paste0(group, "_x_", dummy)]] <- data[[group]] * data[[dummy]]
     }
@@ -473,17 +475,18 @@ ATTRIBUTES <- c(
   "floor_heating"
 )
 
-# The Berufsgruppe shifting the means of the constants; the SHK-Handwerk is
-# the reference
-GROUP_SHIFTS <- c("is_schornsteinfeger", "is_energieberater")
+# The Berufsgruppe shifting the means of the constants; the Energieberater
+# are the reference group (Max, 2026-10-24). Another reference group: list
+# the other two here and in GROUP_X_ATTRIBUTES.
+GROUP_SHIFTS <- c("is_shk", "is_schornsteinfeger")
 
 # One set of constants per Berufsgruppe
 GROUP_CONSTANTS <- c("is_shk", "is_schornsteinfeger", "is_energieberater")
 
-# The effects of the attributes for the Schornsteinfeger and the
-# Energieberater, as differences to the SHK-Handwerk
-GROUP_X_ATTRIBUTES <- c(paste0("is_schornsteinfeger_x_", ATTRIBUTES),
-                        paste0("is_energieberater_x_", ATTRIBUTES))
+# The effects of the attributes for the SHK-Handwerk and the
+# Schornsteinfeger, as differences to the Energieberater
+GROUP_X_ATTRIBUTES <- c(paste0("is_shk_x_", ATTRIBUTES),
+                        paste0("is_schornsteinfeger_x_", ATTRIBUTES))
 
 # Each technology's price per kWh, with one coefficient, and its dummy for a
 # price not reported
