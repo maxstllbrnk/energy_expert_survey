@@ -92,13 +92,13 @@ PROJECT (this folder, on GitHub)
     03_run_all_specifications.R
                                 runs 03_rc_logit_with_ame.R for both Fernwärme arms and two
                                 reference outcomes
-  R/analysis/                 mixed logit specifications beyond the policy brief: how do the
+  R/analysis/                 mixed logit models beyond the policy brief: how do the
                               recommendations differ across experts?
-    00_functions_estimation.R   data in mlogit's format, estimation, covariance matrix, AMEs,
-                                fit, LR tests
-    00_functions_output.R       LaTeX tables, AME figures, heat maps, Excel
-    01_run_specifications.R     settings, data and the specifications; estimates and saves each
-    02_output.R                 tables, figures and Excel from the saved results
+    00_functions_estimation.R   estimation, covariance matrix, AMEs with Krinsky-Robb
+                                standard errors, fit
+    00_functions_output.R       LaTeX tables, AME figures, heat maps, Excel (being reworked)
+    01_run_specifications.R     settings, data and the models; estimates and saves each
+    02_output.R                 tables, figures and Excel from the saved results (being reworked)
   R/geodata/
     build_plz_bundesland.R      run ONCE: downloads and builds the postcode lookup
   tests/selftest.R            checks on the cleaned output
@@ -833,340 +833,228 @@ are set at the top of `03_rc_logit_with_ame.R`. `mlogit` is attached in
 
 `R/analysis/` takes the logit models of the policy brief further: how do the
 recommendations differ across experts, and in particular across Berufsgruppen?
-Every specification is a mixed logit of the recommended technology (`vig_rec`)
-on the vignette attributes in which some coefficients vary across experts — so
-far the constants (alternative-specific constants), normally distributed. It is
-estimated by simulated maximum likelihood with `mlogit` (Train 2009, chapters 6
-and 10), together with a multinomial logit with the same regressors. All
-outputs are in English.
+Every model is a mixed logit of the recommended technology (`vig_rec`) on the
+vignette attributes whose constants (alternative-specific constants) vary
+across experts, normal and correlated. It is estimated by simulated maximum
+likelihood with `mlogit` (Train 2009, chapters 6 and 10). All outputs are in
+English.
 
 ```r
-source("R/analysis/01_run_specifications.R")   # estimates every specification; slow
-source("R/analysis/02_output.R")               # tables, figures, Excel; a few minutes
+source("R/analysis/01_run_specifications.R")   # estimates the models; slow
 ```
 
 | Script | What it does |
 |---|---|
-| `00_functions_estimation.R` | the functions: data in mlogit's format, the translation of a specification into mlogit's formula and arguments, estimation, cluster-robust covariance matrix, AMEs with Krinsky–Robb standard errors, fit, LR tests. They generalise those of `R/first_policy_brief/03_rc_logit_with_ame.R`: a function with a counterpart there names its section, and every difference is marked `Generalisation:` |
-| `00_functions_output.R` | the functions for the LaTeX tables, AME figures, heat maps and the Excel workbook |
-| `01_run_specifications.R` | settings, data and the specifications; estimates each and saves its results |
-| `02_output.R` | tables, figures and Excel from the saved results, without the data; all labels are set at its top |
+| `00_functions_estimation.R` | the functions: estimation (with the starting values of the models by Berufsgruppe), covariance matrix clustered by expert, probabilities and AMEs with Krinsky–Robb standard errors, fit |
+| `01_run_specifications.R` | settings, data and the models; estimates each, saves the model to the secure drive and its aggregate results to Dropbox |
+| `00_functions_output.R`, `02_output.R` | tables, figures and Excel. They still expect the results of the earlier, larger version of `01_run_specifications.R` (commit `93010be`) and are being reworked |
 
-`02_output.R` reads only the aggregate results, not the fitted models or the
-data. Like every script, it sources `config.R`, which stops if the secure paths
-do not exist.
+### The models
 
-### The specifications
-
-| | Name | Random constants | Further regressors | Correlation of the constants |
+| | Name | Constants | Further regressors | Prices |
 |---|---|---|---|---|
-| (1) | `asc_uncorrelated` | one per technology | — | none |
-| (2) | `asc_correlated` | one per technology | — | full covariance matrix |
-| (3) | `asc_uncorrelated_berufsgruppe` | one per technology | Berufsgruppe | none |
-| (4) | `asc_correlated_berufsgruppe` | one per technology | Berufsgruppe | full covariance matrix |
-| (5) | `asc_by_group_uncorrelated` | one per technology and Berufsgruppe | — | none |
-| (6) | `asc_by_group_correlated` | one per technology and Berufsgruppe | — | within each Berufsgruppe |
-| (3i)–(6i) | (3)–(6) with `_interactions` | as (3)–(6) | as (3)–(6), and Berufsgruppe × attributes | as (3)–(6) |
-| (1p)–(6p) | (1)–(6) with `_prices` | as (1)–(6) | as (1)–(6), and the energy prices | as (1)–(6) |
-| (3pg)–(6pg) | (3)–(6) with `_prices_by_group` | as (3)–(6) | as (3)–(6), and the energy prices with one coefficient per Berufsgruppe | as (3)–(6) |
+| (2) | `m2` | one set for all experts, full covariance matrix | — | — |
+| (4) | `m4` | one set for all experts, full covariance matrix | Berufsgruppe | — |
+| (6) | `m6` | one set per Berufsgruppe, a covariance matrix within each | — | — |
+| (4i) | `m4i` | as (4) | Berufsgruppe, Berufsgruppe × attributes | — |
+| (6i) | `m6i` | as (6) | Berufsgruppe × attributes | — |
+| (4p) | `m4p` | as (4) | Berufsgruppe | yes |
+| (6p) | `m6p` | as (6) | — | yes |
+| (4ip) | `m4ip` | as (4) | Berufsgruppe, Berufsgruppe × attributes | yes |
 
-All have the seven vignette attributes as regressors, with one fixed coefficient
-per technology, as in the policy brief. Specifications (1) and (2) are the
-policy brief's `mixed` and `mixed_corr`, on the sample below. In (3) and (4)
-the Berufsgruppe shifts the means of the constants (reference category:
-SHK-Handwerk), with one covariance matrix for all. In (5) and (6) every
-Berufsgruppe has its own means and (co)variances. Every expert belongs to one
-Berufsgruppe, so the covariances between two groups' constants never enter the
-likelihood: in (6) they are set to zero as a normalisation, not as an
-assumption (the Cholesky elements that link two groups are fixed through
-`constPar`).
+(4) is the main specification; (6), (4i), (6i) and (2) are kept as
+alternatives (project team, October 2026). The numbers are those of the
+earlier version, whose other specifications (uncorrelated constants, (1), (3)
+and (5), and prices with one coefficient per Berufsgruppe) are in commit
+`93010be`.
 
-(3i) to (6i) let the effect of every attribute differ by Berufsgruppe: 16
-interactions (the two Berufsgruppen besides the SHK-Handwerk times the eight
-attribute levels besides the reference levels), each with one coefficient per
-technology. An interaction is only meaningful next to the Berufsgruppe's main
-effect, as in (3) and (4), or its group constants, as in (5) and (6), which is
-why (1) and (2) have no such variant. In (5i) and (6i) the Berufsgruppen share
-no parameter, so each is a separate model per Berufsgruppe, estimated together.
-A Berufsgruppe's interactions rest on its experts alone, so those of a small
-Berufsgruppe are estimated imprecisely (`01_run_specifications.R` prints the
-experts per Berufsgruppe).
+All have the eight attribute dummies as regressors, with one fixed coefficient
+per technology, as in the policy brief. In (4) the Berufsgruppe shifts the
+means of the constants (reference category: SHK-Handwerk), with one covariance
+matrix for all. In (6) every Berufsgruppe has its own means and covariance
+matrix. Every expert belongs to one Berufsgruppe, so the covariances between
+two groups' constants never enter the likelihood: they are set to zero as a
+normalisation, not as an assumption (the Cholesky elements that link two
+groups are fixed through `constPar`).
 
-(1p) to (6p) add the price per kWh of each technology, from the energy prices
-the expert reported (Q15), with the rules of
-`05_rc_logit_explore_heterogeneity.R` for answers in euro, per litre or per kg
-and for unusable answers, except that pellet answers of 20 to 70 (not 10 to
-100) are read as cent per kg, so that answers per kWh stay per kWh. Gas, oil and pellets are priced per kWh of fuel,
-district heating per kWh of heat. The heat pump's price is the electricity
-price divided by the COP, a price per kWh of heat; the hybrid heating's is the
-weighted average of the gas price (weight `HYBRID_GAS_SHARE`) and the heat
-pump's. Prices are centred at
-the mean over the experts; a price not reported is set to the mean and gets a
-dummy. Each technology's price enters its own utility (also the reference
-outcome's), with one coefficient for all technologies, so the prices come
-before the `|` of `mlogit`'s formula; the dummies have one coefficient per
-technology. (3pg) to (6pg) give the price one coefficient per Berufsgruppe;
-as with the interactions, only next to the Berufsgruppe's main effect or its
-group constants. The AMEs are for an expert who reported the mean prices. The
-settings are in section 1 of `01_run_specifications.R`, the terms in
-`PRICE_TERMS`.
+(4i) and (6i) let the effect of every attribute differ by Berufsgruppe: 16
+interactions (the Schornsteinfeger and the Energieberater times the eight
+attribute dummies), each with one coefficient per technology, the difference
+to the SHK-Handwerk. In (6i) the Berufsgruppen share no parameter, so it is a
+separate model per Berufsgruppe, estimated together. A Berufsgruppe's
+interactions rest on its experts alone, so those of a small Berufsgruppe are
+estimated imprecisely (the script prints the experts per Berufsgruppe).
 
-### Writing a specification
+(4p), (6p) and (4ip) add the price per kWh of each technology, from the energy
+prices the expert reported (Q15). Answers in euro, per litre (oil) or per kg
+(pellets) are converted, and answers more than three times above or below the
+median of their fuel count as not reported (the rules and bounds are in
+section 1 of `01_run_specifications.R`). Gas, oil and pellets are priced per
+kWh of fuel, district heating per kWh of heat. The heat pump's price is the
+electricity price divided by the COP, a price per kWh of heat; the hybrid
+heating's is the weighted average of the gas price (weight `HYBRID_GAS_SHARE`)
+and the heat pump's. Prices are centred at the mean over the experts; a price
+not reported is set to the mean and gets a dummy. Each technology's price
+enters its own utility (also the reference outcome's), with one coefficient
+for all technologies, so the prices come before the `|` of `mlogit`'s formula;
+the dummies have one coefficient per technology. The AMEs are for an expert
+who reported the mean prices.
 
-Each specification is one entry of `SPECIFICATIONS` in section 3 of
-`01_run_specifications.R` and states its model in full, e.g. (6):
+### Writing a model
+
+Each model is one entry of `MODELS` in section 3 of
+`01_run_specifications.R`, e.g. (6):
 
 ```r
-asc_by_group_correlated = list(
+m6 = list(
   label = "Random constants by occupational group, correlated",
-  constants = BERUFSGRUPPE_CONSTANTS,
+  constants = GROUP_CONSTANTS,
   regressors = ATTRIBUTES,
-  random = c(is_shk = "n", is_schornsteinfeger = "n", is_energieberater = "n"),
-  correlation = list("is_shk", "is_schornsteinfeger", "is_energieberater"),
-  draws = "halton_by_group"
+  prices = character(0),
+  start_from = "m4"
 )
 ```
 
 | Element | Values |
 |---|---|
 | `label` | name in tables and figures |
-| `constants` | `"1"`: one constant per technology for all experts, the term `"(Intercept)"`; or 0/1 group dummies that sum to one for every expert, e.g. `BERUFSGRUPPE_CONSTANTS` (`is_shk`, `is_schornsteinfeger`, `is_energieberater`): one constant per technology and group, each group's a term named as its dummy |
-| `regressors` | terms with one coefficient per technology: a variable (a factor gets one per level but the first) or an interaction `"a:b"` |
-| `random` | the terms whose coefficients vary across experts, each with its distribution: `"n"` normal, `"ln"` log-normal, `"cn"` censored normal, `"u"` uniform, `"t"` triangular. All other coefficients are fixed |
-| `correlation` | `"none"`, `"full"`, or a list of blocks of random terms: correlated within a block, independent across blocks |
-| `draws` | `"halton"` or `"halton_by_group"`, see below |
-| `prices` | optional: terms of `PRICE_TERMS`, each with one fixed coefficient: `PRICES` (one price coefficient) or `PRICES_BY_GROUP` (one per Berufsgruppe), both with the dummies |
+| `constants` | `"(Intercept)"`: one constant per technology for all experts; `GROUP_CONSTANTS` (`is_shk`, `is_schornsteinfeger`, `is_energieberater`): one per technology and Berufsgruppe |
+| `regressors` | variables of the decisions, each with one coefficient per technology |
+| `prices` | `PRICES` (each technology's price with one coefficient, and the dummies for a price not reported), or `character(0)` |
+| `start_from` | for constants by Berufsgruppe: the model with one set of constants whose estimates are the starting values (see below) |
 
-The building blocks `ATTRIBUTES`, `BERUFSGRUPPE_X_ATTRIBUTES` and
-`BERUFSGRUPPE_CONSTANTS` are written out above the list, one term per line, so
-a regressor or an interaction is added or removed by adding or deleting a line,
-there or in a specification. `check_specification()` stops with a message when
-the elements do not fit together: a random term that is not in the
-specification, correlation blocks that do not hold every random term once, a
-block with two Berufsgruppen's constants, a uniform coefficient with
-correlation, `a * b` instead of the three regressors `a`, `b` and `a:b`.
+The building blocks `ATTRIBUTES`, `GROUP_SHIFTS`, `GROUP_CONSTANTS` and
+`GROUP_X_ATTRIBUTES` are written out above the list, so a regressor is added
+or removed by adding or deleting a line. The regressors are 0/1 variables that
+`add_regressors()` (section 2.3) builds from the attributes and the
+Berufsgruppe: one dummy per attribute level besides the reference level
+(`REFERENCE_LEVELS` and `ATTRIBUTE_DUMMIES` in section 1), the group dummies,
+and the interactions `is_<group>_x_<dummy>`. The vignettes of the AMEs go
+through the same function, so a variable built there needs nothing else. A
+variable joined from elsewhere (e.g. from `survey_main` in section 2.1) also
+needs a value in the AME vignettes (section 4.4), e.g. its sample mean. Before
+the first estimation, the script checks every model: its columns exist and are
+linearly independent, its prices are price terms, and the model it starts from
+has one set of constants. To run only some models, list them in
+`MODELS_TO_RUN`; the others keep their saved results.
 
-**Interactions.** Write `"berufsgruppe:att_income"` as in an R formula and list
-`att_income` as well, and for the Berufsgruppe its main effect or its group
-constants. R codes the interaction with one column per Berufsgruppe but the
-reference and income level but the reference; its coefficients are the
-differences in the effect of the low income between that Berufsgruppe and the
-SHK-Handwerk. `mlogit` 2.0 cannot take `a:b` itself: it cuts each coefficient
-name at its `:` and keeps two parts, so the coefficients of an interaction of
-two factors would share their names. `interaction_columns()` therefore writes
-each column as a product, `I((berufsgruppe == "Schornsteinfeger") * (att_income
-== "unter 40.000 € brutto im Jahr"))`. It is the same column as R's own (checked
-on simulated data), and the output labels it by its parts: "Chimney sweep ×
-Income below €40,000". Each interaction needs a factor or a numeric variable on
-both sides.
+### Starting values of the models by Berufsgruppe
 
-**Random coefficients.** `random = c("(Intercept)" = "n", att_income = "n")`
-lets the effect of the low income vary across experts too: one random
-coefficient per technology. With `correlation = list("(Intercept)",
-"att_income")`, the constants are correlated with each other and so are the
-income effects, but the constants are not correlated with the income effects;
-the Cholesky elements that link two blocks are fixed at zero through
-`constPar`. The AMEs draw every random coefficient from its estimated
-distribution, transformed exactly as `mlogit` does (`coefficient_draws()`,
-checked against `mlogit`'s `make.beta()`). `mlogit` transforms correlated
-coefficients only if they are log-normal or censored normal, so uniform and
-triangular ones are allowed only with `correlation = "none"`. A log-normal
-coefficient is positive for every expert, a censored normal one never negative.
-`mlogit` starts a log-normal coefficient at the log of its multinomial-logit
-estimate, so the script stops if that estimate is not positive for every
-technology. On simulated data, a censored normal effect of the oil heating, in
-a correlation block of its own, did not converge (code 3 after 108
-iterations): with a true effect of zero for most technologies, such a
-coefficient is poorly identified.
+`mlogit` starts the means at multinomial-logit estimates and every element of
+the Cholesky factor L of the covariance matrix at 0.1, also those off the
+diagonal. In every Berufsgruppe's block of (6), that is a set of constants with
+small variances and correlations close to one, far from the estimates. (6),
+(6i) and (6p) therefore start from (4), (4i) and (4p): each Berufsgruppe gets
+the constants of the common model plus its shift, and the common model's
+Cholesky factor as its block of L; the attributes, interactions and prices
+keep their values (`start_from_common()`). At these values (6) predicts
+exactly what (4) predicts, for every expert, so it starts at the maximum of
+(4) and can only improve on it. The script prints both log-likelihoods and
+stops if they differ, e.g. because the saved (4) comes from an earlier run on
+other data or with other draws; (4) must then be estimated again, before (6)
+in `MODELS_TO_RUN`. If the estimation stops with code 3 (no better point
+along the search direction), it restarts from the last iterate, at most three
+times. On simulated data (340 experts, 100 draws per expert), (6) with
+`mlogit`'s default starting values took 95 iterations and stopped 1.1 log
+points below the maximum that the new starting values reached in 53.
 
 ### Sample
 
-All specifications are estimated on the same sample, so that their
-log-likelihoods can be compared: the completers of one Fernwärme arm
-(`SELECTED_FW_ARM`) with one of the three Berufsgruppen. This drops "Keine
-Zuordnung" and the experts who did not answer Q2, which the policy brief kept.
-Vignettes without a recommendation are dropped too, visibly; in the policy
-brief `mlogit` dropped them without notice. The script prints the experts and
+All models are estimated on the same sample, so that their log-likelihoods can
+be compared: the completers of one Fernwärme arm (`SELECTED_FW_ARM`) with one
+of the three Berufsgruppen. This drops "Keine Zuordnung" and the experts who
+did not answer Q2, which the policy brief kept. Vignettes without a
+recommendation are dropped too, visibly. The script prints the experts and
 vignettes in the arm, those dropped for lack of a Berufsgruppe, the number of
 vignettes without a recommendation, and the estimation sample by Berufsgruppe.
-A missing value in a variable that a specification uses stops the script
-instead of shrinking the sample: restrict the sample visibly in section 2.2.
+A missing value in a variable of the models stops the script instead of
+shrinking the sample: restrict the sample visibly in section 2.2.
 
 ### Halton draws
 
-`mlogit` gives every random coefficient its own Halton prime, in the order of the
-coefficients: 2, 3, 5, ... With one set of six constants per Berufsgruppe, the
-last group (the Energieberater) gets the primes 41 to 61, whose Halton sequences
-cover the unit cube unevenly unless very many draws are used (Train 2009,
-section 9.3.3). On simulated data with 400 draws per expert, these draws gave
-an expert's simulated log-likelihood twice the error of pseudo-random draws.
-An expert's utility contains only the constants of their own Berufsgruppe, so
-with `draws = "halton_by_group"` the primes start again at 2 for each
-Berufsgruppe's constants; random coefficients that every expert has, such as a
-random income effect, take the primes after them. That cut the error by about
-three quarters, and it gives every expert the same draws in the nested
-specifications, so that their log-likelihoods differ by less simulation noise.
-`check_specification()` allows it only where no expert's utility depends on
-the draws of another group: each group's constants must be uncorrelated with
-everything outside the group.
+`mlogit` gives every random coefficient its own Halton prime, in the order of
+the coefficients: 2, 3, 5, ... With one set of six constants per Berufsgruppe,
+the last group would get the primes 41 to 61, whose Halton sequences cover the
+unit cube unevenly unless very many draws are used (Train 2009, section
+9.3.3). An expert's utility contains only the constants of their own
+Berufsgruppe, so the primes start again at 2 for each Berufsgruppe. Every
+expert then gets the same draws in (4) and (6), which is what makes the
+starting values above reproduce the log-likelihood of (4).
 
-### What the scripts report
+The order of the random constants follows the order of the outcomes. The data
+in `mlogit`'s format list the outcomes alphabetically, as `dfidx()` does with
+the wide data of the policy brief and of the earlier version of the script,
+with the reference outcome moved to the front. Another order would give each
+constant another prime and change the Cholesky parameters, so estimates would
+differ from earlier runs by simulation error.
 
-- **Coefficients**, with standard errors clustered by expert (sandwich, with
-  G/(G − 1)), and the standard deviations and correlations of the random
-  coefficients with delta-method standard errors, as in the policy brief. For a
-  log-normal or censored normal coefficient these are the mean and standard
-  deviation of the normal before the transformation, for a uniform or
-  triangular one its mean and the half-width of its range; the tables say so.
-- **AMEs** at the reference vignette, with Krinsky–Robb standard errors and
-  percentile intervals, as in the policy brief. A specification with
-  Berufsgruppe has them for each Berufsgruppe (the profiles in `AME_PROFILES`),
-  the others for all experts. In (3i) to (6i) they include the interactions of
-  the profile's Berufsgruppe.
-- **Fit**: McFadden R² and LR tests against the constants-only model and
-  against the multinomial logit, as in the policy brief; AIC and BIC (with the
-  number of experts as N) to compare specifications that are not nested.
-- **LR tests between nested specifications**, classical and robust:
+### What the script saves
 
-| Test | Restrictions | What it asks |
-|---|---|---|
-| (1) against (2) | `correlations` | are the constants correlated? |
-| (1) against (3), (2) against (4) | `regressors` | do the means of the constants differ by Berufsgruppe? |
-| (3) against (5) | `group_covariances` | ... and their standard deviations? |
-| (4) against (6) | `group_covariances` | ... and their covariance matrices? |
-| (5) against (6) | `correlations` | are the constants correlated within the Berufsgruppen? |
-| (3) against (3i), (4) against (4i), (5) against (5i), (6) against (6i) | `regressors` | do the effects of the attributes differ by Berufsgruppe? |
-| (3i) against (5i), (4i) against (6i), (5i) against (6i) | as above | the tests of the constants, with the interactions |
+For each model, `results/<model>.rds` in
+`output_dropbox/rc_logit_heterogeneity/rc_logit_<arm>_ref_<outcome>/`
+(aggregates only):
 
-The classical p-value compares LR = 2 (log L₁ − log L₀) with the χ²
-distribution with as many degrees of freedom as the more general model has
-more parameters. That holds only if the model is correctly specified, which the
-cluster-robust standard errors do not assume. The robust p-value drops that
-assumption too (Kent 1982, *Biometrika* 69; White 1982, *Econometrica* 50):
-under the restrictions, LR is then approximately distributed as a weighted sum
-of independent χ²₁ variables, Σ λᵢ χ²₁, whose weights λᵢ are the eigenvalues
-of (R H⁻¹ R′)⁻¹ (R V R′). H⁻¹ is the inverse Hessian and V the cluster-robust
-covariance matrix of the more general model, and R the derivative of the
-restrictions. If the model is correctly specified, every weight is 1 in large
-samples and the two p-values agree. The Excel sheet shows the mean weight, a
-rough guide: above 1, the classical test tends to reject too often. The robust
-p-value is simulated with 1,000,000 draws; 0 means below one in a million.
-The LR test against the multinomial logit in the coefficient tables stays
-classical, as in the policy brief.
+- **Coefficients** with standard errors clustered by expert (sandwich with
+  G/(G − 1); the Hessian by numerical differences of `mlogit`'s gradient), z
+  and p; the covariance matrix and the inverse Hessian.
+- **Krinsky–Robb draws**: `n_draws_kr` draws of the parameters from N(θ̂, V).
+  The same draws give the standard errors of everything that is a nonlinear
+  function of the parameters.
+- **Standard deviations and correlations of the constants**, with
+  Krinsky–Robb standard errors and percentile intervals, like every other
+  quantity that is a nonlinear function of the parameters (decided October
+  2026; the earlier version used the delta method). Unlike delta-method
+  intervals, the percentile intervals stay within the bounds (a standard
+  deviation above 0, a correlation between −1 and 1) and show skewness, which
+  matters most in the smaller Berufsgruppen. Whether the constants vary at all
+  (standard deviation 0) is a question for a likelihood-ratio test, not for a
+  standard error: 0 lies on the boundary of the parameter space.
+- **AMEs** at the reference vignette, with Krinsky–Robb standard errors, normal
+  and percentile intervals, and the probabilities at the reference vignette. A
+  model with Berufsgruppe has them for each Berufsgruppe, (2) for all experts.
+  In (4i) and (6i) they include the interactions of the profile's Berufsgruppe.
+  The probabilities at every Krinsky–Robb draw are saved too, so that
+  differences between Berufsgruppen can be tested without rerunning.
+- **Fit**: log-likelihood, McFadden R², AIC and BIC (with the number of experts
+  as N).
 
-**Small Berufsgruppen.** The variance of a parameter that only one Berufsgruppe
-identifies, such as its (co)variances in (5) and (6) or its interactions in
-(3i) to (6i), is clustered over that group's experts alone, and the
-cluster-robust estimate is biased downward when they are few. The weights of
-the tests that involve such parameters can then fall below 1 although the
-model is correctly specified, and their robust p-values come out too small. On
-simulated data from such a correctly specified model, with about 60 experts in
-the smallest group, the mean weights were 0.7 and 0.8. Read these tests with
-the size of the smallest Berufsgruppe in mind (`01_run_specifications.R`
-prints it).
-
-Each test is a row of `LR_TEST_PAIRS` at the top of `02_output.R`. Its
-`restrictions` say how the restricted specification sits in the more general
-one, in the latter's coefficients (several are joined with `" + "`):
-
-| Restriction | Sets to zero |
-|---|---|
-| `regressors` | the coefficients of the regressors that the restricted specification lacks |
-| `correlations` | the Cholesky elements off the diagonal, i.e. the correlations |
-| `group_covariances` | the differences between the Berufsgruppen's (co)variances of the constants |
-
-The restrictions must account for exactly the difference in the number of
-parameters; otherwise the script stops. A test is valid only if both
-specifications use the same sample and give every expert the same draws: the
-script checks both, so a rerun of some specifications with other draws stops
-the test rather than comparing log-likelihoods simulated differently.
-
-### Output
-
-| File | Contents |
-|---|---|
-| `results/<specification>.rds` | the aggregate results of a specification: the specification and its terms, coefficients, covariance matrices and inverse Hessians, coefficient table, AMEs, fit, settings and date. `02_output.R` reads these |
-| `tables/tab_<specification>.tex` | one LaTeX table per mixed logit, as in the policy brief. The rows of the interactions are left out (`HIDE_INTERACTIONS` in `02_output.R`), and so are the correlations of (6) and (6i), which would run over a page; both are in the Excel workbook, the correlations also in the heat maps |
-| `tables/tab_comparison.tex`, `tables/tab_comparison_interactions.tex` | the specifications of each entry of `COMPARISONS` side by side, with the LR tests that involve them |
-| `figures/fig_ame_<specification>_<outcome>.svg` | the AMEs by Berufsgruppe, for the specifications with Berufsgruppe |
-| `figures/fig_ame_<comparison>_<profile>_<outcome>.svg` | the AMEs of one profile across the specifications of a comparison |
-| `figures/fig_correlation_<specification>[_<block>].svg` | heat maps of the standard deviations and correlations, one per correlation block |
-| `excel/rc_logit_results.xlsx` | one sheet each: the specifications (with their elements as written in `01_run_specifications.R`), and the coefficients (labelled), marginal effects, fit and LR tests of all |
-
-They are written to `output_dropbox/rc_logit_heterogeneity/rc_logit_<arm>_ref_<outcome>/`;
-the folder name keeps the reference outcome as in the data, as the policy brief
-does (`rc_logit_fw_ref_waermepumpe`). The fitted models contain the estimation
-data, one row per expert and vignette, so they go to the secure drive instead,
-`rc_logit_models/rc_logit_<arm>_ref_<outcome>/` next to the cleaned data. The
-LaTeX tables need `\usepackage[T1]{fontenc}`, `booktabs` and `threeparttable`.
-
-### Changing things
-
-- **A specification:** add or edit an entry of `SPECIFICATIONS`. To rerun only
-  some, list them in `SPECIFICATIONS_TO_RUN`; the others keep their saved
-  results. A specification that is rerun loses its old results first, so that
-  `02_output.R` cannot show them as current if the run fails. To report it, give
-  it a number in `SPECIFICATION_NUMBERS` of `02_output.R`; results without a
-  number are listed there as not reported.
-- **A regressor or an interaction:** add or delete its line in `ATTRIBUTES`,
-  `BERUFSGRUPPE_X_ATTRIBUTES` or the `regressors` of a specification. A new
-  column of the design matrix needs a label in `TERM_LABELS` of `02_output.R`
-  (an interaction's columns are labelled from their parts), a new expert
-  variable one in `VARIABLE_LABELS`.
-- **A random coefficient:** add its term and distribution to `random`, and to a
-  block if `correlation` is a list.
-- **An expert characteristic:** add it to `experts` in section 2.1 of
-  `01_run_specifications.R` (one row per expert, joined by `resp_uid`), add it to
-  the `regressors` of a specification, and give it a value in `AME_PROFILES`,
-  e.g. its sample mean, at which the AMEs are evaluated.
-- **The arm or the reference outcome:** `SELECTED_FW_ARM` and `REFERENCE_OUTCOME`
-  at the top of both scripts, or `RUN_SETTINGS` from a runner, as with the
-  policy brief. Each combination writes its own folder.
-- **An LR test:** add a row to `LR_TEST_PAIRS`; **a comparison:** an entry of
-  `COMPARISONS` (at most six specifications); **a label:** section 1 of
-  `02_output.R`.
-
-Results saved by the version of `01_run_specifications.R` before the
-interactions and English outputs lack what `02_output.R` now needs: it stops and
-asks to rerun them.
+The fitted model contains the estimation data, one row per expert and vignette,
+so it goes to the secure drive instead,
+`rc_logit_models/rc_logit_<arm>_ref_<outcome>/<model>.rds` next to the cleaned
+data. The formula is saved in the results as text, because a formula object
+carries the environment it was made in.
 
 ### Checks
 
-`01_run_specifications.R` stops a specification, records the error, and moves on
-to the next if a check fails: a design matrix with a column that is zero in
-every decision or with linearly dependent columns, coefficient names that do not
-match mlogit's, a model that has not converged or does not use every choice
-situation, a re-evaluated gradient that differs from the stored one, a
-numerical Hessian that is not positive definite, a Cholesky factor that does
-not reproduce mlogit's covariance matrix, MNL probabilities that differ from
-mlogit's, or AMEs that do not sum to zero. It also prints:
-- the formula as `mlogit` received it, each interaction as its products; the
-  random coefficients by term, with their distribution, correlation block and
-  Halton primes; and the number of parameters;
-- the convergence code and the largest element of the gradient;
-- the smallest eigenvalue of the covariance matrix of each correlation block.
-  Close to zero, the matrix is nearly singular, as can happen in a small
-  Berufsgruppe, and its standard deviations, correlations and LR tests are
-  unreliable;
-- for random coefficients that are not normal, the gap between the mean of
-  their simulated draws and mlogit's formula for it;
-- how much other draws change the AMEs, and the ratio of the delta-method to
-  the Krinsky–Robb standard errors, as in the policy brief.
+The script stops before the first estimation if an attribute has a value that
+is neither its reference level nor one of its dummies (a different spelling
+would otherwise count as the reference level), a variable of the models has a
+missing value, a recommendation is never chosen, a price dummy is the same for
+every expert, a model's columns are linearly dependent, or `MODELS_TO_RUN`
+lists a model before the model it starts from. For each model it stops,
+records the error and moves on to the next if the starting values do not
+reproduce the common model's log-likelihood, the model has not converged or
+does not use every choice situation, its parameters are not one per column of
+the design matrix and technology plus the prices and the elements of L (the
+AMEs would ignore a coefficient), the Cholesky factor that the AMEs use does
+not reproduce `mlogit`'s covariance matrix of the constants, a re-evaluated
+gradient differs from the stored one, the numerical Hessian is not positive
+definite, or the probabilities do not sum to one. It prints the formula, the
+number of parameters, the convergence code, the largest element of the
+gradient and the log-likelihood. Convergence code 2 (successive
+log-likelihoods within tolerance) counts as converged; read the largest
+gradient element for (6), (6i) and (6p).
 
 ### Runtime
 
-The draws are set at the top of `01_run_specifications.R`; the policy brief
-used 2,000 Halton draws per expert, 100,000 draws for the AMEs and 10,000
-Krinsky–Robb draws. Two steps take most of the time. The estimation and the
-numerical Hessian of the mixed logits grow with the number of parameters, the
-random ones above all, and in proportion to the number of experts times the
-draws per expert. On simulated data with 388 experts and 200 draws per expert
-(several runs side by side on one machine), they took about 7 minutes for (1),
-8 for (3), 21 for (3i), 43 for (6) and 66 for (6i), whose 225 parameters need
-450 evaluations of the gradient for the Hessian alone. The Krinsky–Robb
-standard errors grow with the number of profiles and with the AME draws: one
-evaluation of the AMEs takes about half a second to a second with 100,000
-draws, so each profile needs one and a half to three hours with 10,000
-Krinsky–Robb draws, and a specification with three Berufsgruppen up to about
-nine. For a first look, lower `n_draws_ame` and `n_draws_kr`, and list only
-some specifications in `SPECIFICATIONS_TO_RUN`.
+The draws are set at the top of `01_run_specifications.R`: 1,000 Halton draws
+per expert, 100,000 draws for the AMEs and 5,000 Krinsky–Robb draws, so that
+each 2.5% tail of a percentile interval rests on 125 draws. The estimation and
+the numerical Hessian grow with the number of parameters and with the number
+of experts times the draws per expert; the Hessian of a model with K
+parameters needs 2K evaluations of the gradient. The Krinsky–Robb step grows
+with the number of profiles and with both kinds of draws: one evaluation of
+the AMEs takes about 0.4 seconds with 100,000 draws, so a model with three
+Berufsgruppen needs about 1.5 hours for it, (2) about half an hour, and all
+eight models about 12 hours, on top of the estimation. For a first look, lower
+`n_draws_ame` and `n_draws_kr`, and list only some models in `MODELS_TO_RUN`.
