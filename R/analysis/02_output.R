@@ -59,7 +59,17 @@ SPECIFICATION_NUMBERS <- c(
   asc_uncorrelated_berufsgruppe_interactions = "(3i)",
   asc_correlated_berufsgruppe_interactions = "(4i)",
   asc_by_group_uncorrelated_interactions = "(5i)",
-  asc_by_group_correlated_interactions = "(6i)"
+  asc_by_group_correlated_interactions = "(6i)",
+  asc_uncorrelated_prices = "(1p)",
+  asc_correlated_prices = "(2p)",
+  asc_uncorrelated_berufsgruppe_prices = "(3p)",
+  asc_correlated_berufsgruppe_prices = "(4p)",
+  asc_by_group_uncorrelated_prices = "(5p)",
+  asc_by_group_correlated_prices = "(6p)",
+  asc_uncorrelated_berufsgruppe_prices_by_group = "(3pg)",
+  asc_correlated_berufsgruppe_prices_by_group = "(4pg)",
+  asc_by_group_uncorrelated_prices_by_group = "(5pg)",
+  asc_by_group_correlated_prices_by_group = "(6pg)"
 )
 
 # Likelihood-ratio tests, classical and robust (lr_tests()). In each pair, the
@@ -104,7 +114,29 @@ LR_TEST_PAIRS <- tribble(
   "asc_correlated_berufsgruppe_interactions",
   "asc_by_group_correlated_interactions",        "group_covariances",
   "asc_by_group_uncorrelated_interactions",
-  "asc_by_group_correlated_interactions",        "correlations"
+  "asc_by_group_correlated_interactions",        "correlations",
+  # do the prices matter?
+  "asc_uncorrelated",
+  "asc_uncorrelated_prices",                     "prices",
+  "asc_correlated",
+  "asc_correlated_prices",                       "prices",
+  "asc_uncorrelated_berufsgruppe",
+  "asc_uncorrelated_berufsgruppe_prices",        "prices",
+  "asc_correlated_berufsgruppe",
+  "asc_correlated_berufsgruppe_prices",          "prices",
+  "asc_by_group_uncorrelated",
+  "asc_by_group_uncorrelated_prices",            "prices",
+  "asc_by_group_correlated",
+  "asc_by_group_correlated_prices",              "prices",
+  # does the price coefficient differ by Berufsgruppe?
+  "asc_uncorrelated_berufsgruppe_prices",
+  "asc_uncorrelated_berufsgruppe_prices_by_group", "price_groups",
+  "asc_correlated_berufsgruppe_prices",
+  "asc_correlated_berufsgruppe_prices_by_group", "price_groups",
+  "asc_by_group_uncorrelated_prices",
+  "asc_by_group_uncorrelated_prices_by_group",   "price_groups",
+  "asc_by_group_correlated_prices",
+  "asc_by_group_correlated_prices_by_group",     "price_groups"
 )
 
 # Comparisons: the specifications side by side in one table, and in one AME
@@ -118,7 +150,29 @@ COMPARISONS <- list(
   comparison_interactions = c("asc_uncorrelated_berufsgruppe_interactions",
                               "asc_correlated_berufsgruppe_interactions",
                               "asc_by_group_uncorrelated_interactions",
-                              "asc_by_group_correlated_interactions")
+                              "asc_by_group_correlated_interactions"),
+  comparison_prices = c("asc_uncorrelated_prices", "asc_correlated_prices",
+                        "asc_uncorrelated_berufsgruppe_prices",
+                        "asc_correlated_berufsgruppe_prices",
+                        "asc_by_group_uncorrelated_prices",
+                        "asc_by_group_correlated_prices"),
+  comparison_prices_by_group = c("asc_uncorrelated_berufsgruppe_prices_by_group",
+                                 "asc_correlated_berufsgruppe_prices_by_group",
+                                 "asc_by_group_uncorrelated_prices_by_group",
+                                 "asc_by_group_correlated_prices_by_group")
+)
+
+# Slides: the price coefficients side by side, one row per specification
+# without prices: its variant with one price coefficient, and the one with a
+# price coefficient per occupational group (NA: none)
+PRICE_COMPARISON <- tribble(
+  ~prices,                                ~prices_by_group,
+  "asc_uncorrelated_prices",              NA_character_,
+  "asc_correlated_prices",                NA_character_,
+  "asc_uncorrelated_berufsgruppe_prices", "asc_uncorrelated_berufsgruppe_prices_by_group",
+  "asc_correlated_berufsgruppe_prices",   "asc_correlated_berufsgruppe_prices_by_group",
+  "asc_by_group_uncorrelated_prices",     "asc_by_group_uncorrelated_prices_by_group",
+  "asc_by_group_correlated_prices",       "asc_by_group_correlated_prices_by_group"
 )
 
 # Labels, in plain text; latex_text() writes them as LaTeX in the tables. The
@@ -206,9 +260,23 @@ GROUP_LABELS <- c(
 )
 
 # Regressors other than the vignette attributes, for the comparison table and
-# the notes; an interaction with an attribute reads "<label> × attributes"
+# the notes; an interaction with an attribute reads "<label> × attributes".
+# "prices" stands for the prices of a specification, "prices_by_group" for
+# prices with one coefficient per occupational group.
 VARIABLE_LABELS <- c(
-  berufsgruppe = "Occupational group"
+  berufsgruppe = "Occupational group",
+  prices = "Energy prices",
+  prices_by_group = "Energy prices by occupational group"
+)
+
+# The price terms by their kind (column kind of PRICE_TERMS in
+# 01_run_specifications.R), and the row of a price with one coefficient for
+# all technologies: tables and Excel. Per kWh of fuel or of heat, depending on
+# the technology: the table notes say which.
+PRICE_LABELS <- c(
+  price = "Price per kWh (cent)",
+  not_reported = "Price not reported",
+  all_technologies = "All technologies"
 )
 
 DISTRIBUTION_LABELS <- c(
@@ -228,6 +296,7 @@ labels <- list(
   profiles = PROFILE_LABELS,
   groups = GROUP_LABELS,
   variables = VARIABLE_LABELS,
+  prices = PRICE_LABELS,
   distributions = DISTRIBUTION_LABELS,
   group_name = "occupational group"
 )
@@ -252,7 +321,11 @@ TABLE_NOTES <- c(
   asc_uncorrelated_berufsgruppe = reference_group_note,
   asc_correlated_berufsgruppe = reference_group_note,
   asc_uncorrelated_berufsgruppe_interactions = reference_group_note,
-  asc_correlated_berufsgruppe_interactions = reference_group_note
+  asc_correlated_berufsgruppe_interactions = reference_group_note,
+  asc_uncorrelated_berufsgruppe_prices = reference_group_note,
+  asc_correlated_berufsgruppe_prices = reference_group_note,
+  asc_uncorrelated_berufsgruppe_prices_by_group = reference_group_note,
+  asc_correlated_berufsgruppe_prices_by_group = reference_group_note
 )
 # The slide tables show the interactions, also those of (5i) and (6i), whose
 # paper tables leave them out: their notes need the reference group as well
@@ -266,7 +339,9 @@ SLIDE_TABLE_NOTES <- c(
 # Berufsgruppe, the table runs over a page. The correlations are in the heat
 # maps and in Excel.
 TABLES_WITHOUT_CORRELATIONS <- c("asc_by_group_correlated",
-                                 "asc_by_group_correlated_interactions")
+                                 "asc_by_group_correlated_interactions",
+                                 "asc_by_group_correlated_prices",
+                                 "asc_by_group_correlated_prices_by_group")
 
 # The coefficient tables leave out the rows of the interactions (regressors
 # "a:b"): the 16 interactions of the Berufsgruppe with the attributes would
@@ -435,14 +510,36 @@ for (comparison_name in names(COMPARISONS)) {
                              paste0("tab_", comparison_name, ".tex")))
 }
 
-# Slide versions of the comparisons: the fit of all specifications in one
-# table, and all LR tests in another, each with a row for those without
-# results
-write_tex(slide_fit_table(results_list, SPECIFICATION_NUMBERS),
-          file.path(output_dirs$slide_tables, "tab_fit.tex"))
-write_tex(slide_lr_table(LR_TEST_PAIRS, lr, results_list, labels,
-                         SPECIFICATION_NUMBERS),
+# Slide versions of the comparisons: the fit of the specifications, and the
+# LR tests, each with a row for those without results. Each comes in two
+# tables, so that each fits a slide: the specifications without prices, and
+# those with prices (their names end in "_prices" or "_prices_by_group"); the
+# LR tests of the prices, and the others. The lowest AIC and BIC are in bold
+# within each fit table.
+is_price_specification <- grepl("_prices", names(SPECIFICATION_NUMBERS))
+numbers_by_table <- list(
+  fit = SPECIFICATION_NUMBERS[!is_price_specification],
+  fit_prices = SPECIFICATION_NUMBERS[is_price_specification]
+)
+for (table_name in names(numbers_by_table)) {
+  numbers_table <- numbers_by_table[[table_name]]
+  results_table <- results_list[intersect(names(numbers_table),
+                                          names(results_list))]
+  write_tex(slide_fit_table(results_table, numbers_table),
+            file.path(output_dirs$slide_tables, paste0("tab_", table_name, ".tex")))
+}
+is_price_test <- LR_TEST_PAIRS$restrictions %in% c("prices", "price_groups")
+write_tex(slide_lr_table(LR_TEST_PAIRS[!is_price_test, ], lr, results_list,
+                         labels, SPECIFICATION_NUMBERS),
           file.path(output_dirs$slide_tables, "tab_lr_tests.tex"))
+write_tex(slide_lr_table(LR_TEST_PAIRS[is_price_test, ], lr, results_list,
+                         labels, SPECIFICATION_NUMBERS),
+          file.path(output_dirs$slide_tables, "tab_lr_tests_prices.tex"))
+
+# The price coefficients across the specifications with prices
+write_tex(slide_price_comparison_table(results_list, PRICE_COMPARISON, labels,
+                                       SPECIFICATION_NUMBERS),
+          file.path(output_dirs$slide_tables, "tab_price_coefficients.tex"))
 
 # 5. Figures: AMEs at the reference vignette -----------------------------------
 # The AMEs of the mixed logits in percentage points, with the 95% Krinsky-Robb
@@ -494,6 +591,9 @@ for (spec_name in names(results_list)) {
   if (length(profiles) < 2) next
   spec_title <- paste(SPECIFICATION_NUMBERS[[spec_name]],
                       results_list[[spec_name]]$specification$label)
+  if (length(results_list[[spec_name]]$specification$prices) > 0) {
+    spec_title <- paste0(spec_title, "; at the mean prices")
+  }
   for (outcome_name in results_list[[spec_name]]$outcomes) {
     plot_data <- spec_data %>%
       filter(outcome == outcome_name) %>%
@@ -545,12 +645,22 @@ for (comparison_name in names(COMPARISONS)) {
     short_labels <- gsub("[()]", "", SPECIFICATION_NUMBERS[specs])
     names(short_labels) <- spec_legend[specs]
     outcomes <- results_list[[specs[1]]]$outcomes
+    # The specifications with prices: their AMEs are at the mean prices
+    profile_title <- PROFILE_LABELS[[profile_name]]
+    prices_text <- ""
+    for (spec_name in specs) {
+      if (length(results_list[[spec_name]]$specification$prices) > 0) {
+        prices_text <- " Specifications with prices: at the mean prices."
+      }
+    }
+    if (prices_text != "") {
+      profile_title <- paste0(profile_title, ".", prices_text)
+    }
     for (outcome_name in outcomes) {
       plot_data <- profile_data %>%
         filter(outcome == outcome_name) %>%
         mutate(group = factor(spec_legend[specification], levels = spec_legend))
-      subtitle <- baseline_subtitle(plot_data, PROFILE_LABELS[[profile_name]],
-                                    short_labels)
+      subtitle <- baseline_subtitle(plot_data, profile_title, short_labels)
       # The labels of the specifications are long: one per line
       plot <- plot_ame(plot_data, TECHNOLOGY_LABELS[[outcome_name]], subtitle) +
         guides(colour = guide_legend(ncol = 1), shape = guide_legend(ncol = 1))
@@ -578,8 +688,8 @@ for (comparison_name in names(COMPARISONS)) {
         paste0(latex_text(TECHNOLOGY_LABELS[[outcome_name]]),
                ": AMEs across specifications, ", PROFILE_LABELS[[profile_name]]),
         c("  \\centering", paste0("  \\includegraphics{", figure_file, "}")),
-        paste0(latex_text(paste(spec_legend[specs], collapse = "; ")), ". ",
-               ame_note_short)
+        paste0(latex_text(paste(spec_legend[specs], collapse = "; ")), ".",
+               prices_text, " ", ame_note_short)
       ))
     }
   }

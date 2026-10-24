@@ -2,14 +2,15 @@
 # 01_run_specifications.R — which heating technology do experts recommend?
 #                           Mixed logit specifications, to study how
 #                           recommendations differ across experts
-# Inputs : survey_main and vignettes_long (CLEAN_DATA_DIR), through
-#          load_analysis_data()
+# Inputs : survey_main (with the energy prices of Q15) and vignettes_long
+#          (CLEAN_DATA_DIR), through load_analysis_data()
 # Outputs: RC_LOGIT_DIR/rc_logit_<arm>_ref_<outcome>/results/<specification>.rds
 #            aggregate results: coefficients, covariance matrices, AMEs, fit
 #          RC_LOGIT_MODEL_DIR/rc_logit_<arm>_ref_<outcome>/<specification>.rds
 #            the fitted models, which contain the data (secure drive)
-# Checks : experts and decisions dropped by each restriction; no missing
-#          values in the estimation variables; the specifications; per
+# Checks : treatment of the reported prices by fuel; experts and decisions
+#          dropped by each restriction; no missing values in the estimation
+#          variables; price terms identified; the specifications; per
 #          specification: a design matrix of full rank, coefficient names,
 #          convergence, estimation sample, and the checks of section 6.5 of
 #          the policy brief script
@@ -28,6 +29,10 @@
 #                                  (section 2), then to the regressors of a
 #                                  specification
 #   rerun some specifications      list them in SPECIFICATIONS_TO_RUN
+#                                  (section 3)
+#   change the energy prices       their settings in section 1 (e.g. the COP
+#                                  and HYBRID_GAS_SHARE), the variables in
+#                                  section 2, the terms in PRICE_TERMS
 #                                  (section 3)
 #
 # Runtime: two steps take most of it. The estimation and numerical Hessian of
@@ -106,6 +111,50 @@ ATTRIBUTE_LEVELS <- list(
   att_heat_distribution = c("Heizkörper", "eine Fußbodenheizung")
 )
 
+# Reported energy prices (Q15), as in 05_rc_logit_explore_heterogeneity.R
+# except the pellet band of (3): what households among the expert's clients paid per kWh of each fuel in
+# January and February 2026, in cent. The question asks experts to leave a
+# field blank if none of their clients uses the fuel; a blank also covers "do
+# not know". Answers in another unit are converted, in this order:
+#   (1) below PRICE_EURO_BELOW: euro instead of cent, times 100
+#   (2) oil within OIL_PER_LITRE (after (1)): cent per litre, divided by 10
+#       (1 l of heating oil is about 10 kWh, as the question says)
+#   (3) pellets within PELLETS_PER_KG (after (1)): cent per kg, divided by 5
+#       (1 kg of pellets is about 5 kWh, as the question says)
+#   (4) an answer more than PRICE_VALID_FACTOR times above or below the median
+#       answer for its fuel cannot be read as a price per kWh: it counts as not
+#       reported, like a blank
+# The bounds are wide on purpose: the survey measures beliefs, so high and low
+# answers are kept. Band of (2): Max, 2026-10-19. Band of (3): pellets cost
+# about 400 euro per tonne, 40 cent per kg; it starts at 20, above plausible
+# answers per kWh (median about 8 cent), so that these stay per kWh (Max,
+# 2026-10-20). PRICE_VALID_FACTOR: first choice, to be confirmed.
+PRICE_FUELS <- c("gas", "hpelec", "dh", "oil", "pellet")
+PRICE_EURO_BELOW <- 1
+OIL_PER_LITRE <- c(40, 140)
+PELLETS_PER_KG <- c(20, 70)
+PRICE_VALID_FACTOR <- 3
+
+# Coefficient of performance of the heat pump: the electricity price divided by
+# it is the price per kWh of heat. The same COP for both heat distributions for
+# now (Max, 2026-10-19). A COP that is the same in every vignette rescales the
+# coefficient of the heat pump's price, but it also sets the weight of the
+# electricity price in the hybrid's price, and so changes the hybrid's
+# coefficient. Different values make the price of heat differ between
+# vignettes. The price is centred before it is divided: the part this leaves
+# out, the mean price divided by the COP, differs only with the heat
+# distribution, so the coefficients of att_heat_distribution take it up, and
+# the AME of underfloor heating includes it.
+COP <- c(radiators = 3, floor_heating = 3)
+
+# Hybrid heating: its price per kWh is the weighted average of the gas price
+# and the heat pump's price per kWh of heat (the electricity price divided by
+# the COP). HYBRID_GAS_SHARE is the weight of the gas price, the share of the
+# heat that the gas boiler supplies; the heat pump supplies the rest. 0.5 is a
+# placeholder (Max, 2026-10-20).
+HYBRID_GAS_SHARE <- 0.5
+stopifnot(HYBRID_GAS_SHARE >= 0, HYBRID_GAS_SHARE <= 1, all(COP > 0))
+
 # 2. Data ----------------------------------------------------------------------
 analysis_data <- load_analysis_data(completers_only = TRUE)
 experts_all <- analysis_data$main
@@ -115,8 +164,75 @@ vignettes_all <- analysis_data$vignettes
 # One row per expert. Add expert-level variables here, e.g. from survey_main or
 # from regional data joined by nuts3; the join below brings them to the
 # decisions, where a specification can use them as regressors.
+
+# Reported prices, with the rules of section 1. The median and the mean of
+# each fuel are taken over the experts of the three Berufsgruppen in both
+# arms, so that every arm and reference outcome uses the same reference
+# prices. price_<fuel>_na is 1 if the price is blank or not usable;
+# price_<fuel>_c is the price minus the mean, 0 if not reported (the dummy
+# then captures the difference to an expert who reported the mean).
+in_groups <- experts_all$berufsgruppe %in% BERUFSGRUPPEN
+price_reference <- tibble()
+price_treatment <- tibble()
+for (fuel in PRICE_FUELS) {
+  reported <- experts_all[[paste0("price_", fuel)]]
+  treatment <- if_else(is.na(reported), "blank", "as reported")
+
+  # (1) euro instead of cent
+  is_euro <- !is.na(reported) & reported < PRICE_EURO_BELOW
+  price <- if_else(is_euro, reported * 100, reported)
+  treatment[is_euro] <- "euro"
+
+  # (2) oil per litre, (3) pellets per kg
+  is_per_unit <- rep(FALSE, length(price))
+  if (fuel == "oil") {
+    is_per_unit <- !is.na(price) &
+      price >= OIL_PER_LITRE[1] & price <= OIL_PER_LITRE[2]
+    price <- if_else(is_per_unit, price / 10, price)
+  }
+  if (fuel == "pellet") {
+    is_per_unit <- !is.na(price) &
+      price >= PELLETS_PER_KG[1] & price <= PELLETS_PER_KG[2]
+    price <- if_else(is_per_unit, price / 5, price)
+  }
+  treatment[is_per_unit & !is_euro] <- "per litre or kg"
+  treatment[is_per_unit & is_euro] <- "euro and per litre or kg"
+
+  # (4) far from the median answer: not a price per kWh
+  price_median <- median(price[in_groups], na.rm = TRUE)
+  lower <- price_median / PRICE_VALID_FACTOR
+  upper <- price_median * PRICE_VALID_FACTOR
+  is_unusable <- !is.na(price) & (price < lower | price > upper)
+  price[is_unusable] <- NA
+  treatment[is_unusable] <- "not usable"
+
+  price_mean <- mean(price[in_groups], na.rm = TRUE)
+  experts_all[[paste0("price_", fuel, "_na")]] <- if_else(is.na(price), 1, 0)
+  experts_all[[paste0("price_", fuel, "_c")]] <-
+    if_else(is.na(price), 0, price - price_mean)
+
+  price_reference <- bind_rows(price_reference, tibble(
+    fuel = fuel, median = price_median, lower = lower, upper = upper,
+    mean = price_mean
+  ))
+  price_treatment <- bind_rows(price_treatment, tibble(
+    fuel = fuel, treatment = treatment[in_groups]
+  ))
+}
+
+# Reference prices in cent per kWh, and the number of experts of the three
+# Berufsgruppen by treatment of their answer
+print(price_reference)
+price_treatment %>%
+  count(fuel, treatment) %>%
+  pivot_wider(names_from = treatment, values_from = n, values_fill = 0) %>%
+  print()
+
+# all_of(): selects the columns named in a character vector
+price_columns <- c(paste0("price_", PRICE_FUELS, "_na"),
+                   paste0("price_", PRICE_FUELS, "_c"))
 experts <- experts_all %>%
-  select(resp_uid)
+  select(resp_uid, all_of(price_columns))
 
 n_vignettes_all <- nrow(vignettes_all)
 decisions <- vignettes_all %>%
@@ -173,6 +289,44 @@ decisions <- decisions %>%
     is_energieberater = if_else(berufsgruppe == "Energieberater", 1, 0)
   )
 
+# Prices per kWh of the heat pump and the hybrid heating (section 1).
+# The heat pump's is the electricity price divided by the COP of the
+# vignette's heat distribution (case_when() leaves any other value NA, which
+# prepare_choice_data() stops on). The hybrid's is the weighted average of the
+# gas price and the heat pump's; it counts as not reported if the gas or the
+# electricity price is not reported. An expert who reported the mean prices
+# has 0 in every vignette.
+decisions <- decisions %>%
+  mutate(
+    cop = case_when(
+      att_heat_distribution == "Heizkörper" ~ COP[["radiators"]],
+      att_heat_distribution == "eine Fußbodenheizung" ~ COP[["floor_heating"]]
+    ),
+    price_hpelec_heat_c = price_hpelec_c / cop,
+    price_hybrid_na = if_else(price_gas_na == 1 | price_hpelec_na == 1, 1, 0),
+    price_hybrid_c = if_else(price_hybrid_na == 1, 0,
+                             HYBRID_GAS_SHARE * price_gas_c +
+                               (1 - HYBRID_GAS_SHARE) * price_hpelec_heat_c)
+  )
+
+# Experts of the sample whose price counts as not reported (blank or not
+# usable), by Berufsgruppe. The dummies are the same in all of an expert's
+# vignettes, so distinct() keeps one row per expert.
+decisions %>%
+  distinct(resp_uid, berufsgruppe, price_gas_na, price_hpelec_na,
+           price_hybrid_na, price_dh_na, price_oil_na, price_pellet_na) %>%
+  group_by(berufsgruppe) %>%
+  summarise(
+    experts = n(),
+    gas = sum(price_gas_na),
+    hpelec = sum(price_hpelec_na),
+    hybrid = sum(price_hybrid_na),
+    dh = sum(price_dh_na),
+    oil = sum(price_oil_na),
+    pellet = sum(price_pellet_na)
+  ) %>%
+  print()
+
 # 3. Specifications ------------------------------------------------------------
 # One element per specification; its name is the name of its result files.
 # Each states its model in full:
@@ -198,6 +352,8 @@ decisions <- decisions %>%
 #   draws        "halton": mlogit's Halton draws; "halton_by_group": the
 #                primes start again for each group's constants
 #                (halton_primes() in 00_functions_estimation.R)
+#   prices       optional: terms of PRICE_TERMS (below), each with one fixed
+#                coefficient
 # For example, random = c("(Intercept)" = "n", att_income = "n") lets the
 # effect of the low income vary across experts as well; with correlation =
 # list("(Intercept)", "att_income"), the constants are correlated with each
@@ -233,6 +389,63 @@ BERUFSGRUPPE_X_ATTRIBUTES <- c(
 
 # One set of constants per Berufsgruppe: the dummies of section 2.3
 BERUFSGRUPPE_CONSTANTS <- c("is_shk", "is_schornsteinfeger", "is_energieberater")
+
+# Prices: for each technology, its price per kWh (sections 2.1 and 2.3):
+# per kWh of fuel for gas, oil and pellets, per kWh of heat for district
+# heating and the heat pump (the electricity price divided by the COP), and
+# the weighted average of the gas and heat pump prices for the hybrid; centred
+# at the mean over the experts. And the dummy for a price not reported. name:
+# part of the names of the dummies' terms. Fernwärme is an outcome in the fw
+# arm only.
+PRICE_VARIABLES <- tribble(
+  ~technology,     ~name,    ~price,                ~not_reported,
+  "Gasheizung",    "gas",    "price_gas_c",         "price_gas_na",
+  "Ölheizung",     "oil",    "price_oil_c",         "price_oil_na",
+  "Pelletheizung", "pellet", "price_pellet_c",      "price_pellet_na",
+  "Wärmepumpe",    "hpelec", "price_hpelec_heat_c", "price_hpelec_na",
+  "Hybridheizung", "hybrid", "price_hybrid_c",      "price_hybrid_na",
+  "Fernwärme",     "dh",     "price_dh_c",          "price_dh_na"
+) %>%
+  filter(technology %in% RECOMMENDATIONS)
+
+# The price terms of mlogit's formula, one row per term and technology. In
+# the utility of a technology, a term takes the technology's variable, times
+# the dummy `group` where that is not NA; in the utility of the other
+# outcomes it is 0. Each term has one coefficient, also in the utility of the
+# reference outcome.
+#   price                one coefficient for the prices of all technologies
+#   price_is_shk, ...    one per Berufsgruppe: the price times the group's
+#                        dummy (section 2.3)
+#   <name>_price_na      one per technology: its dummy for a price not
+#                        reported
+# term: the name of the term and of its coefficient, a column built in
+# section 4; kind: what it is, for the labels of 02_output.R.
+PRICE_TERMS <- bind_rows(
+  tibble(term = "price", technology = PRICE_VARIABLES$technology,
+         variable = PRICE_VARIABLES$price, group = NA_character_,
+         kind = "price"),
+  tibble(term = "price_is_shk", technology = PRICE_VARIABLES$technology,
+         variable = PRICE_VARIABLES$price, group = "is_shk", kind = "price"),
+  tibble(term = "price_is_schornsteinfeger",
+         technology = PRICE_VARIABLES$technology,
+         variable = PRICE_VARIABLES$price, group = "is_schornsteinfeger",
+         kind = "price"),
+  tibble(term = "price_is_energieberater",
+         technology = PRICE_VARIABLES$technology,
+         variable = PRICE_VARIABLES$price, group = "is_energieberater",
+         kind = "price"),
+  tibble(term = paste0(PRICE_VARIABLES$name, "_price_na"),
+         technology = PRICE_VARIABLES$technology,
+         variable = PRICE_VARIABLES$not_reported, group = NA_character_,
+         kind = "not_reported")
+)
+
+# The price terms of the specifications: one price coefficient, or one per
+# Berufsgruppe; the dummies in both
+PRICE_NOT_REPORTED <- paste0(PRICE_VARIABLES$name, "_price_na")
+PRICES <- c("price", PRICE_NOT_REPORTED)
+PRICES_BY_GROUP <- c("price_is_shk", "price_is_schornsteinfeger",
+                     "price_is_energieberater", PRICE_NOT_REPORTED)
 
 SPECIFICATIONS <- list(
   # (1) random constants, independent of each other
@@ -327,11 +540,115 @@ SPECIFICATIONS <- list(
     random = c(is_shk = "n", is_schornsteinfeger = "n", is_energieberater = "n"),
     correlation = list("is_shk", "is_schornsteinfeger", "is_energieberater"),
     draws = "halton_by_group"
+  ),
+  # (1p) to (6p): (1) to (6), with the energy prices
+  asc_uncorrelated_prices = list(
+    label = "Random constants, uncorrelated, with prices",
+    constants = "1",
+    regressors = ATTRIBUTES,
+    random = c("(Intercept)" = "n"),
+    correlation = "none",
+    draws = "halton",
+    prices = PRICES
+  ),
+  asc_correlated_prices = list(
+    label = "Random constants, correlated, with prices",
+    constants = "1",
+    regressors = ATTRIBUTES,
+    random = c("(Intercept)" = "n"),
+    correlation = "full",
+    draws = "halton",
+    prices = PRICES
+  ),
+  asc_uncorrelated_berufsgruppe_prices = list(
+    label = "Random constants, uncorrelated, with occupational group and prices",
+    constants = "1",
+    regressors = c("berufsgruppe", ATTRIBUTES),
+    random = c("(Intercept)" = "n"),
+    correlation = "none",
+    draws = "halton",
+    prices = PRICES
+  ),
+  asc_correlated_berufsgruppe_prices = list(
+    label = "Random constants, correlated, with occupational group and prices",
+    constants = "1",
+    regressors = c("berufsgruppe", ATTRIBUTES),
+    random = c("(Intercept)" = "n"),
+    correlation = "full",
+    draws = "halton",
+    prices = PRICES
+  ),
+  asc_by_group_uncorrelated_prices = list(
+    label = "Random constants by occupational group, uncorrelated, with prices",
+    constants = BERUFSGRUPPE_CONSTANTS,
+    regressors = ATTRIBUTES,
+    random = c(is_shk = "n", is_schornsteinfeger = "n", is_energieberater = "n"),
+    correlation = "none",
+    draws = "halton_by_group",
+    prices = PRICES
+  ),
+  asc_by_group_correlated_prices = list(
+    label = "Random constants by occupational group, correlated, with prices",
+    constants = BERUFSGRUPPE_CONSTANTS,
+    regressors = ATTRIBUTES,
+    random = c(is_shk = "n", is_schornsteinfeger = "n", is_energieberater = "n"),
+    correlation = list("is_shk", "is_schornsteinfeger", "is_energieberater"),
+    draws = "halton_by_group",
+    prices = PRICES
+  ),
+  # (3pg) to (6pg): (3p) to (6p), with one price coefficient per
+  #      Berufsgruppe. As for the interactions, only next to the
+  #      Berufsgruppe's main effect or its group constants.
+  asc_uncorrelated_berufsgruppe_prices_by_group = list(
+    label = "Random constants, uncorrelated, with occupational group and prices by group",
+    constants = "1",
+    regressors = c("berufsgruppe", ATTRIBUTES),
+    random = c("(Intercept)" = "n"),
+    correlation = "none",
+    draws = "halton",
+    prices = PRICES_BY_GROUP
+  ),
+  asc_correlated_berufsgruppe_prices_by_group = list(
+    label = "Random constants, correlated, with occupational group and prices by group",
+    constants = "1",
+    regressors = c("berufsgruppe", ATTRIBUTES),
+    random = c("(Intercept)" = "n"),
+    correlation = "full",
+    draws = "halton",
+    prices = PRICES_BY_GROUP
+  ),
+  asc_by_group_uncorrelated_prices_by_group = list(
+    label = "Random constants by occupational group, uncorrelated, with prices by group",
+    constants = BERUFSGRUPPE_CONSTANTS,
+    regressors = ATTRIBUTES,
+    random = c(is_shk = "n", is_schornsteinfeger = "n", is_energieberater = "n"),
+    correlation = "none",
+    draws = "halton_by_group",
+    prices = PRICES_BY_GROUP
+  ),
+  asc_by_group_correlated_prices_by_group = list(
+    label = "Random constants by occupational group, correlated, with prices by group",
+    constants = BERUFSGRUPPE_CONSTANTS,
+    regressors = ATTRIBUTES,
+    random = c(is_shk = "n", is_schornsteinfeger = "n", is_energieberater = "n"),
+    correlation = list("is_shk", "is_schornsteinfeger", "is_energieberater"),
+    draws = "halton_by_group",
+    prices = PRICES_BY_GROUP
   )
 )
 
 # The specifications this run estimates; the others keep their saved results
-SPECIFICATIONS_TO_RUN <- "asc_by_group_correlated" # names(SPECIFICATIONS)
+SPECIFICATIONS_TO_RUN <- "asc_by_group_correlated_prices"
+  
+old <- c(
+  "asc_uncorrelated_prices", "asc_correlated_prices",
+  "asc_uncorrelated_berufsgruppe_prices", "asc_correlated_berufsgruppe_prices",
+  "asc_by_group_uncorrelated_prices", "asc_by_group_correlated_prices",
+  "asc_uncorrelated_berufsgruppe_prices_by_group",
+  "asc_correlated_berufsgruppe_prices_by_group",
+  "asc_by_group_uncorrelated_prices_by_group",
+  "asc_by_group_correlated_prices_by_group"
+) # "asc_by_group_correlated" # names(SPECIFICATIONS)
 
 # Expert types at which the AMEs are evaluated, one row each. A specification
 # that uses one of these columns gets AMEs for every profile; the others get a
@@ -345,10 +662,16 @@ AME_PROFILES <- tibble(
   is_energieberater = c(0, 0, 1)
 )
 
-# Every attribute of a specification needs its levels
+# Every attribute of a specification needs its levels, every price its row in
+# PRICE_TERMS
 stopifnot(all(ATTRIBUTES %in% names(ATTRIBUTE_LEVELS)))
 for (spec_name in names(SPECIFICATIONS)) {
   check_specification(SPECIFICATIONS[[spec_name]], spec_name)
+  unknown_prices <- setdiff(SPECIFICATIONS[[spec_name]]$prices, PRICE_TERMS$term)
+  if (length(unknown_prices) > 0) {
+    stop("Specification ", spec_name, ": prices that are not in PRICE_TERMS: ",
+         paste(unknown_prices, collapse = ", "))
+  }
 }
 if (!all(SPECIFICATIONS_TO_RUN %in% names(SPECIFICATIONS))) {
   stop("Not in SPECIFICATIONS: ",
@@ -359,8 +682,10 @@ if (!all(SPECIFICATIONS_TO_RUN %in% names(SPECIFICATIONS))) {
 # Built from the variables of all specifications, so that every specification
 # has the same sample even when only some of them run. all.vars() lists the
 # variables of a formula, e.g. berufsgruppe and att_income for the term
-# berufsgruppe:att_income.
+# berufsgruppe:att_income. The price variables have no missing values (a
+# price not reported is 0, with its dummy 1).
 model_variables <- character(0)
+model_prices <- character(0)
 for (spec_name in names(SPECIFICATIONS)) {
   specification <- SPECIFICATIONS[[spec_name]]
   spec_terms <- specification$regressors
@@ -370,11 +695,44 @@ for (spec_name in names(SPECIFICATIONS)) {
   spec_formula <- as.formula(paste("~", paste(c("1", spec_terms),
                                                collapse = " + ")))
   model_variables <- c(model_variables, all.vars(spec_formula))
+  model_prices <- c(model_prices, specification$prices)
 }
+is_model_price <- PRICE_TERMS$term %in% model_prices
+model_variables <- c(model_variables,
+                     PRICE_TERMS$variable[is_model_price],
+                     PRICE_TERMS$group[is_model_price & !is.na(PRICE_TERMS$group)])
 prepared <- prepare_choice_data(decisions, RECOMMENDATIONS, ATTRIBUTE_LEVELS,
                                 model_variables)
 decisions <- prepared$decisions
 choice_data <- prepared$choice_data
+
+# The price terms (PRICE_TERMS): in the rows of each of its technologies, the
+# expert's price (or dummy) of that technology, times the group dummy for a
+# term of one Berufsgruppe; 0 in the rows of the other outcomes. idx(
+# choice_data, 2): the second index of the data, the outcome of each row. A
+# column taken from dfidx data has the class "xseries"; as.numeric() makes it
+# a plain number. A term that is the same in all the rows of its technologies
+# has no identified coefficient: a dummy that is 1 for every expert would
+# duplicate the technology's constant.
+alternative <- as.character(idx(choice_data, 2))
+for (price_term in unique(PRICE_TERMS$term[is_model_price])) {
+  column <- rep(0, nrow(choice_data))
+  is_term_row <- rep(FALSE, nrow(choice_data))
+  for (k in which(PRICE_TERMS$term == price_term)) {
+    is_technology <- alternative == PRICE_TERMS$technology[k]
+    value <- as.numeric(choice_data[[PRICE_TERMS$variable[k]]])
+    if (!is.na(PRICE_TERMS$group[k])) {
+      value <- value * as.numeric(choice_data[[PRICE_TERMS$group[k]]])
+    }
+    column[is_technology] <- value[is_technology]
+    is_term_row <- is_term_row | is_technology
+  }
+  if (n_distinct(column[is_term_row]) < 2) {
+    stop("The price term ", price_term, " is the same for every expert of ",
+         "the estimation sample: its coefficient is not identified")
+  }
+  choice_data[[price_term]] <- column
+}
 
 n_choices <- nrow(decisions)
 n_experts <- n_distinct(decisions$resp_uid)
@@ -434,6 +792,9 @@ for (s in seq_along(SPECIFICATIONS_TO_RUN)) {
     # Elements of L fixed at 0 (constPar) belong to the mixed logit only; the
     # MNL has no L
     fixed_by_model <- list(mnl = NULL, mixed = estimates$fixed_parameters)
+    # The price terms of this specification; no rows without prices
+    price_terms <- PRICE_TERMS %>%
+      filter(term %in% specification$prices)
 
     # What was estimated: the formula as mlogit received it (each interaction
     # as its 0/1 products; showEnv = FALSE leaves out where R stores it); the
@@ -475,7 +836,8 @@ for (s in seq_along(SPECIFICATIONS_TO_RUN)) {
     # Steps (1) to (5); the checks keep their letters from section 6.5 of the
     # policy brief script.
     # (1) One design matrix per expert profile: the reference vignette and its
-    #     variations
+    #     variations. With prices, the expert reported the mean price of
+    #     every fuel, so the prices add 0 to every utility.
     X_by_profile <- ame_design_matrices(estimates$formula_terms,
                                         estimates$column_names,
                                         ATTRIBUTE_LEVELS, AME_PROFILES)
@@ -549,10 +911,15 @@ for (s in seq_along(SPECIFICATIONS_TO_RUN)) {
     }
 
     #     Check (b): MNL: at the observed vignettes, ame_at_reference()
-    #     reproduces mlogit's probabilities exactly (only $probabilities is used)
+    #     reproduces mlogit's probabilities exactly (only $probabilities is
+    #     used). Generalisation: with the utility from the prices at the
+    #     observed vignettes, which also checks the price terms of section 4.
     X_observed <- design_matrix(estimates$formula_terms, decisions)
+    prices_mnl <- price_utility(coef(models$mnl), decisions, price_terms,
+                                RECOMMENDATIONS)
     p_own <- ame_at_reference(coef(models$mnl), X_observed, draws_by_model$mnl,
-                              random, RECOMMENDATIONS)$probabilities
+                              random, RECOMMENDATIONS,
+                              price_utility = prices_mnl)$probabilities
     p_mlogit <- fitted(models$mnl, type = "probabilities")[, RECOMMENDATIONS]
     stopifnot(max(abs(p_own - p_mlogit)) < 1e-8)
 
@@ -564,9 +931,12 @@ for (s in seq_along(SPECIFICATIONS_TO_RUN)) {
     n_draws_observed <- min(n_draws_check, n_draws_ame)
     standard_draws_observed <- standard_draws[seq_len(n_draws_observed), ,
                                               drop = FALSE]
+    prices_mixed <- price_utility(coef(models$mixed), decisions, price_terms,
+                                  RECOMMENDATIONS)
     p_own <- ame_at_reference(coef(models$mixed), X_observed,
                               standard_draws_observed, random, RECOMMENDATIONS,
-                              fixed_by_model$mixed)$probabilities
+                              fixed_by_model$mixed,
+                              price_utility = prices_mixed)$probabilities
     p_mlogit <- fitted(models$mixed, type = "probabilities")[, RECOMMENDATIONS]
     cat("Mean absolute difference to mlogit's probabilities:",
         round(mean(abs(p_own - p_mlogit)), 4), "\n")
@@ -661,6 +1031,13 @@ for (s in seq_along(SPECIFICATIONS_TO_RUN)) {
       column_names = estimates$column_names,
       random_coefficients = random,
       fixed_parameters = estimates$fixed_parameters,
+      price_terms = price_terms,
+      price_settings = list(euro_below = PRICE_EURO_BELOW,
+                            oil_per_litre = OIL_PER_LITRE,
+                            pellets_per_kg = PELLETS_PER_KG,
+                            valid_factor = PRICE_VALID_FACTOR,
+                            cop = COP,
+                            hybrid_gas_share = HYBRID_GAS_SHARE),
       coefficients = list(mnl = coef(models$mnl), mixed = coef(models$mixed)),
       covariance_matrices = covariance_matrices,
       inverse_hessians = inverse_hessians,

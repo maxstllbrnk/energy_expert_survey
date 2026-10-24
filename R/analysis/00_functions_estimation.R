@@ -38,6 +38,17 @@
 # likelihood); mlogit() simulates the integral with R draws per expert
 # (maximum simulated likelihood).
 #
+# A specification may add prices (its element `prices`): the price per kWh of
+# each technology and a dummy for a price not reported, which enter before
+# `|` in mlogit's formula, each term with one fixed coefficient,
+#
+#   U_njt = x_nt' beta_nj + p_njt' gamma + e_njt,
+#
+# where p_njt holds the price terms in the utility of technology j: e.g. its
+# own price in the term that all technologies share, and its own dummy (0 in
+# the dummies of the other technologies). The prices enter the utility of the
+# reference outcome as well.
+#
 # The specifications are written in section 3 of 01_run_specifications.R,
 # which describes their elements. From a specification and the data, the
 # functions build what mlogit and the later steps need:
@@ -688,14 +699,19 @@ estimate_specification <- function(specification, choice_data, decisions,
   }
 
   # (b) Formula and design matrix. mlogit's formula, as choice_formula in the
-  #     policy brief script: before `|` come attributes of the technologies
-  #     (none: 0); after it the terms of formula_terms(), which get one
-  #     coefficient per technology. Each column of the design matrix gets one
-  #     coefficient per technology, so it must vary and must not be a linear
-  #     combination of the other columns; otherwise its coefficients are not
-  #     identified. qr()$rank: the number of linearly independent columns.
+  #     policy brief script: before `|` come attributes of the technologies,
+  #     the prices of the specification (none: 0), each with one coefficient;
+  #     after it the terms of formula_terms(), which get one coefficient per
+  #     technology. Each column of the design matrix gets one coefficient per
+  #     technology, so it must vary and must not be a linear combination of
+  #     the other columns; otherwise its coefficients are not identified.
+  #     qr()$rank: the number of linearly independent columns.
   terms_table <- formula_terms(specification, decisions)
-  formula <- as.formula(paste("vig_rec ~ 0 |",
+  price_part <- "0"
+  if (length(specification$prices) > 0) {
+    price_part <- paste(specification$prices, collapse = " + ")
+  }
+  formula <- as.formula(paste("vig_rec ~", price_part, "|",
                               paste(terms_table$formula_term, collapse = " + ")))
   X <- design_matrix(terms_table, decisions)
   columns <- design_columns(terms_table, X)
@@ -714,9 +730,11 @@ estimate_specification <- function(specification, choice_data, decisions,
                                   reflevel = reference_outcome))
   m_mnl <- reevaluate_at_coefficients(m_mnl, choice_data)
 
-  # The columns of the design matrix times the technologies must be exactly
-  # the coefficients of the model (setequal(): same elements, in any order)
-  expected_coefs <- outer(colnames(X), technologies, paste, sep = ":")
+  # The columns of the design matrix times the technologies, and the prices,
+  # must be exactly the coefficients of the model (setequal(): same elements,
+  # in any order)
+  expected_coefs <- c(outer(colnames(X), technologies, paste, sep = ":"),
+                      specification$prices)
   if (!setequal(expected_coefs, names(coef(m_mnl)))) {
     stop("The design matrix does not match mlogit's coefficients")
   }
@@ -1050,6 +1068,11 @@ coefficient_draws <- function(distribution, b, s, eta, z) {
 #' group constants that value is the expert's group dummy, so the draws of the
 #' other groups' constants are multiplied by 0. And a random coefficient may
 #' follow another distribution than the normal (coefficient_draws()).
+#' Generalisation: with prices, every outcome's utility, also the reference
+#' outcome's, adds its utility from the prices (price_utility()). At the
+#' reference vignette every price is at its mean and reported, so the prices
+#' add 0 and price_utility stays NULL; the checks at the observed vignettes
+#' pass it.
 #'
 #' @param theta               coefficient vector, named as coef() of an mlogit
 #'                            model
@@ -1061,6 +1084,8 @@ coefficient_draws <- function(distribution, b, s, eta, z) {
 #'                            order) and distributions
 #' @param outcomes            all outcomes, the reference outcome first
 #' @param fixed_parameters    elements of L fixed by constPar (NULL if none)
+#' @param price_utility       from price_utility(), one row per row of X; NULL:
+#'                            the prices add 0
 #' @return list with
 #'   probabilities  matrix, one row per vignette, one column per outcome
 #'   ame            matrix, one row per variation, one column per outcome
@@ -1068,7 +1093,7 @@ coefficient_draws <- function(distribution, b, s, eta, z) {
 #'   deviations     d(r): one row per draw, one column per random coefficient
 #'                  (for the checks)
 ame_at_reference <- function(theta, X, standard_draws, random_coefficients, outcomes,
-                             fixed_parameters = NULL) {
+                             fixed_parameters = NULL, price_utility = NULL) {
   technologies <- outcomes[-1]
   regressors <- colnames(X)
   rpar_names <- random_coefficients$name
@@ -1160,6 +1185,12 @@ ame_at_reference <- function(theta, X, standard_draws, random_coefficients, outc
     # the reference outcome has utility 0: first column (n_draws rows x one
     # column per outcome)
     utility <- cbind(0, utility)
+    # Generalisation: plus each outcome's utility from the prices in this
+    # vignette, the same for every draw (the price coefficients are fixed)
+    if (!is.null(price_utility)) {
+      utility <- utility + matrix(price_utility[v, outcomes], nrow = n_draws,
+                                  ncol = length(outcomes), byrow = TRUE)
+    }
     # logit probabilities for each draw; each row sums to one. Subtracting each
     # row's largest utility before exp() avoids overflow; it cancels in the ratio.
     # Each row's largest utility: the elementwise maximum over the columns
@@ -1182,6 +1213,36 @@ ame_at_reference <- function(theta, X, standard_draws, random_coefficients, outc
 
   list(probabilities = probabilities, ame = ame, L = L,
        deviations = coefficient_deviations)
+}
+
+#' Utility from the prices in each decision: for every row of price_terms, its
+#' variable (times its group dummy) times the term's coefficient, in the
+#' column of its technology. It is computed from the variables in
+#' `decisions`, not from the columns mlogit used, so check (b) of
+#' 01_run_specifications.R also checks those columns.
+#'
+#' @param theta       coefficient vector, named as coef() of an mlogit model
+#' @param decisions   one row per decision, with the variables of price_terms
+#' @param price_terms the price terms of the specification (PRICE_TERMS of
+#'                    01_run_specifications.R), one row per term and
+#'                    technology: term (its coefficient), technology,
+#'                    variable (its column of decisions) and group (a group
+#'                    dummy of decisions, or NA); none: the utility is 0
+#' @param outcomes    all outcomes
+#' @return matrix, one row per decision, one column per outcome
+price_utility <- function(theta, decisions, price_terms, outcomes) {
+  utility <- matrix(0, nrow = nrow(decisions), ncol = length(outcomes),
+                    dimnames = list(NULL, outcomes))
+  for (k in seq_len(nrow(price_terms))) {
+    technology <- price_terms$technology[k]
+    value <- decisions[[price_terms$variable[k]]]
+    if (!is.na(price_terms$group[k])) {
+      value <- value * decisions[[price_terms$group[k]]]
+    }
+    utility[, technology] <- utility[, technology] +
+      theta[[price_terms$term[k]]] * value
+  }
+  utility
 }
 
 #' The reference vignette and its variations (section 6.1 of the policy brief
@@ -1692,9 +1753,14 @@ fit_statistics <- function(models, choice_counts, n_experts, n_draws_model) {
 #'   group_covariances  (group constants) each group's covariance matrix of
 #'                      the constants minus the first group's: the variances,
 #'                      and with correlated constants also the covariances
+#'   prices             the coefficients of the prices that the restricted
+#'                      specification does not have
+#'   price_groups       the price coefficients of the groups (the price terms
+#'                      with a group dummy) minus the first group's: 0 when
+#'                      one price coefficient holds for all groups
 #'
 #' @param theta        coefficients of the unrestricted mixed logit, coef()
-#' @param type         one of the three types
+#' @param type         one of the five types
 #' @param unrestricted saved results of the unrestricted specification
 #' @param restricted   saved results of the restricted specification
 #' @return numeric vector, one element per restriction
@@ -1752,6 +1818,23 @@ lr_restrictions <- function(theta, type, unrestricted, restricted) {
                           difference[lower.tri(difference, diag = TRUE)])
       }
     }
+
+  } else if (type == "prices") {
+    dropped_prices <- setdiff(unrestricted$specification$prices,
+                              restricted$specification$prices)
+    if (length(dropped_prices) == 0) {
+      stop("Restriction prices: no price to drop")
+    }
+    restrictions <- theta[dropped_prices]
+
+  } else if (type == "price_groups") {
+    price_terms <- unrestricted$price_terms
+    group_terms <- unique(price_terms$term[!is.na(price_terms$group)])
+    if (length(group_terms) < 2) {
+      stop("Restriction price_groups needs price coefficients by group in the ",
+           "unrestricted specification")
+    }
+    restrictions <- theta[group_terms[-1]] - theta[[group_terms[1]]]
 
   } else {
     stop("Unknown restriction type: ", type)

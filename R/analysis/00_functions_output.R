@@ -23,6 +23,10 @@
 #   variables           expert characteristic -> label (comparison table)
 #   distributions       distribution of a random coefficient ("n", "ln",
 #                       ...) -> name
+#   prices              kind of a price term ("price", "not_reported", the
+#                       column kind of PRICE_TERMS) -> label; and
+#                       "all_technologies", the row of a price term with one
+#                       coefficient for all technologies
 #   group_name          what a group of constants is, e.g. "occupational group"
 # The labels are plain text; latex_text() turns them into LaTeX for the
 # tables. All outputs are in English: numbers with a decimal point (0.123)
@@ -143,6 +147,49 @@ regressor_label <- function(regressor, labels, attributes) {
   paste(unique(parts), collapse = " × ")
 }
 
+#' The rows of the prices in the coefficient tables: a heading per kind of
+#' term (labels$prices, e.g. "Price per kWh (cent)"), then one row per term.
+#' A term is labelled by its group if it is a price coefficient of one group
+#' (labels$groups), by its technology if it belongs to one technology (e.g.
+#' its dummy for a price not reported), and as a term of all technologies
+#' otherwise (labels$prices[["all_technologies"]]).
+#'
+#' @param price_terms the price terms of a specification (results$price_terms),
+#'                    one row per term and technology
+#' @return tibble, one row per table row: label (plain text), term (NA for a
+#'   heading) and kind (of the heading the row is under)
+price_rows <- function(price_terms, labels) {
+  groups <- unique(price_terms$group[!is.na(price_terms$group)])
+  missing_labels <- c(setdiff(price_terms$technology, names(labels$technologies)),
+                      setdiff(c(price_terms$kind, "all_technologies"),
+                              names(labels$prices)),
+                      setdiff(groups, names(labels$groups)))
+  if (length(missing_labels) > 0) {
+    stop("No label for: ", paste(unique(missing_labels), collapse = ", "),
+         " (add it to the labels in 02_output.R)")
+  }
+  rows <- tibble(label = character(0), term = character(0),
+                 kind = character(0))
+  for (price_kind in unique(price_terms$kind)) {
+    rows <- bind_rows(rows, tibble(label = labels$prices[[price_kind]],
+                                   term = NA_character_, kind = price_kind))
+    for (price_term in unique(price_terms$term[price_terms$kind == price_kind])) {
+      is_term <- price_terms$term == price_term
+      group <- price_terms$group[is_term][1]
+      if (!is.na(group)) {
+        label <- labels$groups[[group]]
+      } else if (sum(is_term) == 1) {
+        label <- labels$technologies[[price_terms$technology[is_term]]]
+      } else {
+        label <- labels$prices[["all_technologies"]]
+      }
+      rows <- bind_rows(rows, tibble(label = label, term = price_term,
+                                     kind = price_kind))
+    }
+  }
+  rows
+}
+
 #' Distributions of the random coefficients, and how panels A and B of the
 #' coefficient table read for each, as text for the notes
 #'
@@ -232,7 +279,9 @@ correlation_rows <- function(estimate_of, se_of, column, technologies, labels) {
 #' block. The last panel (D, or C without correlations): fit.
 #' Generalisation: with group constants, panel A has one row of mean
 #' constants per group, and panel B one row per group; random coefficients of
-#' other regressors get their rows in panels B and C as well.
+#' other regressors get their rows in panels B and C as well. With prices,
+#' panel A ends with one row per price term (price_rows()), shown across the
+#' columns.
 #' The LaTeX document needs \usepackage[T1]{fontenc}, booktabs and
 #' threeparttable.
 #'
@@ -265,6 +314,10 @@ coefficient_table_tex <- function(results, labels, reference_note, sample_note,
   has_groups <- !identical(specification$constants, "1")
   random_columns <- unique(random$column)
   blocks <- unique(random$block)
+  # results without prices: no price_terms (results from before the prices),
+  # or a table without rows
+  price_terms <- results$price_terms
+  has_prices <- !is.null(price_terms) && nrow(price_terms) > 0
 
   # Every value that appears in the table needs a label
   column_label <- column_labels(results$columns, labels)
@@ -341,6 +394,30 @@ coefficient_table_tex <- function(results, labels, reference_note, sample_note,
                paste0(label, " & ", paste(estimate_of[parameters], collapse = " & "),
                       " \\\\"),
                paste0(" & ", paste(se_of[parameters], collapse = " & "), " \\\\"))
+  }
+  #     Generalisation: the prices (price_rows()): a heading per kind of
+  #     term, then one row per term, its estimate and standard error centred
+  #     across the technology columns as the fit statistics. A term's
+  #     coefficient belongs to all its technologies, also to the reference
+  #     category, which has no column.
+  if (has_prices) {
+    price_table_rows <- price_rows(price_terms, labels)
+    for (r in seq_len(nrow(price_table_rows))) {
+      price_term <- price_table_rows$term[r]
+      row_label <- latex_text(price_table_rows$label[r])
+      if (is.na(price_term)) {
+        lines <- c(lines, paste0("\\multicolumn{", n_columns, "}{l}{",
+                                 row_label, "} \\\\"))
+        next
+      }
+      if (!(price_term %in% names(estimate_of))) {
+        stop("Coefficient missing for ", price_term)
+      }
+      lines <- c(lines,
+                 paste0("\\quad ", row_label, " & ", span,
+                        estimate_of[[price_term]], "} \\\\"),
+                 paste0(" & ", span, se_of[[price_term]], "} \\\\"))
+    }
   }
 
   # (c) Panel B: standard deviations of the random coefficients across
@@ -497,6 +574,36 @@ coefficient_table_tex <- function(results, labels, reference_note, sample_note,
     draws_note <- paste0("The Halton sequences start with the same primes for ",
                          "each ", labels$group_name, ".")
   }
+  price_note <- NULL
+  if (has_prices) {
+    rules <- results$price_settings
+    price_note <- paste0(
+      "Prices: what households among the expert's clients paid in January ",
+      "and February 2026, as the expert reported it, in cent per kWh: per kWh ",
+      "of fuel for gas, oil and pellets, per kWh of heat for district ",
+      "heating. Answers below ", rules$euro_below, " are read as euro, oil ",
+      "prices of ", rules$oil_per_litre[1], " to ", rules$oil_per_litre[2],
+      " as cent per litre (divided by 10), pellet prices of ",
+      rules$pellets_per_kg[1], " to ", rules$pellets_per_kg[2], " as cent per ",
+      "kg (divided by 5); answers more than ", rules$valid_factor, " times ",
+      "above or below the median count as not reported. The heat pump's price ",
+      "is the electricity price divided by a coefficient of performance of ",
+      rules$cop[["radiators"]], " with radiators and ",
+      rules$cop[["floor_heating"]], " with underfloor heating, a price per kWh ",
+      "of heat; the hybrid heating's is the weighted average of the gas price ",
+      "(weight ", rules$hybrid_gas_share, ") and the heat pump's. Prices are ",
+      "centred at their mean over the experts of the three occupational ",
+      "groups in both arms. A price not reported (blank or not usable) is set ",
+      "to the mean and gets the dummy for a price not reported; for the hybrid ",
+      "heating, if the gas or the electricity price is not reported. Each ",
+      "technology's price enters its own utility, also that of the reference ",
+      "category, with one coefficient for all technologies (or one per ",
+      "occupational group): the effect of one cent more on the log odds of ",
+      "that technology against every other outcome. The dummies have one ",
+      "coefficient per technology. The marginal effects are for an expert ",
+      "who reported the mean prices."
+    )
+  }
   # The sample first, then the model and its parameters
   notes <- c(
     sample_note,
@@ -510,6 +617,7 @@ coefficient_table_tex <- function(results, labels, reference_note, sample_note,
     latex_text(correlation_note),
     correlations_note,
     latex_text(hidden_note),
+    latex_text(price_note),
     extra_note,
     reference_note,
     paste("Standard errors in parentheses, clustered by expert (sandwich",
@@ -565,6 +673,7 @@ comparison_table_tex <- function(results_list, lr, labels, attributes,
   regressors_cells <- character(0)
   correlation_cells <- character(0)
   has_any_groups <- FALSE
+  has_any_prices <- FALSE
   fit_rows <- tibble()
   for (spec_name in names(results_list)) {
     results <- results_list[[spec_name]]
@@ -604,6 +713,17 @@ comparison_table_tex <- function(results_list, lr, labels, attributes,
     for (regressor in other_regressors) {
       regressor_items <- c(regressor_items,
                            regressor_label(regressor, labels, attributes))
+    }
+    # the prices, labelled by labels$variables: "prices", or
+    # "prices_by_group" with price coefficients by group
+    if (length(specification$prices) > 0) {
+      has_any_prices <- TRUE
+      price_label <- "prices"
+      if (any(!is.na(results$price_terms$group))) {
+        price_label <- "prices_by_group"
+      }
+      regressor_items <- c(regressor_items,
+                           regressor_label(price_label, labels, attributes))
     }
     regressor_items <- gsub(" $\\times$ ", " $\\times$\\\\",
                             latex_text(unique(regressor_items)), fixed = TRUE)
@@ -711,6 +831,15 @@ comparison_table_tex <- function(results_list, lr, labels, attributes,
                           labels$group_name, ", each with its own means and ",
                           "(co)variances.")
   }
+  prices_note <- NULL
+  if (has_any_prices) {
+    prices_note <- paste0(
+      latex_text(labels$variables[["prices"]]), ": the price per kWh of each ",
+      "technology in its utility, with one coefficient for all technologies ",
+      "(or one per ", labels$group_name, "), and a dummy for a price not ",
+      "reported per technology (see the tables of the specifications)."
+    )
+  }
 
   # The sample first, then the specifications and the statistics
   notes <- c(
@@ -722,6 +851,7 @@ comparison_table_tex <- function(results_list, lr, labels, attributes,
            paste0(column_numbers, " ", latex_text(spec_labels), collapse = "; "),
            "."),
     groups_note,
+    prices_note,
     paste("AIC $= -2 \\log L + 2k$, BIC $= -2 \\log L + k \\log N$, with $k$",
           "parameters and $N$ experts."),
     lr_notes
@@ -977,7 +1107,9 @@ results_excel_sheets <- function(results_list, lr, labels, numbers) {
         paste0(names(specification$random), " = ", specification$random,
                collapse = ", "),
       `Correlation (as in 01_run_specifications.R)` = correlation_text,
-      `Draws (as in 01_run_specifications.R)` = specification$draws
+      `Draws (as in 01_run_specifications.R)` = specification$draws,
+      `Prices (as in 01_run_specifications.R)` =
+        paste(specification$prices, collapse = ", ")
     ))
 
     # (b) Coefficients, with the labels of each coefficient's column and
@@ -991,6 +1123,29 @@ results_excel_sheets <- function(results_list, lr, labels, numbers) {
         term_label = column_label[[column]],
         technology_label = unname(labels$technologies[results$technologies])
       ))
+    }
+    #     The prices: each coefficient is named as its term, one row each
+    #     (results$price_terms, NULL in results from before the prices). The
+    #     regressor is its kind, with the group for a price coefficient of one
+    #     group; the technology its own, or all technologies.
+    price_terms <- results$price_terms
+    if (!is.null(price_terms)) {
+      for (price_term in unique(price_terms$term)) {
+        is_term <- price_terms$term == price_term
+        term_label <- unname(labels$prices[price_terms$kind[is_term][1]])
+        group <- price_terms$group[is_term][1]
+        if (!is.na(group)) {
+          term_label <- paste0(term_label, ", ", labels$groups[[group]])
+        }
+        if (sum(is_term) == 1) {
+          technology_label <- unname(labels$technologies[price_terms$technology[is_term]])
+        } else {
+          technology_label <- labels$prices[["all_technologies"]]
+        }
+        lookup <- bind_rows(lookup, tibble(coefficient = price_term,
+                                           term_label = term_label,
+                                           technology_label = technology_label))
+      }
     }
     lookup_2 <- lookup %>%
       rename(coefficient_2 = coefficient, term_label_2 = term_label,
@@ -1043,7 +1198,9 @@ results_excel_sheets <- function(results_list, lr, labels, numbers) {
   restriction_labels <- c(
     regressors = "the coefficients of the added regressors are zero",
     correlations = "the correlations are zero",
-    group_covariances = "the (co)variances of the constants are equal across groups"
+    group_covariances = "the (co)variances of the constants are equal across groups",
+    prices = "the coefficients of the prices are zero",
+    price_groups = "the price coefficients are equal across groups"
   )
   restriction_text <- character(nrow(lr))
   for (i in seq_len(nrow(lr))) {
@@ -1196,6 +1353,7 @@ coefficient_row_labels <- function(columns_shown, column_label, random) {
 #'   correlations   the correlations, one table per correlation block, if each
 #'                  block holds the coefficients of one column (otherwise they
 #'                  are in the heat maps and Excel only)
+#'   prices         with prices: the rows of price_rows()
 #'
 #' @param results saved results of one specification
 #' @param labels  list of labels, see the top of this file; labels$groups names
@@ -1345,6 +1503,64 @@ slide_coefficient_tables <- function(results, labels) {
       )
     }
   }
+
+  # (e) Prices: the rows of the paper table (price_rows()), one panel per
+  #     kind of term side by side (e.g. the price coefficients left, the
+  #     dummies for a price not reported right), so that the table fits a
+  #     slide. Each panel: a label column and a coefficient column.
+  price_terms <- results$price_terms
+  if (!is.null(price_terms) && nrow(price_terms) > 0) {
+    price_table_rows <- price_rows(price_terms, labels)
+    kinds <- unique(price_table_rows$kind)
+    panels <- list()
+    for (price_kind in kinds) {
+      is_panel_row <- price_table_rows$kind == price_kind &
+        !is.na(price_table_rows$term)
+      panels[[price_kind]] <- price_table_rows[is_panel_row, ]
+    }
+    n_rows <- 0
+    for (panel in panels) {
+      n_rows <- max(n_rows, nrow(panel))
+    }
+    prices_body <- character(0)
+    for (r in seq_len(n_rows)) {
+      estimate_cells <- character(0)
+      se_cells <- character(0)
+      for (price_kind in kinds) {
+        panel <- panels[[price_kind]]
+        if (r <= nrow(panel)) {
+          estimate_cells <- c(estimate_cells, latex_text(panel$label[r]),
+                              cells$estimate_of[[panel$term[r]]])
+          se_cells <- c(se_cells, "", cells$se_of[[panel$term[r]]])
+        } else {
+          estimate_cells <- c(estimate_cells, "", "")
+          se_cells <- c(se_cells, "", "")
+        }
+      }
+      prices_body <- c(prices_body,
+                       paste0(paste(estimate_cells, collapse = " & "), " \\\\"),
+                       paste0(paste(se_cells, collapse = " & "), " \\\\"))
+    }
+    price_header <- paste0(paste0("\\multicolumn{2}{l}{",
+                                  latex_text(labels$prices[kinds]), "}",
+                                  collapse = " & "), " \\\\")
+    tables[["prices"]] <- list(
+      name = "prices",
+      title = "Energy prices",
+      note = paste("Each technology's price enters its own utility; prices",
+                   "centred at the mean over the experts.", stars_note),
+      lines = c("\\setlength{\\tabcolsep}{4pt}",
+                paste0("\\begin{tabular}{",
+                       paste(rep("lc", length(kinds)), collapse = "@{\\hspace{2em}}"),
+                       "}"),
+                "\\toprule",
+                price_header,
+                "\\midrule",
+                prices_body,
+                "\\bottomrule",
+                "\\end{tabular}")
+    )
+  }
   tables
 }
 
@@ -1427,6 +1643,77 @@ slide_fit_table <- function(results_list, numbers) {
   slide_tabular(header, body, 5)
 }
 
+#' Slide table of the price coefficients of the mixed logits side by side:
+#' one row per row of `rows`, with the coefficient of the specification with
+#' one price coefficient, then those of the specification with one per group
+#' (labels$groups), standard errors in parentheses below. A specification
+#' without results gets "no results"; one that `rows` leaves out (NA), empty
+#' cells.
+#'
+#' @param results_list named list of saved results
+#' @param rows         tibble: prices and prices_by_group, names of
+#'                     specifications (NA where there is none)
+#' @param numbers      number of each specification, e.g. "(4p)", named by the
+#'                     specifications
+#' @return character vector, the lines of the tabular
+slide_price_comparison_table <- function(results_list, rows, labels, numbers) {
+  groups <- names(labels$groups)
+  header <- c(
+    paste0(" & One price & \\multicolumn{", length(groups), "}{c}{One per ",
+           labels$group_name, "} \\\\"),
+    paste0("\\cmidrule(lr){3-", length(groups) + 2, "}"),
+    paste0("Specifications & coefficient & ",
+           paste(latex_text(labels$groups[groups]), collapse = " & "), " \\\\")
+  )
+  body <- character(0)
+  for (r in seq_len(nrow(rows))) {
+    estimate_cells <- rep("", 1 + length(groups))
+    se_cells <- rep("", 1 + length(groups))
+    row_numbers <- character(0)
+    # the specification with one price coefficient fills the first column,
+    # the one with a price coefficient per group the columns of the groups
+    for (variant in c("prices", "prices_by_group")) {
+      spec_name <- rows[[variant]][r]
+      if (is.na(spec_name)) next
+      row_numbers <- c(row_numbers, numbers[[spec_name]])
+      if (variant == "prices") {
+        columns <- 1
+      } else {
+        columns <- 1 + seq_along(groups)
+      }
+      if (!(spec_name %in% names(results_list))) {
+        estimate_cells[columns[1]] <- "\\textit{no results}"
+        next
+      }
+      results <- results_list[[spec_name]]
+      cells <- coefficient_cells(results$coefficient_table %>%
+                                   filter(model == "mixed"), digits = 2)
+      price_terms <- results$price_terms
+      if (variant == "prices") {
+        terms_of_columns <- unique(price_terms$term[price_terms$kind == "price" &
+                                                      is.na(price_terms$group)])
+      } else {
+        terms_of_columns <- character(0)
+        for (group in groups) {
+          terms_of_columns <- c(terms_of_columns,
+                                unique(price_terms$term[!is.na(price_terms$group) &
+                                                          price_terms$group == group]))
+        }
+      }
+      if (length(terms_of_columns) != length(columns)) {
+        stop("The price coefficients of ", spec_name, " do not fit its columns")
+      }
+      estimate_cells[columns] <- cells$estimate_of[terms_of_columns]
+      se_cells[columns] <- cells$se_of[terms_of_columns]
+    }
+    body <- c(body,
+              paste0(paste(row_numbers, collapse = ", "), " & ",
+                     paste(estimate_cells, collapse = " & "), " \\\\"),
+              paste0(" & ", paste(se_cells, collapse = " & "), " \\\\"))
+  }
+  slide_tabular(header, body, 1 + length(groups))
+}
+
 #' p-value in a table cell: "<0.001" below 0.001, three decimals otherwise,
 #' "--" if missing
 p_cell <- function(p) {
@@ -1453,7 +1740,9 @@ slide_lr_table <- function(pairs, lr, results_list, labels, numbers) {
   restriction_labels <- c(
     regressors = "Added regressors",
     correlations = "Correlations",
-    group_covariances = "Group (co)variances"
+    group_covariances = "Group (co)variances",
+    prices = "Prices",
+    price_groups = "Price coefficient by group"
   )
   header <- paste("Test & Restriction & $\\chi^2$ & df & $p$ & Robust $p$ &",
                   "Mean weight \\\\")
@@ -1490,7 +1779,7 @@ slide_lr_table <- function(pairs, lr, results_list, labels, numbers) {
       body <- c(body, paste0(test_cells,
                              " & \\multicolumn{5}{l}{\\textit{not run: no results}} \\\\"))
     } else if (test$lr < 0) {
-      body <- c(body, paste0(test_cells, " & ", math_number(test$lr, 1),
+      body <- c(body, paste0(test_cells, " & ", latex_number(test$lr, 1),
                              "$^{\\dagger}$ & ", test$df,
                              " & -- & -- & -- \\\\"))
     } else {

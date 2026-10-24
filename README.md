@@ -867,6 +867,8 @@ do not exist.
 | (5) | `asc_by_group_uncorrelated` | one per technology and Berufsgruppe | — | none |
 | (6) | `asc_by_group_correlated` | one per technology and Berufsgruppe | — | within each Berufsgruppe |
 | (3i)–(6i) | (3)–(6) with `_interactions` | as (3)–(6) | as (3)–(6), and Berufsgruppe × attributes | as (3)–(6) |
+| (1p)–(6p) | (1)–(6) with `_prices` | as (1)–(6) | as (1)–(6), and the energy prices | as (1)–(6) |
+| (3pg)–(6pg) | (3)–(6) with `_prices_by_group` | as (3)–(6) | as (3)–(6), and the energy prices with one coefficient per Berufsgruppe | as (3)–(6) |
 
 All have the seven vignette attributes as regressors, with one fixed coefficient
 per technology, as in the policy brief. Specifications (1) and (2) are the
@@ -889,6 +891,25 @@ no parameter, so each is a separate model per Berufsgruppe, estimated together.
 A Berufsgruppe's interactions rest on its experts alone, so those of a small
 Berufsgruppe are estimated imprecisely (`01_run_specifications.R` prints the
 experts per Berufsgruppe).
+
+(1p) to (6p) add the price per kWh of each technology, from the energy prices
+the expert reported (Q15), with the rules of
+`05_rc_logit_explore_heterogeneity.R` for answers in euro, per litre or per kg
+and for unusable answers, except that pellet answers of 20 to 70 (not 10 to
+100) are read as cent per kg, so that answers per kWh stay per kWh. Gas, oil and pellets are priced per kWh of fuel,
+district heating per kWh of heat. The heat pump's price is the electricity
+price divided by the COP, a price per kWh of heat; the hybrid heating's is the
+weighted average of the gas price (weight `HYBRID_GAS_SHARE`) and the heat
+pump's. Prices are centred at
+the mean over the experts; a price not reported is set to the mean and gets a
+dummy. Each technology's price enters its own utility (also the reference
+outcome's), with one coefficient for all technologies, so the prices come
+before the `|` of `mlogit`'s formula; the dummies have one coefficient per
+technology. (3pg) to (6pg) give the price one coefficient per Berufsgruppe;
+as with the interactions, only next to the Berufsgruppe's main effect or its
+group constants. The AMEs are for an expert who reported the mean prices. The
+settings are in section 1 of `01_run_specifications.R`, the terms in
+`PRICE_TERMS`.
 
 ### Writing a specification
 
@@ -914,6 +935,7 @@ asc_by_group_correlated = list(
 | `random` | the terms whose coefficients vary across experts, each with its distribution: `"n"` normal, `"ln"` log-normal, `"cn"` censored normal, `"u"` uniform, `"t"` triangular. All other coefficients are fixed |
 | `correlation` | `"none"`, `"full"`, or a list of blocks of random terms: correlated within a block, independent across blocks |
 | `draws` | `"halton"` or `"halton_by_group"`, see below |
+| `prices` | optional: terms of `PRICE_TERMS`, each with one fixed coefficient: `PRICES` (one price coefficient) or `PRICES_BY_GROUP` (one per Berufsgruppe), both with the dummies |
 
 The building blocks `ATTRIBUTES`, `BERUFSGRUPPE_X_ATTRIBUTES` and
 `BERUFSGRUPPE_CONSTANTS` are written out above the list, one term per line, so
