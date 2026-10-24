@@ -933,14 +933,73 @@ or removed by adding or deleting a line. The regressors are 0/1 variables that
 `add_regressors()` (section 2.3) builds from the attributes and the
 Berufsgruppe: one dummy per attribute level besides the reference level
 (`REFERENCE_LEVELS` and `ATTRIBUTE_DUMMIES` in section 1), the group dummies,
-and the interactions `is_<group>_x_<dummy>`. The vignettes of the AMEs go
-through the same function, so a variable built there needs nothing else. A
-variable joined from elsewhere (e.g. from `survey_main` in section 2.1) also
-needs a value in the AME vignettes (section 4.4), e.g. its sample mean. Before
-the first estimation, the script checks every model: its columns exist and are
-linearly independent, its prices are price terms, and the model it starts from
-has one set of constants. To run only some models, list them in
-`MODELS_TO_RUN`; the others keep their saved results.
+and the interactions `is_<group>_x_<dummy>`. Before the first estimation, the
+script checks every model: its columns exist and are linearly independent, its
+prices are price terms, and the model it starts from has one set of constants.
+To run only some models, list them in `MODELS_TO_RUN`; the others keep their
+saved results.
+
+### Adding a regressor
+
+How depends on what kind of variable it is. In every case, its name then goes
+into the `regressors` of a model, or into a building block.
+
+**A variable built from the vignette attributes or the Berufsgruppe**, e.g. an
+interaction of low income and urgent replacement. Create it in
+`add_regressors()` (section 2.3), below the attribute dummies:
+
+```r
+data$income_low_x_urgent <- data$income_low * data$replacement_urgent
+```
+
+and add `"income_low_x_urgent"` to the `regressors` of a model. Nothing else is
+needed: the vignettes of the AMEs go through the same function, so they get
+the variable too.
+
+**An expert characteristic**, e.g. from `survey_main` (a preference score, the
+firm size) or regional data joined by `nuts3`:
+
+1. Section 2.1: add the column to `experts`, which is joined to the decisions:
+   ```r
+   experts <- experts_all %>%
+     select(resp_uid, all_of(price_columns), expert_var)
+   ```
+   It must be numeric. A categorical variable becomes one 0/1 dummy per
+   category besides a reference category, created in the same step.
+2. Section 2.4 (a): add it to `model_variables`, so that a missing value stops
+   the script with a clear message (otherwise the rank check in section 3 stops
+   with an unclear one). Whether to drop experts with a missing value is a
+   decision for the sample restrictions in section 2.2.
+3. Section 3: add it to the `regressors` of the models, e.g. as a building
+   block `EXPERT_CHARACTERISTICS <- c("expert_var")`. Like the Berufsgruppe
+   shifts, it gets one coefficient per technology.
+4. Section 4.4: give it a value in the vignettes of the AMEs, which are
+   evaluated for an expert with that value:
+   ```r
+   mutate(berufsgruppe = profile_name, expert_var = 0)
+   ```
+   For a continuous variable centred in step 1, 0 is the sample mean. Which
+   value to use is a substantive choice. Without it the script stops with
+   "Not in the data: expert_var".
+
+**A variable that differs between the technologies within one vignette**, like
+the price: a column in the long data (section 2.5) that holds each
+technology's value in its rows, as the loop over `PRICE_VARIABLES` does for the
+price. List it in the model's `prices` element, which takes any such term,
+each with one coefficient for all technologies.
+
+Things to keep in mind:
+
+- (6), (6i) and (6p) start from (4), (4i) and (4p). A regressor added to a
+  model by Berufsgruppe needs the same regressor in the model it starts from;
+  otherwise the script stops with "No starting value for ...". The other way
+  round is fine: extra parameters of the common model are ignored.
+- The checks before the first estimation (columns exist and are not collinear,
+  e.g. with the Berufsgruppe dummies) and after each estimation (every
+  coefficient is used in the AMEs) cover new regressors as well.
+- To estimate only the new or changed models, list them in `MODELS_TO_RUN`,
+  with a model's `start_from` model before it.
+- The output script needs a label for each new regressor.
 
 ### Starting values of the models by Berufsgruppe
 
