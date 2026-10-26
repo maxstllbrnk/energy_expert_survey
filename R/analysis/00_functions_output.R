@@ -1,58 +1,71 @@
 ################################################################################
-# 00_functions_output.R — tables, figures and Excel sheets of the mixed logit
-#                         specifications
+# 00_functions_output.R — tables, figures and tests from the saved results of
+#                         the mixed logit models of the recommendations
 # Inputs : none; sourced by 02_output.R
 # Outputs: none
-# Checks : every value in a table has a label; every parameter a table needs
-#          is in the results
+# Checks : inside the functions: every parameter a table needs is in the
+#          results; a model with Berufsgruppe shifts or interactions has one
+#          reference group; the restrictions of an LR test account for its
+#          degrees of freedom; every value has a label
 ################################################################################
-# The functions generalise section 8 of
-# R/first_policy_brief/03_rc_logit_with_ame.R and the heat map of
-# R/first_policy_brief/04_heatmap_rc_logit.R to the specifications of
-# 01_run_specifications.R. They take the saved results of one or several
-# specifications (the .rds files in results/) and a list of labels, which
-# 02_output.R defines:
-#   models              model -> label ("mnl", "mixed")
-#   technologies        outcome -> label
-#   technology_headers  outcome -> table column header (LaTeX, \\ breaks)
-#   terms               column of the design matrix of a variable -> label;
-#                       a column of an interaction is labelled by its parts
-#                       (column_labels())
-#   variations          variation of the reference vignette -> figure row
-#   profiles            profile of the AMEs -> label
-#   variables           expert characteristic -> label (comparison table)
-#   distributions       distribution of a random coefficient ("n", "ln",
-#                       ...) -> name
-#   prices              kind of a price term ("price", "not_reported", the
-#                       column kind of PRICE_TERMS) -> label; and
-#                       "all_technologies", the row of a price term with one
-#                       coefficient for all technologies
-#   group_name          what a group of constants is, e.g. "occupational group"
-# The labels are plain text; latex_text() turns them into LaTeX for the
-# tables. All outputs are in English: numbers with a decimal point (0.123)
-# and a thousands comma (2,400).
+# Every table and figure shows a quantity the same way, whatever the model:
+#
+#   mean constant       of a Berufsgruppe (or of all experts, if the model has
+#                       no Berufsgruppe): the mean utility of a technology
+#                       relative to the reference outcome, at the reference
+#                       vignette. With Berufsgruppe shifts (model 4) it is the
+#                       constant plus the group's shift; with constants by
+#                       Berufsgruppe (model 6) the group's constant.
+#   attribute effect    of a Berufsgruppe (models with interactions) or of all
+#                       experts: the attribute's coefficient plus the group's
+#                       interaction
+#   standard deviation  of a constant across the experts of a covariance
+#   and correlation     block: all experts (one covariance matrix) or one
+#                       Berufsgruppe (a covariance matrix per Berufsgruppe)
+#
+# A row thus always shows a group's own value, never its difference to the
+# reference group. Whether the Berufsgruppen differ is a question for the LR
+# tests, and for the probabilities and AMEs for the Krinsky-Robb draws
+# (group_differences()).
+#
+# Standard errors: a sum of coefficients is linear in them, so its standard
+# error comes from the cluster-robust covariance matrix; everything nonlinear
+# (standard deviations, correlations, probabilities, AMEs) has Krinsky-Robb
+# standard errors and percentile intervals, saved by 01_run_specifications.R.
 
-# 1. Numbers, text and labels --------------------------------------------------
+# 1. Formatting ----------------------------------------------------------------
 
-#' Numbers as LaTeX text: fixed number of digits, thousands comma, a proper
-#' minus sign ($-$), "--" for a missing value (as in section 8.3 of the policy
-#' brief script)
+#' Numbers as LaTeX text: fixed decimals, a thousands comma, the minus sign as
+#' $-$, an empty cell for NA. Rounded first, so that -0.001 reads 0.00 and not
+#' -0.00 (round() keeps the sign of a negative zero).
 latex_number <- function(x, digits) {
-  text <- formatC(x, format = "f", digits = digits, big.mark = ",")
+  x_rounded <- round(x, digits)
+  # which(): the positions where the condition is TRUE, leaving out NA
+  x_rounded[which(x_rounded == 0)] <- 0
+  text <- formatC(x_rounded, format = "f", digits = digits, big.mark = ",")
   text <- sub("^-", "$-$", text)
-  text[is.na(x)] <- "--"
+  text[is.na(x)] <- ""
   text
 }
 
-#' Number inside a LaTeX formula ($...$), without a thousands separator: a
-#' comma in a formula would be followed by a space
-math_number <- function(x, digits) {
-  formatC(x, format = "f", digits = digits)
+#' p-value as LaTeX text: three decimals, "$<$0.001" below 0.001, "--" if it
+#' could not be computed
+latex_p <- function(p) {
+  text <- latex_number(p, 3)
+  text[!is.na(p) & p < 0.001] <- "$<$0.001"
+  text[is.na(p)] <- "--"
+  text
 }
 
-#' p-value as LaTeX text
-latex_p <- function(p) {
-  if (p < 0.001) "$p<0.001$" else paste0("$p=", math_number(p, 3), "$")
+#' Significance stars at 10, 5 and 1 percent; none without a p-value
+star_text <- function(p) {
+  case_when(
+    is.na(p) ~ "",
+    p < 0.01 ~ "$^{***}$",
+    p < 0.05 ~ "$^{**}$",
+    p < 0.10 ~ "$^{*}$",
+    TRUE ~ ""
+  )
 }
 
 #' Plain text as LaTeX: the characters that LaTeX reserves are escaped, and
@@ -69,1783 +82,826 @@ latex_text <- function(text) {
   gsub("€", "\\texteuro{}", text, fixed = TRUE)
 }
 
+#' The label of each value, from a named vector of labels; stops if a value
+#' has none, so that no raw name reaches a table or figure
+#'
+#' @param values character vector, e.g. the outcomes of a table
+#' @param labels named character vector: value -> label
+#' @param what   what the values are, for the error message
+label_of <- function(values, labels, what) {
+  missing_values <- setdiff(unique(values), names(labels))
+  if (length(missing_values) > 0) {
+    stop("No label for the ", what, ": ", paste(missing_values, collapse = ", "),
+         " (add it in section 1 of 02_output.R)")
+  }
+  unname(labels[values])
+}
+
 #' Write the lines of a .tex file in UTF-8, so the special characters are read
 #' the same on every system
 write_tex <- function(lines, file) {
-  table_file <- file(file, open = "w", encoding = "UTF-8")
-  writeLines(lines, table_file)
-  close(table_file)
+  connection <- file(file, open = "w", encoding = "UTF-8")
+  writeLines(lines, connection)
+  close(connection)
 }
 
-#' Formatted cells of a coefficient table: estimate with stars, standard error
-#' in parentheses. Rows without a p-value (standard deviations) get no stars.
-#' @param digits decimals: 3 in the paper tables, 2 on the slides
-#' @return named lists estimate_of and se_of: parameter name -> cell text
-coefficient_cells <- function(coefficients, digits = 3) {
-  coefficient_text <- coefficients %>%
-    mutate(
-      stars = case_when(
-        is.na(p) ~ "",
-        p < 0.01 ~ "$^{***}$",
-        p < 0.05 ~ "$^{**}$",
-        p < 0.10 ~ "$^{*}$",
-        TRUE ~ ""
-      ),
-      estimate_text = paste0(latex_number(estimate, digits), stars),
-      se_text = paste0("(", latex_number(se, digits), ")")
-    )
-  # setNames(): the cell texts, named by their parameters
-  list(estimate_of = setNames(coefficient_text$estimate_text,
-                              coefficient_text$parameter),
-       se_of = setNames(coefficient_text$se_text, coefficient_text$parameter))
-}
+# 2. Quantities from the saved results -----------------------------------------
 
-#' Labels of the columns of a design matrix (plain text): labels$terms for the
-#' columns of a variable; for a column of an interaction, the labels of its
-#' parts joined by " × ", e.g. "Chimney sweep × Income below €40,000". The
-#' parts are those of the column's name in R's coding (r_name of
-#' design_columns()).
+#' Estimate and standard error of a sum of coefficients, e.g. a constant plus
+#' a Berufsgruppe's shift. The sum is linear in the coefficients, so its
+#' variance is w' V w, with w the 0/1 weights and V the cluster-robust
+#' covariance matrix of the coefficients.
 #'
-#' @param columns the columns of a specification (results$columns)
-#' @return named character vector: column -> label
-column_labels <- function(columns, labels) {
-  result <- character(0)
-  missing_labels <- character(0)
-  for (k in seq_len(nrow(columns))) {
-    # one part for a variable's column, one per variable for an interaction
-    parts <- strsplit(columns$r_name[k], ":", fixed = TRUE)[[1]]
-    missing_labels <- c(missing_labels, setdiff(parts, names(labels$terms)))
-    result[columns$column[k]] <- paste(labels$terms[parts], collapse = " × ")
+#' @param results    saved results of one model
+#' @param parameters names of the coefficients to add up
+#' @return tibble, one row: estimate, se, z, p
+sum_of_coefficients <- function(results, parameters) {
+  theta <- results$coefficients
+  missing_parameters <- setdiff(parameters, names(theta))
+  if (length(missing_parameters) > 0) {
+    stop("Not a parameter of ", results$name, ": ",
+         paste(missing_parameters, collapse = ", "))
   }
-  if (length(missing_labels) > 0) {
-    stop("No label for: ", paste(unique(missing_labels), collapse = ", "),
-         " (add it to TERM_LABELS in 02_output.R)")
-  }
-  result
+  weights <- rep(0, length(theta))
+  names(weights) <- names(theta)
+  weights[parameters] <- 1
+  V <- results$vcov[names(theta), names(theta)]
+  estimate <- sum(weights * theta)
+  se <- sqrt(as.numeric(t(weights) %*% V %*% weights))
+  tibble(estimate = estimate, se = se, z = estimate / se,
+         p = 2 * pnorm(-abs(estimate / se)))
 }
 
-#' Label of a regressor of a specification that is not a vignette attribute,
-#' for the comparison table: labels$variables for a variable; for an
-#' interaction, the labels of its variables joined by " × ", with "attributes"
-#' for every attribute, e.g. "Occupational group × attributes" for all
-#' interactions of the Berufsgruppe with an attribute
+#' How a model treats the Berufsgruppen, read from its specification
 #'
-#' @param regressor  a regressor as written in the specification
-#' @param attributes the vignette attributes
-regressor_label <- function(regressor, labels, attributes) {
-  variables <- strsplit(regressor, ":", fixed = TRUE)[[1]]
-  parts <- character(0)
-  for (variable in variables) {
-    if (variable %in% attributes) {
-      parts <- c(parts, "attributes")
-    } else if (variable %in% names(labels$variables)) {
-      parts <- c(parts, labels$variables[[variable]])
-    } else {
-      stop("No label for: ", variable, " (add it to VARIABLE_LABELS in 02_output.R)")
+#' @param specification results$specification
+#' @param group_dummies named vector: group dummy -> Berufsgruppe, e.g.
+#'                      is_shk = "SHK-Handwerk"
+#' @return list:
+#'   group_constants  TRUE: one set of constants, and one covariance matrix,
+#'                    per Berufsgruppe
+#'   group_shifts     the group dummies that shift the mean constants
+#'   interactions     TRUE: the attribute effects differ by Berufsgruppe
+#'   prices           TRUE: the model has the energy prices
+#'   reference_dummy  the group dummy without shift and interactions, NA if
+#'                    the model has neither
+model_structure <- function(specification, group_dummies) {
+  regressors <- specification$regressors
+  group_constants <- !identical(specification$constants, "(Intercept)")
+  group_shifts <- intersect(names(group_dummies), regressors)
+  # the group dummies with interactions, e.g. is_shk for is_shk_x_age_60
+  dummies_with_interactions <- character(0)
+  for (dummy in names(group_dummies)) {
+    if (any(startsWith(regressors, paste0(dummy, "_x_")))) {
+      dummies_with_interactions <- c(dummies_with_interactions, dummy)
     }
   }
-  paste(unique(parts), collapse = " × ")
+
+  # The groups with a shift or with interactions are all but one: the
+  # reference group, whose constants and attribute coefficients are the
+  # model's own
+  reference_dummy <- NA_character_
+  for (dummies in list(group_shifts, dummies_with_interactions)) {
+    if (length(dummies) == 0) next
+    if (length(dummies) != length(group_dummies) - 1) {
+      stop("A model needs the shifts or interactions of all Berufsgruppen ",
+           "but one: ", paste(dummies, collapse = ", "))
+    }
+    reference <- setdiff(names(group_dummies), dummies)
+    if (!is.na(reference_dummy) && reference != reference_dummy) {
+      stop("The shifts and the interactions have different reference groups")
+    }
+    reference_dummy <- reference
+  }
+
+  list(group_constants = group_constants,
+       group_shifts = group_shifts,
+       interactions = length(dummies_with_interactions) > 0,
+       prices = length(specification$prices) > 0,
+       reference_dummy = reference_dummy)
 }
 
-#' The rows of the prices in the coefficient tables: a heading per kind of
-#' term (labels$prices, e.g. "Price per kWh (cent)"), then one row per term.
-#' A term is labelled by its group if it is a price coefficient of one group
-#' (labels$groups), by its technology if it belongs to one technology (e.g.
-#' its dummy for a price not reported), and as a term of all technologies
-#' otherwise (labels$prices[["all_technologies"]]).
+#' Mean constants by Berufsgruppe, or for all experts if the model has no
+#' Berufsgruppe (see the top of this file)
 #'
-#' @param price_terms the price terms of a specification (results$price_terms),
-#'                    one row per term and technology
-#' @return tibble, one row per table row: label (plain text), term (NA for a
-#'   heading) and kind (of the heading the row is under)
-price_rows <- function(price_terms, labels) {
-  groups <- unique(price_terms$group[!is.na(price_terms$group)])
-  missing_labels <- c(setdiff(price_terms$technology, names(labels$technologies)),
-                      setdiff(c(price_terms$kind, "all_technologies"),
-                              names(labels$prices)),
-                      setdiff(groups, names(labels$groups)))
-  if (length(missing_labels) > 0) {
-    stop("No label for: ", paste(unique(missing_labels), collapse = ", "),
-         " (add it to the labels in 02_output.R)")
+#' @return tibble: group (Berufsgruppe or "All experts"), technology,
+#'   estimate, se, z, p
+mean_constants <- function(results, group_dummies) {
+  setup <- model_structure(results$specification, group_dummies)
+  technologies <- results$outcomes[-1]
+  has_groups <- setup$group_constants || length(setup$group_shifts) > 0
+  table <- tibble()
+  if (!has_groups) {
+    for (technology in technologies) {
+      table <- bind_rows(table, tibble(
+        group = "All experts",
+        technology = technology,
+        sum_of_coefficients(results, paste0("(Intercept):", technology))
+      ))
+    }
+    return(table)
   }
-  rows <- tibble(label = character(0), term = character(0),
-                 kind = character(0))
-  for (price_kind in unique(price_terms$kind)) {
-    rows <- bind_rows(rows, tibble(label = labels$prices[[price_kind]],
-                                   term = NA_character_, kind = price_kind))
-    for (price_term in unique(price_terms$term[price_terms$kind == price_kind])) {
-      is_term <- price_terms$term == price_term
-      group <- price_terms$group[is_term][1]
-      if (!is.na(group)) {
-        label <- labels$groups[[group]]
-      } else if (sum(is_term) == 1) {
-        label <- labels$technologies[[price_terms$technology[is_term]]]
+  for (dummy in names(group_dummies)) {
+    for (technology in technologies) {
+      if (setup$group_constants) {
+        parameters <- paste0(dummy, ":", technology)
       } else {
-        label <- labels$prices[["all_technologies"]]
+        parameters <- paste0("(Intercept):", technology)
+        if (dummy %in% setup$group_shifts) {
+          parameters <- c(parameters, paste0(dummy, ":", technology))
+        }
       }
-      rows <- bind_rows(rows, tibble(label = label, term = price_term,
-                                     kind = price_kind))
-    }
-  }
-  rows
-}
-
-#' Distributions of the random coefficients, and how panels A and B of the
-#' coefficient table read for each, as text for the notes
-#'
-#' @param distributions the distributions that occur ("n", "ln", ...)
-#' @return character vector of sentences; empty if all are normal
-distribution_note <- function(distributions, labels) {
-  notes <- character(0)
-  if (any(distributions %in% c("ln", "cn"))) {
-    notes <- c(notes, paste(
-      "For a log-normal or censored normal coefficient, panels A and B show",
-      "the mean and the standard deviation of the normal before it is",
-      "exponentiated or censored at zero."))
-  }
-  if (any(distributions %in% c("u", "t"))) {
-    notes <- c(notes, paste(
-      "For a uniform or triangular coefficient, panel A shows the mean and",
-      "panel B the half-width of its range."))
-  }
-  notes
-}
-
-#' One cell of a table with one item per line: a one-column tabular inside
-#' the cell, so that \\ breaks the line
-stacked_cell <- function(items) {
-  if (length(items) == 0) {
-    "--"
-  } else {
-    paste0("\\begin{tabular}[t]{@{}c@{}}", paste(items, collapse = "\\\\"),
-           "\\end{tabular}")
-  }
-}
-
-# 2. LaTeX tables --------------------------------------------------------------
-
-# How the rows of a random coefficient read in the tables, by its
-# distribution: its first parameter (panel A) and its spread (panel B)
-MEAN_SUFFIX <- c(n = " (mean)", ln = " (mean of the log)",
-                 cn = " (mean before censoring)", u = " (mean)", t = " (mean)")
-SPREAD_SUFFIX <- c(n = "", ln = " (sd of the log)",
-                   cn = " (sd before censoring)", u = " (half-width)",
-                   t = " (half-width)")
-
-#' Rows of the correlations of one correlation block, lower triangle: the row
-#' of technology i has its correlations with the technologies j left of it,
-#' the standard errors in parentheses below. omega_parameters() names each
-#' correlation once, with the two coefficients in mlogit's order, so both
-#' orders of the pair are tried.
-#'
-#' @param estimate_of, se_of from coefficient_cells()
-#' @param column       the column of the design matrix whose coefficients
-#'                     form the block (one column per block)
-#' @param technologies the outcomes but the reference, in their order
-#' @return character vector, two lines per technology but the first
-correlation_rows <- function(estimate_of, se_of, column, technologies, labels) {
-  lines <- character(0)
-  for (i in 2:length(technologies)) {
-    estimate_cells <- rep("", length(technologies))
-    se_cells <- rep("", length(technologies))
-    for (j in 1:(i - 1)) {
-      name_ji <- paste0("cor.", column, ":", technologies[j], ":", column, ":",
-                        technologies[i])
-      name_ij <- paste0("cor.", column, ":", technologies[i], ":", column, ":",
-                        technologies[j])
-      parameter <- if (name_ji %in% names(estimate_of)) name_ji else name_ij
-      if (!parameter %in% names(estimate_of)) {
-        stop("Correlation missing: ", parameter)
-      }
-      estimate_cells[j] <- estimate_of[[parameter]]
-      se_cells[j] <- se_of[[parameter]]
-    }
-    lines <- c(lines,
-               paste0(latex_text(labels$technologies[[technologies[i]]]), " & ",
-                      paste(estimate_cells, collapse = " & "), " \\\\"),
-               paste0(" & ", paste(se_cells, collapse = " & "), " \\\\"))
-  }
-  lines
-}
-
-#' LaTeX table of the mixed logit of one specification (section 8.3 of the
-#' policy brief script)
-#'
-#' Layout: one column per technology. Panel A: one coefficient per regressor
-#' and technology, with its standard error in parentheses below; for a random
-#' coefficient, its mean. Panel B: the standard deviations of the random
-#' coefficients across experts, one row per regressor. Panel C (correlated
-#' models): their correlations, lower triangle, one block per correlation
-#' block. The last panel (D, or C without correlations): fit.
-#' Generalisation: with group constants, panel A has one row of mean
-#' constants per group, and panel B one row per group; random coefficients of
-#' other regressors get their rows in panels B and C as well. With prices,
-#' panel A ends with one row per price term (price_rows()), shown across the
-#' columns.
-#' The LaTeX document needs \usepackage[T1]{fontenc}, booktabs and
-#' threeparttable.
-#'
-#' @param results           saved results of one specification
-#' @param labels            list of labels, see the top of this file
-#' @param reference_note    text of the notes describing the reference vignette
-#' @param sample_note       text of the notes describing the sample
-#' @param extra_note        further text for the notes of this table, or NULL
-#' @param show_correlations FALSE leaves panel C out, e.g. when it would not
-#'                          fit on a page; the notes then refer to the heat
-#'                          maps and the Excel workbook. Panel C is left out as
-#'                          well when a correlation block holds the
-#'                          coefficients of several regressors.
-#' @param hidden_terms      terms (as in the specification) whose rows panel A
-#'                          leaves out, e.g. the interactions; the notes then
-#'                          refer to the Excel workbook
-#' @return character vector, the lines of the .tex file
-coefficient_table_tex <- function(results, labels, reference_note, sample_note,
-                                  extra_note = NULL, show_correlations = TRUE,
-                                  hidden_terms = NULL) {
-  # the outcomes but the reference, in their order
-  technologies <- results$technologies
-  coefficients <- results$coefficient_table %>%
-    filter(model == "mixed")
-  fit <- results$fit_statistics %>%
-    filter(model == "mixed")
-  random <- results$random_coefficients
-  specification <- results$specification
-  is_correlated <- !identical(specification$correlation, "none")
-  has_groups <- !identical(specification$constants, "1")
-  random_columns <- unique(random$column)
-  blocks <- unique(random$block)
-  # results without prices: no price_terms (results from before the prices),
-  # or a table without rows
-  price_terms <- results$price_terms
-  has_prices <- !is.null(price_terms) && nrow(price_terms) > 0
-
-  # Every value that appears in the table needs a label
-  column_label <- column_labels(results$columns, labels)
-  missing_labels <- c(setdiff(technologies, names(labels$technology_headers)),
-                      setdiff(technologies, names(labels$technologies)),
-                      setdiff(results$reference_outcome,
-                              names(labels$technologies)))
-  if (length(missing_labels) > 0) {
-    stop("No label for: ", paste(missing_labels, collapse = ", "),
-         " (add it to the labels in 02_output.R)")
-  }
-  reference_label <- latex_text(labels$technologies[[results$reference_outcome]])
-
-  # How the rows of a random coefficient read in panels A and B, by its
-  # distribution (MEAN_SUFFIX, SPREAD_SUFFIX at the top of this section)
-  mean_suffix <- MEAN_SUFFIX
-  spread_suffix <- SPREAD_SUFFIX
-  # column -> distribution
-  distribution_of <- setNames(random$distribution, random$column)
-
-  # Panel C needs one regressor per correlation block: the block is then a
-  # triangle of technologies
-  columns_per_block <- numeric(0)
-  for (b in blocks) {
-    is_in_block <- !is.na(random$block) & random$block == b
-    columns_per_block <- c(columns_per_block,
-                           length(unique(random$column[is_in_block])))
-  }
-  has_panel_c <- is_correlated && show_correlations &&
-    all(columns_per_block == 1)
-
-  cells <- coefficient_cells(coefficients)
-  estimate_of <- cells$estimate_of
-  se_of <- cells$se_of
-
-  # Column headers: a one-column tabular inside each header cell, so that the
-  # line break in the header labels works
-  column_headers <- paste0("\\begin{tabular}[b]{@{}c@{}}",
-                           labels$technology_headers[technologies],
-                           "\\end{tabular}")
-  n_columns <- length(technologies) + 1                # row labels + technologies
-  span <- paste0("\\multicolumn{", length(technologies), "}{c}{")   # fit rows
-
-  # (a) Head of the table
-  lines <- c(
-    "\\begin{table}[htbp]",
-    "\\centering",
-    "\\begin{threeparttable}",
-    paste0("\\caption{Recommended heating technology: ",
-           latex_text(specification$label), " (reference category: ",
-           reference_label, ")}"),
-    paste0("\\label{tab:rcl_", results$arm, "_ref_",
-           file_name(results$reference_outcome), "_", results$name, "}"),
-    "\\footnotesize",
-    "\\setlength{\\tabcolsep}{4pt}",
-    paste0("\\begin{tabular}{l", strrep("c", length(technologies)), "}"),
-    "\\toprule",
-    paste0(" & ", paste(column_headers, collapse = " & "), " \\\\"),
-    "\\midrule",
-    paste0("\\multicolumn{", n_columns, "}{l}{\\textit{A. Coefficients}} \\\\")
-  )
-
-  # (b) Panel A: two rows per column of the design matrix, the estimates and
-  #     the standard errors. A random coefficient's row shows its mean.
-  is_shown <- !(results$columns$term %in% hidden_terms)
-  for (column in results$columns$column[is_shown]) {
-    parameters <- paste0(column, ":", technologies)
-    if (anyNA(estimate_of[parameters])) stop("Coefficients missing for ", column)
-    label <- latex_text(column_label[[column]])
-    if (column %in% random_columns) {
-      label <- paste0(label, latex_text(mean_suffix[[distribution_of[[column]]]]))
-    }
-    lines <- c(lines,
-               paste0(label, " & ", paste(estimate_of[parameters], collapse = " & "),
-                      " \\\\"),
-               paste0(" & ", paste(se_of[parameters], collapse = " & "), " \\\\"))
-  }
-  #     Generalisation: the prices (price_rows()): a heading per kind of
-  #     term, then one row per term, its estimate and standard error centred
-  #     across the technology columns as the fit statistics. A term's
-  #     coefficient belongs to all its technologies, also to the reference
-  #     category, which has no column.
-  if (has_prices) {
-    price_table_rows <- price_rows(price_terms, labels)
-    for (r in seq_len(nrow(price_table_rows))) {
-      price_term <- price_table_rows$term[r]
-      row_label <- latex_text(price_table_rows$label[r])
-      if (is.na(price_term)) {
-        lines <- c(lines, paste0("\\multicolumn{", n_columns, "}{l}{",
-                                 row_label, "} \\\\"))
-        next
-      }
-      if (!(price_term %in% names(estimate_of))) {
-        stop("Coefficient missing for ", price_term)
-      }
-      lines <- c(lines,
-                 paste0("\\quad ", row_label, " & ", span,
-                        estimate_of[[price_term]], "} \\\\"),
-                 paste0(" & ", span, se_of[[price_term]], "} \\\\"))
-    }
-  }
-
-  # (c) Panel B: standard deviations of the random coefficients across
-  #     experts, one row per column of the design matrix
-  lines <- c(lines,
-             "\\midrule",
-             paste0("\\multicolumn{", n_columns,
-                    "}{l}{\\textit{B. Standard deviations across experts}} \\\\"))
-  for (column in random_columns) {
-    parameters <- paste0("sd.", column, ":", technologies)
-    if (anyNA(estimate_of[parameters])) {
-      stop("Standard deviations missing for ", column)
-    }
-    label <- paste0(latex_text(column_label[[column]]),
-                    latex_text(spread_suffix[[distribution_of[[column]]]]))
-    lines <- c(lines,
-               paste0(label, " & ", paste(estimate_of[parameters], collapse = " & "),
-                      " \\\\"),
-               paste0(" & ", paste(se_of[parameters], collapse = " & "), " \\\\"))
-  }
-
-  # (d) Panel C: correlations, lower triangle (correlation_rows()). One block
-  #     per correlation block; correlations across blocks are zero by
-  #     construction.
-  if (has_panel_c) {
-    lines <- c(lines,
-               "\\midrule",
-               paste0("\\multicolumn{", n_columns,
-                      "}{l}{\\textit{C. Correlations across experts}} \\\\"))
-    for (b in blocks) {
-      column <- unique(random$column[random$block == b])
-      if (length(blocks) > 1) {
-        lines <- c(lines, paste0("\\multicolumn{", n_columns, "}{l}{",
-                                 latex_text(column_label[[column]]), "} \\\\"))
-      }
-      lines <- c(lines, correlation_rows(estimate_of, se_of, column,
-                                         technologies, labels))
-    }
-  }
-
-  # (e) The last panel, D (C without correlations): fit statistics, each value
-  #     centred across the technology columns
-  fit_panel <- if (has_panel_c) "D" else "C"
-  lines <- c(lines,
-             "\\midrule",
-             paste0("\\multicolumn{", n_columns, "}{l}{\\textit{", fit_panel,
-                    ". Fit}} \\\\"),
-             paste0("Decisions & ", span, latex_number(fit$n_choices, 0), "} \\\\"),
-             paste0("Experts & ", span, latex_number(fit$n_experts, 0), "} \\\\"),
-             paste0("Parameters & ", span, fit$n_parameters, "} \\\\"),
-             paste0("Log-likelihood & ", span,
-                    latex_number(fit$log_likelihood, 1), "} \\\\"),
-             paste0("McFadden $R^2$ & ", span,
-                    latex_number(fit$mcfadden_r2, 3), "} \\\\"),
-             paste0("LR test against constants only & ", span,
-                    "$\\chi^2(", fit$lr_constants_only_df, ")=",
-                    math_number(fit$lr_constants_only, 1), "$, ",
-                    latex_p(fit$lr_constants_only_p), "} \\\\"),
-             paste0("LR test against multinomial logit & ", span,
-                    "$\\chi^2(", fit$lr_mnl_df, ")=",
-                    math_number(fit$lr_mnl, 1), "$, ",
-                    latex_p(fit$lr_mnl_p), "} \\\\"),
-             paste0("Halton draws per expert & ", span,
-                    latex_number(fit$n_draws_per_expert, 0), "} \\\\"))
-
-  # (f) Notes. What is random, with which distribution: the constants, the
-  #     constants of each group, or a regressor's label (the labels of its
-  #     columns)
-  random_items <- character(0)
-  for (term in unique(random$term)) {
-    term_columns <- unique(random$column[random$term == term])
-    distribution <- random$distribution[random$term == term][1]
-    if (term == "(Intercept)") {
-      item <- "the constants"
-    } else if (has_groups && term %in% specification$constants) {
-      item <- paste("the constants of each", labels$group_name)
-    } else {
-      item <- paste(column_label[term_columns], collapse = ", ")
-    }
-    random_items <- c(random_items,
-                      paste0(item, " (", labels$distributions[[distribution]],
-                             ")"))
-  }
-  # the constants of the groups once
-  random_items <- unique(random_items)
-  random_note <- paste0("Random coefficients, which vary across experts: ",
-                        paste(random_items, collapse = "; "), ".")
-  if (has_groups) {
-    random_note <- paste0(random_note, " Each ", labels$group_name,
-                          " has its own means (panel A) and standard ",
-                          "deviations (panel B) of the constants.")
-  }
-  # Correlation: which coefficients are correlated, and where the table shows
-  # their standard deviations and correlations. One block per group's
-  # constants reads "within each group"; lengths(): the number of terms of
-  # each block.
-  is_block_per_group <- has_groups && is.list(specification$correlation) &&
-    all(lengths(specification$correlation) == 1) &&
-    all(unlist(specification$correlation) %in% specification$constants)
-  if (!is_correlated) {
-    correlation_note <- "The random coefficients are independent of each other."
-  } else {
-    if (identical(specification$correlation, "full")) {
-      structure_text <- "The random coefficients are correlated"
-    } else if (is_block_per_group) {
-      # every expert belongs to one group, so these correlations never enter
-      # the likelihood (cholesky_fixed_at_zero())
-      structure_text <- paste0(
-        "The constants are correlated within each ", labels$group_name,
-        "; correlations across groups are not identified, as each expert ",
-        "belongs to one group, and are set to zero")
-    } else {
-      block_texts <- character(0)
-      for (b in blocks) {
-        block_columns <- unique(random$column[random$block == b])
-        block_texts <- c(block_texts,
-                         paste(column_label[block_columns], collapse = "; "))
-      }
-      structure_text <- paste0(
-        "The random coefficients are correlated within each of the blocks [",
-        paste(block_texts, collapse = "], ["), "]; correlations across blocks ",
-        "are set to zero")
-    }
-    if (has_panel_c) {
-      panels_text <- paste("; panels B and C show their standard deviations and",
-                           "correlations, with delta-method standard errors.")
-    } else {
-      panels_text <- paste("; panel B shows their standard deviations, with",
-                           "delta-method standard errors.")
-    }
-    correlation_note <- paste0(structure_text, panels_text)
-  }
-  correlations_note <- NULL
-  if (is_correlated && !has_panel_c) {
-    correlations_note <- paste("The correlations are not in this table because",
-                               "of their number; they are in the heat maps and",
-                               "the Excel workbook.")
-  }
-  hidden_note <- NULL
-  if (any(results$columns$term %in% hidden_terms)) {
-    hidden_labels <- character(0)
-    for (term in intersect(hidden_terms, results$columns$term)) {
-      hidden_labels <- c(hidden_labels,
-                         regressor_label(term, labels,
-                                         names(results$attribute_levels)))
-    }
-    hidden_note <- paste0("Not in this table because of their number: the ",
-                          "coefficients of ",
-                          paste(unique(hidden_labels), collapse = ", "),
-                          ". They are in the Excel workbook.")
-  }
-  draws_note <- NULL
-  if (specification$draws == "halton_by_group") {
-    draws_note <- paste0("The Halton sequences start with the same primes for ",
-                         "each ", labels$group_name, ".")
-  }
-  price_note <- NULL
-  if (has_prices) {
-    rules <- results$price_settings
-    price_note <- paste0(
-      "Prices: what households among the expert's clients paid in January ",
-      "and February 2026, as the expert reported it, in cent per kWh: per kWh ",
-      "of fuel for gas, oil and pellets, per kWh of heat for district ",
-      "heating. Answers below ", rules$euro_below, " are read as euro, oil ",
-      "prices of ", rules$oil_per_litre[1], " to ", rules$oil_per_litre[2],
-      " as cent per litre (divided by 10), pellet prices of ",
-      rules$pellets_per_kg[1], " to ", rules$pellets_per_kg[2], " as cent per ",
-      "kg (divided by 5); answers more than ", rules$valid_factor, " times ",
-      "above or below the median count as not reported. The heat pump's price ",
-      "is the electricity price divided by a coefficient of performance of ",
-      rules$cop[["radiators"]], " with radiators and ",
-      rules$cop[["floor_heating"]], " with underfloor heating, a price per kWh ",
-      "of heat; the hybrid heating's is the weighted average of the gas price ",
-      "(weight ", rules$hybrid_gas_share, ") and the heat pump's. Prices are ",
-      "centred at their mean over the experts of the three occupational ",
-      "groups in both arms. A price not reported (blank or not usable) is set ",
-      "to the mean and gets the dummy for a price not reported; for the hybrid ",
-      "heating, if the gas or the electricity price is not reported. Each ",
-      "technology's price enters its own utility, also that of the reference ",
-      "category, with one coefficient for all technologies (or one per ",
-      "occupational group): the effect of one cent more on the log odds of ",
-      "that technology against every other outcome. The dummies have one ",
-      "coefficient per technology. The marginal effects are for an expert ",
-      "who reported the mean prices."
-    )
-  }
-  # The sample first, then the model and its parameters
-  notes <- c(
-    sample_note,
-    paste("Mixed logit of the heating technology that experts recommend for the",
-          "household of a vignette. Reference category:",
-          paste0("\\textit{", reference_label, "};"),
-          "each coefficient is the effect on the log odds of the recommendation in",
-          "its column relative to the reference category."),
-    latex_text(random_note),
-    distribution_note(random$distribution, labels),
-    latex_text(correlation_note),
-    correlations_note,
-    latex_text(hidden_note),
-    latex_text(price_note),
-    extra_note,
-    reference_note,
-    paste("Standard errors in parentheses, clustered by expert (sandwich",
-          "estimator). $^{*}$ $p<0.10$, $^{**}$ $p<0.05$, $^{***}$ $p<0.01$",
-          "(two-sided $z$ tests)."),
-    paste("Standard deviations carry no stars: a standard deviation of zero lies",
-          "on the boundary of the parameter space."),
-    paste("McFadden $R^2$ and the first LR test compare the model with a model",
-          "with constants only, which predicts the observed shares of the",
-          "recommendations for every vignette."),
-    paste("The LR test against the multinomial logit tests whether the random",
-          "coefficients vary across experts; its $p$-value is conservative,",
-          "because a variance of zero lies on the boundary of the parameter",
-          "space."),
-    draws_note
-  )
-  c(lines,
-    "\\bottomrule",
-    "\\end{tabular}",
-    "\\begin{tablenotes}[flushleft]",
-    "\\footnotesize",
-    paste0("\\item \\textit{Notes:} ", paste(notes, collapse = " ")),
-    "\\end{tablenotes}",
-    "\\end{threeparttable}",
-    "\\end{table}")
-}
-
-#' LaTeX table comparing the mixed logits of several specifications: one
-#' column per specification, headed by its number. Panel A: what each
-#' specification contains and its fit. Panel B: likelihood-ratio tests between
-#' nested specifications.
-#'
-#' @param results_list named list of saved results, in the order of the columns
-#' @param lr           tibble from lr_tests(): restricted, unrestricted, lr, df, p,
-#'                     p_robust
-#' @param attributes   the vignette attributes; the other regressors are listed
-#'                     in the row "Further regressors"
-#' @param numbers      number of each specification, e.g. "(5)", named by the
-#'                     specifications; all of them, also those of the tests
-#'                     with a specification that is not a column
-#' @param table_name   part of the LaTeX label, e.g. "comparison"
-#' @return character vector, the lines of the .tex file
-comparison_table_tex <- function(results_list, lr, labels, attributes,
-                                 sample_note, numbers, table_name) {
-  n_specifications <- length(results_list)
-  column_numbers <- numbers[names(results_list)]
-  n_columns <- n_specifications + 1
-  first <- results_list[[1]]
-
-  # One cell per specification and row
-  spec_labels <- character(0)
-  random_cells <- character(0)
-  regressors_cells <- character(0)
-  correlation_cells <- character(0)
-  has_any_groups <- FALSE
-  has_any_prices <- FALSE
-  fit_rows <- tibble()
-  for (spec_name in names(results_list)) {
-    results <- results_list[[spec_name]]
-    specification <- results$specification
-    random <- results$random_coefficients
-    spec_labels[spec_name] <- specification$label
-    has_groups <- !identical(specification$constants, "1")
-    has_any_groups <- has_any_groups || has_groups
-    column_label <- column_labels(results$columns, labels)
-
-    # Random coefficients: one line per regressor, and its distribution on
-    # the next line if it is not normal (\\ breaks the line in the cell)
-    random_items <- character(0)
-    for (term in unique(random$term)) {
-      distribution <- random$distribution[random$term == term][1]
-      if (term == "(Intercept)") {
-        item <- "Constants"
-      } else if (has_groups && term %in% specification$constants) {
-        item <- "Group constants"
-      } else {
-        item <- paste(column_label[unique(random$column[random$term == term])],
-                      collapse = ", ")
-      }
-      item <- latex_text(item)
-      if (distribution != "n") {
-        item <- paste0(item, "\\\\(", labels$distributions[[distribution]], ")")
-      }
-      random_items <- c(random_items, item)
-    }
-    random_cells[spec_name] <- stacked_cell(unique(random_items))
-
-    # Further regressors: those that are not vignette attributes. An
-    # interaction takes two lines, broken after its "×", so that four or
-    # five columns fit the page.
-    other_regressors <- setdiff(specification$regressors, attributes)
-    regressor_items <- character(0)
-    for (regressor in other_regressors) {
-      regressor_items <- c(regressor_items,
-                           regressor_label(regressor, labels, attributes))
-    }
-    # the prices, labelled by labels$variables: "prices", or
-    # "prices_by_group" with price coefficients by group
-    if (length(specification$prices) > 0) {
-      has_any_prices <- TRUE
-      price_label <- "prices"
-      if (any(!is.na(results$price_terms$group))) {
-        price_label <- "prices_by_group"
-      }
-      regressor_items <- c(regressor_items,
-                           regressor_label(price_label, labels, attributes))
-    }
-    regressor_items <- gsub(" $\\times$ ", " $\\times$\\\\",
-                            latex_text(unique(regressor_items)), fixed = TRUE)
-    regressors_cells[spec_name] <- stacked_cell(regressor_items)
-
-    # Correlation: none, all, within each group (one block per group's
-    # constants), or in blocks
-    correlation <- specification$correlation
-    if (identical(correlation, "none")) {
-      correlation_cells[spec_name] <- "None"
-    } else if (identical(correlation, "full")) {
-      correlation_cells[spec_name] <- "All"
-    } else if (has_groups && all(lengths(correlation) == 1) &&
-               all(unlist(correlation) %in% specification$constants)) {
-      correlation_cells[spec_name] <- "Within groups"
-    } else {
-      correlation_cells[spec_name] <- "In blocks"
-    }
-
-    fit_rows <- bind_rows(fit_rows, results$fit_statistics %>%
-                            filter(model == "mixed") %>%
-                            mutate(specification = spec_name))
-  }
-
-  # One row of panel A: its label, then one cell per specification
-  table_row <- function(label, cells) {
-    paste0(label, " & ", paste(cells, collapse = " & "), " \\\\")
-  }
-  reference_label <- latex_text(labels$technologies[[first$reference_outcome]])
-  lines <- c(
-    "\\begin{table}[htbp]",
-    "\\centering",
-    "\\begin{threeparttable}",
-    paste0("\\caption{Recommended heating technology: comparison of the ",
-           "specifications (reference category: ", reference_label, ")}"),
-    paste0("\\label{tab:rcl_", first$arm, "_ref_",
-           file_name(first$reference_outcome), "_", table_name, "}"),
-    "\\footnotesize",
-    "\\setlength{\\tabcolsep}{4pt}",
-    paste0("\\begin{tabular}{l", strrep("c", n_specifications), "}"),
-    "\\toprule",
-    table_row("", column_numbers),
-    "\\midrule",
-    paste0("\\multicolumn{", n_columns,
-           "}{l}{\\textit{A. Specification and fit}} \\\\"),
-    table_row("Random coefficients", random_cells),
-    table_row("Further regressors", regressors_cells),
-    table_row("Correlation", correlation_cells),
-    table_row("Decisions", latex_number(fit_rows$n_choices, 0)),
-    table_row("Experts", latex_number(fit_rows$n_experts, 0)),
-    table_row("Parameters", fit_rows$n_parameters),
-    table_row("Log-likelihood", latex_number(fit_rows$log_likelihood, 1)),
-    table_row("McFadden $R^2$", latex_number(fit_rows$mcfadden_r2, 3)),
-    table_row("AIC", latex_number(fit_rows$aic, 1)),
-    table_row("BIC", latex_number(fit_rows$bic, 1))
-  )
-
-  # Panel B: one row per test, its text across all specification columns: the
-  # statistic, the classical and the robust p-value (lr_tests()). A negative
-  # statistic gets a dagger and no p-values.
-  if (nrow(lr) > 0) {
-    lines <- c(lines,
-               "\\midrule",
-               paste0("\\multicolumn{", n_columns, "}{l}{\\textit{B. LR tests ",
-                      "between nested specifications}} \\\\"))
-    for (i in seq_len(nrow(lr))) {
-      statistic <- paste0("$\\chi^2(", lr$df[i], ")=", math_number(lr$lr[i], 1),
-                          "$")
-      if (lr$lr[i] < 0) {
-        p_values <- "$^{\\dagger}$; --"
-      } else {
-        p_values <- paste0("; ", latex_p(lr$p[i]), ", robust ",
-                           latex_p(lr$p_robust[i]))
-      }
-      lines <- c(lines, paste0(
-        numbers[[lr$restricted[i]]], " vs ", numbers[[lr$unrestricted[i]]],
-        " & \\multicolumn{", n_specifications, "}{l}{", statistic, p_values,
-        "} \\\\"
+      table <- bind_rows(table, tibble(
+        group = group_dummies[[dummy]],
+        technology = technology,
+        sum_of_coefficients(results, parameters)
       ))
     }
   }
-
-  lr_notes <- NULL
-  if (nrow(lr) > 0) {
-    lr_notes <- paste(
-      "An LR test compares a specification with a more general one that",
-      "contains it as a special case. Its first $p$-value comes from the",
-      "$\\chi^2$ distribution, which holds only if the model is correctly",
-      "specified; the robust one from the distribution under possible",
-      "misspecification, a weighted sum of $\\chi^2_1$ variables with weights",
-      "from the Hessian and the covariance matrix clustered by expert, as for",
-      "the standard errors (Kent 1982; White 1982)."
-    )
-  }
-  if (nrow(lr) > 0 && any(lr$lr < 0)) {
-    lr_notes <- c(lr_notes, paste(
-      "$^{\\dagger}$ Negative statistic: the more general specification has the",
-      "lower log-likelihood, so it has not reached its maximum; the test is not",
-      "informative."
-    ))
-  }
-  groups_note <- NULL
-  if (has_any_groups) {
-    groups_note <- paste0("Group constants: one set of constants per ",
-                          labels$group_name, ", each with its own means and ",
-                          "(co)variances.")
-  }
-  prices_note <- NULL
-  if (has_any_prices) {
-    prices_note <- paste0(
-      latex_text(labels$variables[["prices"]]), ": the price per kWh of each ",
-      "technology in its utility, with one coefficient for all technologies ",
-      "(or one per ", labels$group_name, "), and a dummy for a price not ",
-      "reported per technology (see the tables of the specifications)."
-    )
-  }
-
-  # The sample first, then the specifications and the statistics
-  notes <- c(
-    sample_note,
-    paste("Mixed logits of the heating technology that experts recommend for the",
-          "household of a vignette, all with the attributes of the vignette as",
-          "regressors."),
-    paste0("Specifications: ",
-           paste0(column_numbers, " ", latex_text(spec_labels), collapse = "; "),
-           "."),
-    groups_note,
-    prices_note,
-    paste("AIC $= -2 \\log L + 2k$, BIC $= -2 \\log L + k \\log N$, with $k$",
-          "parameters and $N$ experts."),
-    lr_notes
-  )
-  c(lines,
-    "\\bottomrule",
-    "\\end{tabular}",
-    "\\begin{tablenotes}[flushleft]",
-    "\\footnotesize",
-    paste0("\\item \\textit{Notes:} ", paste(notes, collapse = " ")),
-    "\\end{tablenotes}",
-    "\\end{threeparttable}",
-    "\\end{table}")
+  table
 }
 
-# 3. Figures -------------------------------------------------------------------
-
-#' Figure of the AMEs at the reference vignette for one outcome (section 8.4
-#' of the policy brief script): the variations of the reference vignette on
-#' the vertical axis; for each group (a profile or a specification), the AME
-#' (point) and its 95% interval (line), in percentage points.
+#' Effects of the vignette attributes by Berufsgruppe (models with
+#' interactions), or for all experts (see the top of this file)
 #'
-#' @param plot_data one row per variation x group: variation (factor; its
-#'                  first level at the bottom), group (factor; its first level
-#'                  at the top of each variation), ame, ci_low, ci_high
-#' @param title     the outcome; NULL for none (on the slides the frame title
-#'                  says it)
-#' @param subtitle  text below the title
-#' @param base_size font size in pt: 11 for the figures of the paper size
-#'                  (8 x 5 in), 9 for the slide versions; the subtitle and the
-#'                  axis title are scaled with it
-#' @return ggplot
-plot_ame <- function(plot_data, title, subtitle, base_size = 11) {
-  # Okabe-Ito colours, the first three as in the policy brief
-  colours <- c("#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9")
-  shapes <- c(16, 17, 15, 18, 3, 4)
-  n_groups <- length(levels(plot_data$group))
-  if (n_groups > length(colours)) {
-    stop("At most ", length(colours), " groups per figure")
-  }
-
-  # coord_flip() puts the variations on the vertical axis; position_dodge()
-  # places the groups next to each other within each variation, in the order
-  # of `group`: reversed, so that the first group is at the top
-  ggplot(plot_data, aes(x = variation, y = ame, ymin = ci_low, ymax = ci_high,
-                        colour = group, shape = group,
-                        group = factor(group, levels = rev(levels(group))))) +
-    geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
-    geom_pointrange(position = position_dodge(width = 0.6), size = 0.4) +
-    coord_flip() +
-    scale_colour_manual(values = colours[seq_len(n_groups)]) +
-    scale_shape_manual(values = shapes[seq_len(n_groups)]) +
-    labs(title = title,
-         subtitle = subtitle,
-         x = NULL,
-         y = "Change in probability in percentage points (95% confidence interval)",
-         colour = NULL, shape = NULL) +
-    theme_minimal(base_size = base_size) +
-    theme(legend.position = "bottom",
-          panel.grid.minor = element_blank(),
-          plot.subtitle = element_text(size = 9 * base_size / 11),
-          axis.title.x = element_text(size = 10 * base_size / 11),
-          plot.title.position = "plot")
-}
-
-#' Subtitle of an AME figure: a first line, then the probability of the
-#' outcome at the reference vignette for each group, e.g. "40.2% (Energy
-#' advisers)"
-#'
-#' @param plot_data    as for plot_ame(), with p_reference in percent
-#' @param first_line   text of the first line; NULL for none (the slides)
-#' @param group_labels short names of the groups for the subtitle, named by
-#'                     the groups (e.g. "(1)" for a specification); NULL: the
-#'                     groups themselves
-baseline_subtitle <- function(plot_data, first_line, group_labels = NULL) {
-  baseline <- plot_data %>%
-    distinct(group, p_reference) %>%
-    arrange(group)
-  group_text <- as.character(baseline$group)
-  if (!is.null(group_labels)) group_text <- group_labels[group_text]
-  baseline_text <- paste0(formatC(baseline$p_reference, format = "f", digits = 1),
-                          "% (", group_text, ")")
-  baseline_line <- paste0("Probability at the reference vignette: ",
-                          paste(baseline_text, collapse = ", "))
-  if (is.null(first_line)) {
-    baseline_line
+#' @return tibble: group (Berufsgruppe or "All experts"), attribute (the
+#'   dummy), technology, estimate, se, z, p
+attribute_effects <- function(results, group_dummies) {
+  setup <- model_structure(results$specification, group_dummies)
+  technologies <- results$outcomes[-1]
+  attributes <- results$attribute_dummies$dummy
+  if (setup$interactions) {
+    groups <- names(group_dummies)
   } else {
-    paste0(first_line, "\n", baseline_line)
+    groups <- "All experts"
   }
-}
-
-#' Standard deviations and correlations of the random coefficients of one
-#' correlation block as a matrix (step (c) of
-#' R/first_policy_brief/04_heatmap_rc_logit.R): standard deviations on the
-#' diagonal, correlations off it
-#'
-#' @param coefficients the coefficient table of the mixed logit
-#' @param rpar_names   the random coefficients, in the order of rows and columns
-#' @return K x K matrix
-sd_cor_matrix <- function(coefficients, rpar_names) {
-  estimate_of <- setNames(coefficients$estimate, coefficients$parameter)
-  K <- length(rpar_names)
-  result <- matrix(NA_real_, nrow = K, ncol = K,
-                   dimnames = list(rpar_names, rpar_names))
-  for (i in 1:K) {
-    for (j in 1:K) {
-      if (i == j) {
-        parameter <- paste0("sd.", rpar_names[i])
-      } else {
-        # each correlation is stored once, with the two coefficients in
-        # mlogit's order, so both orders of the pair are tried
-        name_ij <- paste0("cor.", rpar_names[i], ":", rpar_names[j])
-        name_ji <- paste0("cor.", rpar_names[j], ":", rpar_names[i])
-        parameter <- if (name_ij %in% names(estimate_of)) name_ij else name_ji
+  table <- tibble()
+  for (dummy in groups) {
+    for (attribute in attributes) {
+      for (technology in technologies) {
+        parameters <- paste0(attribute, ":", technology)
+        if (setup$interactions && dummy != setup$reference_dummy) {
+          parameters <- c(parameters,
+                          paste0(dummy, "_x_", attribute, ":", technology))
+        }
+        group <- "All experts"
+        if (setup$interactions) group <- group_dummies[[dummy]]
+        table <- bind_rows(table, tibble(
+          group = group,
+          attribute = attribute,
+          technology = technology,
+          sum_of_coefficients(results, parameters)
+        ))
       }
-      if (!parameter %in% names(estimate_of)) stop("Parameter missing: ", parameter)
-      result[i, j] <- estimate_of[[parameter]]
     }
   }
-  # anyNA(): TRUE if any cell is NA
-  is_diagonal_cell <- diag(K) == 1
-  stopifnot(
-    !anyNA(result),
-    all(result[is_diagonal_cell] > 0),
-    all(abs(result[!is_diagonal_cell]) <= 1)
-  )
-  result
+  table
 }
 
-#' Heat map of the standard deviations (diagonal) and correlations (off the
-#' diagonal) of the random coefficients of one correlation block, as in
-#' R/first_policy_brief/04_heatmap_rc_logit.R
-#'
-#' @param sd_cor     matrix from sd_cor_matrix()
-#' @param row_labels random coefficient -> label, for the rows and columns
-#' @param title, subtitle, caption texts of the figure; NULL for none
-#' @param base_size  font size in pt: 11 for the figures of the paper size
-#'                   (8 x 8 in), 9 for the slide versions
-#' @param text_size  size of the numbers in the tiles (in mm, as in
-#'                   geom_text()); NULL: 3.8, or 2.6 with more than 8 rows
-#' @return ggplot
-plot_correlation_heatmap <- function(sd_cor, row_labels, title, subtitle, caption,
-                                     base_size = 11, text_size = NULL) {
-  # Correlations from red (-1) over light grey (0) to blue (1); the diagonal
-  # (standard deviations) is grey, outside this scale. White text on dark
-  # tiles, from a correlation of about 0.88 on (see the heat map script).
-  color_negative <- "#E15759"
-  color_zero <- "#F2F2F2"
-  color_positive <- "#4E79A7"
-  color_diagonal <- "grey85"
-  color_text <- "#2F3B4A"
-  white_text_above <- 0.88
-  # smaller numbers when there are many tiles
-  if (is.null(text_size)) {
-    text_size <- if (nrow(sd_cor) <= 8) 3.8 else 2.6
+#' The covariance block of each random constant: "All experts" for the
+#' constants of all experts, the Berufsgruppe for a group's constants
+block_of <- function(columns, group_dummies) {
+  block <- rep("All experts", length(columns))
+  is_group <- columns %in% names(group_dummies)
+  block[is_group] <- group_dummies[columns[is_group]]
+  if (!all(is_group | columns == "(Intercept)")) {
+    stop("Random constants of an unknown column: ",
+         paste(unique(columns[!(is_group | columns == "(Intercept)")]), collapse = ", "))
   }
-
-  # Long format, one row per cell. Off the diagonal, `correlation` sets the
-  # colour; on it, correlation is NA, which the fill scale draws in
-  # color_diagonal. Factor levels: the first coefficient in the top row and
-  # the left column. formatC() writes the numbers with two decimals.
-  rpar_names <- rownames(sd_cor)
-  labels_in_order <- unname(row_labels[rpar_names])
-  heatmap_data <- as_tibble(sd_cor, rownames = "row") %>%
-    pivot_longer(-row, names_to = "column", values_to = "value") %>%
-    mutate(
-      is_diagonal = row == column,
-      correlation = if_else(is_diagonal, NA_real_, value),
-      label = formatC(value, format = "f", digits = 2),
-      text_white = !is_diagonal & value > white_text_above,
-      fontface = if_else(is_diagonal, "bold", "plain"),
-      row = factor(unname(row_labels[row]), levels = rev(labels_in_order)),
-      column = factor(unname(row_labels[column]), levels = labels_in_order)
-    )
-
-  ggplot(heatmap_data, aes(x = column, y = row, fill = correlation)) +
-    geom_tile(colour = "white", linewidth = 0.8) +
-    geom_text(aes(label = label, colour = text_white, fontface = fontface),
-              size = text_size) +
-    scale_fill_gradient2(low = color_negative, mid = color_zero,
-                         high = color_positive, midpoint = 0, limits = c(-1, 1),
-                         na.value = color_diagonal) +
-    scale_colour_manual(values = c(`TRUE` = "white", `FALSE` = color_text),
-                        guide = "none") +
-    scale_x_discrete(position = "top") +
-    coord_fixed() +
-    labs(title = title,
-         subtitle = subtitle,
-         caption = caption,
-         x = NULL,
-         y = NULL) +
-    theme_minimal(base_size = base_size) +
-    theme(panel.grid = element_blank(),
-          axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 0),
-          axis.text = element_text(colour = color_text),
-          plot.title = element_text(face = "bold"),
-          plot.subtitle = element_text(size = 9 * base_size / 11),
-          plot.caption = element_text(size = 9 * base_size / 11, hjust = 0),
-          plot.title.position = "plot",
-          plot.caption.position = "plot",
-          legend.position = "none")
+  block
 }
 
-# 4. Excel ---------------------------------------------------------------------
-
-#' The sheets of the Excel workbook (section 8.5 of the policy brief script):
-#' the specifications, and the coefficients, AMEs, fit and LR tests of all
-#' specifications, with labels. The numbers are unrounded.
+#' Standard deviations of the constants across experts, by covariance block,
+#' with Krinsky-Robb standard errors and percentile intervals
 #'
-#' @param results_list named list of saved results
-#' @param lr           tibble from lr_tests()
-#' @param numbers      number of each specification, e.g. "(5)", named by the
-#'                     specifications
-#' @return named list of tibbles, one per sheet
-results_excel_sheets <- function(results_list, lr, labels, numbers) {
-  # The specification of each sheet row: its number and label
-  spec_labels <- character(0)
-  for (spec_name in names(results_list)) {
-    spec_labels[spec_name] <- paste(numbers[[spec_name]],
-                                    results_list[[spec_name]]$specification$label)
-  }
-
-  specifications <- tibble()
-  coefficients <- tibble()
-  ames <- tibble()
-  fit <- tibble()
-  for (spec_name in names(results_list)) {
-    results <- results_list[[spec_name]]
-    specification <- results$specification
-
-    # (a) The specification as written in 01_run_specifications.R, a record
-    #     in R's names; the column names say so
-    if (is.list(specification$correlation)) {
-      correlation_text <- character(0)
-      for (block in specification$correlation) {
-        correlation_text <- c(correlation_text,
-                              paste0("(", paste(block, collapse = ", "), ")"))
-      }
-      correlation_text <- paste("blocks", paste(correlation_text, collapse = " "))
-    } else {
-      correlation_text <- specification$correlation
-    }
-    specifications <- bind_rows(specifications, tibble(
-      Specification = spec_labels[[spec_name]],
-      `Draws per expert` = expert_draws(results),
-      Estimated = as.character(results$date),
-      `Name (as in 01_run_specifications.R)` = spec_name,
-      `Constants (as in 01_run_specifications.R)` =
-        paste(specification$constants, collapse = ", "),
-      `Regressors (as in 01_run_specifications.R)` =
-        paste(specification$regressors, collapse = ", "),
-      `Random (as in 01_run_specifications.R)` =
-        paste0(names(specification$random), " = ", specification$random,
-               collapse = ", "),
-      `Correlation (as in 01_run_specifications.R)` = correlation_text,
-      `Draws (as in 01_run_specifications.R)` = specification$draws,
-      `Prices (as in 01_run_specifications.R)` =
-        paste(specification$prices, collapse = ", ")
+#' @return tibble: group (the block), technology, estimate, se, ci_low_kr,
+#'   ci_high_kr
+constant_sds <- function(results, group_dummies) {
+  random <- results$random_coefficients
+  sds <- results$random_constants
+  blocks <- block_of(random$column, group_dummies)
+  table <- tibble()
+  for (k in seq_len(nrow(random))) {
+    is_row <- sds$parameter == paste0("sd.", random$name[k])
+    if (sum(is_row) != 1) stop("No standard deviation of ", random$name[k])
+    table <- bind_rows(table, tibble(
+      group = blocks[k],
+      technology = random$technology[k],
+      estimate = sds$estimate[is_row],
+      se = sds$se[is_row],
+      ci_low_kr = sds$ci_low_kr[is_row],
+      ci_high_kr = sds$ci_high_kr[is_row]
     ))
+  }
+  table
+}
 
-    # (b) Coefficients, with the labels of each coefficient's column and
-    #     technology: a lookup from mlogit's names "<column>:<technology>"
-    column_label <- column_labels(results$columns, labels)
-    lookup <- tibble()
-    for (k in seq_len(nrow(results$columns))) {
-      column <- results$columns$column[k]
-      lookup <- bind_rows(lookup, tibble(
-        coefficient = paste0(column, ":", results$technologies),
-        term_label = column_label[[column]],
-        technology_label = unname(labels$technologies[results$technologies])
+#' Correlations of the constants across experts, by covariance block: every
+#' pair of technologies in both orders, and 1 on the diagonal, as the heat
+#' maps show them. Each correlation is saved once, named "cor.<constant
+#' j>:<constant i>" in mlogit's order of the constants, so both orders of the
+#' names are tried.
+#'
+#' @return tibble: group (the block), technology_row, technology_column,
+#'   estimate, se, ci_low_kr, ci_high_kr (NA on the diagonal)
+correlation_table <- function(results, group_dummies) {
+  random <- results$random_coefficients
+  correlations <- results$random_constants
+  technologies <- results$outcomes[-1]
+  table <- tibble()
+  for (column_name in unique(random$column)) {
+    block <- block_of(column_name, group_dummies)
+    for (technology_row in technologies) {
+      for (technology_column in technologies) {
+        if (technology_row == technology_column) {
+          table <- bind_rows(table, tibble(
+            group = block, technology_row = technology_row,
+            technology_column = technology_column, estimate = 1,
+            se = NA_real_, ci_low_kr = NA_real_, ci_high_kr = NA_real_
+          ))
+          next
+        }
+        name_row <- paste0(column_name, ":", technology_row)
+        name_column <- paste0(column_name, ":", technology_column)
+        is_row <- correlations$parameter %in%
+          c(paste0("cor.", name_row, ":", name_column),
+            paste0("cor.", name_column, ":", name_row))
+        if (sum(is_row) != 1) {
+          stop("No correlation of ", name_row, " and ", name_column)
+        }
+        table <- bind_rows(table, tibble(
+          group = block, technology_row = technology_row,
+          technology_column = technology_column,
+          estimate = correlations$estimate[is_row],
+          se = correlations$se[is_row],
+          ci_low_kr = correlations$ci_low_kr[is_row],
+          ci_high_kr = correlations$ci_high_kr[is_row]
+        ))
+      }
+    }
+  }
+  table
+}
+
+#' Probabilities of the recommendations at the reference vignette, by profile
+#' (Berufsgruppe or "All experts"), with Krinsky-Robb standard errors and
+#' percentile intervals from the saved probabilities at every draw
+#'
+#' @return tibble: group (the profile), outcome, estimate, se, ci_low_kr,
+#'   ci_high_kr
+baseline_probabilities <- function(results) {
+  ame <- results$ame_table
+  table <- tibble()
+  for (profile_name in names(results$probability_draws)) {
+    draws <- results$probability_draws[[profile_name]]
+    for (outcome_name in results$outcomes) {
+      # every row of the AME table of a profile and outcome has the same
+      # probability at the reference vignette
+      is_row <- ame$profile == profile_name & ame$outcome == outcome_name
+      if (sum(is_row) == 0) stop("No AMEs for ", profile_name, ", ", outcome_name)
+      outcome_draws <- draws["reference", outcome_name, ]
+      table <- bind_rows(table, tibble(
+        group = profile_name,
+        outcome = outcome_name,
+        estimate = ame$p_reference[is_row][1],
+        se = sd(outcome_draws),
+        ci_low_kr = as.numeric(quantile(outcome_draws, 0.025)),
+        ci_high_kr = as.numeric(quantile(outcome_draws, 0.975))
       ))
     }
-    #     The prices: each coefficient is named as its term, one row each
-    #     (results$price_terms, NULL in results from before the prices). The
-    #     regressor is its kind, with the group for a price coefficient of one
-    #     group; the technology its own, or all technologies.
-    price_terms <- results$price_terms
-    if (!is.null(price_terms)) {
-      for (price_term in unique(price_terms$term)) {
-        is_term <- price_terms$term == price_term
-        term_label <- unname(labels$prices[price_terms$kind[is_term][1]])
-        group <- price_terms$group[is_term][1]
-        if (!is.na(group)) {
-          term_label <- paste0(term_label, ", ", labels$groups[[group]])
-        }
-        if (sum(is_term) == 1) {
-          technology_label <- unname(labels$technologies[price_terms$technology[is_term]])
+  }
+  table
+}
+
+#' Differences between the Berufsgruppen in the probabilities at the
+#' reference vignette and in the AMEs, each group against the reference group
+#' and the other two against each other, with Krinsky-Robb standard errors
+#' and percentile intervals
+#'
+#' The saved probabilities of all profiles come from the same Krinsky-Robb
+#' draws of the parameters, so the difference at each draw carries the
+#' correlation between the two groups' estimates. Where the groups share the
+#' attribute coefficients (model 4), their AMEs are almost perfectly
+#' correlated (0.95 on simulated data): a small difference that comes only
+#' from the groups' different baseline probabilities can then be significant
+#' although the two groups' intervals overlap almost completely. Point
+#' estimates are the differences of the point estimates. `significant`: the
+#' 95% percentile interval excludes 0; p is from z = difference / se, as in
+#' the AME table.
+#'
+#' @param reference_group the Berufsgruppe the others are compared with first
+#' @return tibble: quantity ("probability" or "ame"), group, compared_with,
+#'   vignette ("reference" for the probabilities), outcome, difference, se,
+#'   z, p, ci_low_kr, ci_high_kr, significant; no rows for a model with one
+#'   profile
+group_differences <- function(results, reference_group) {
+  draws <- results$probability_draws
+  ame <- results$ame_table
+  profiles <- names(draws)
+  table <- tibble()
+  if (length(profiles) < 2) return(table)
+  if (!(reference_group %in% profiles)) {
+    stop("No AMEs for the reference group ", reference_group, " in ", results$name)
+  }
+
+  # The pairs: each group against the reference group, then the others
+  # against each other
+  others <- setdiff(profiles, reference_group)
+  pairs <- tibble(group = others, compared_with = reference_group)
+  for (i in seq_along(others)) {
+    for (j in seq_len(i - 1)) {
+      pairs <- bind_rows(pairs, tibble(group = others[i],
+                                       compared_with = others[j]))
+    }
+  }
+
+  vignettes <- dimnames(draws[[1]])[[1]]
+  for (k in seq_len(nrow(pairs))) {
+    group_draws <- draws[[pairs$group[k]]]
+    other_draws <- draws[[pairs$compared_with[k]]]
+    for (vignette_name in vignettes) {
+      for (outcome_name in results$outcomes) {
+        is_group <- ame$profile == pairs$group[k] & ame$outcome == outcome_name
+        is_other <- ame$profile == pairs$compared_with[k] & ame$outcome == outcome_name
+        if (vignette_name == "reference") {
+          quantity <- "probability"
+          difference_draws <- group_draws["reference", outcome_name, ] -
+            other_draws["reference", outcome_name, ]
+          difference <- ame$p_reference[is_group][1] - ame$p_reference[is_other][1]
         } else {
-          technology_label <- labels$prices[["all_technologies"]]
+          quantity <- "ame"
+          difference_draws <-
+            (group_draws[vignette_name, outcome_name, ] -
+               group_draws["reference", outcome_name, ]) -
+            (other_draws[vignette_name, outcome_name, ] -
+               other_draws["reference", outcome_name, ])
+          is_group <- is_group & ame$vignette == vignette_name
+          is_other <- is_other & ame$vignette == vignette_name
+          if (sum(is_group) != 1 || sum(is_other) != 1) {
+            stop("AME missing: ", vignette_name, ", ", outcome_name)
+          }
+          difference <- ame$ame[is_group] - ame$ame[is_other]
         }
-        lookup <- bind_rows(lookup, tibble(coefficient = price_term,
-                                           term_label = term_label,
-                                           technology_label = technology_label))
+        se <- sd(difference_draws)
+        ci_low_kr <- as.numeric(quantile(difference_draws, 0.025))
+        ci_high_kr <- as.numeric(quantile(difference_draws, 0.975))
+        table <- bind_rows(table, tibble(
+          quantity = quantity,
+          group = pairs$group[k],
+          compared_with = pairs$compared_with[k],
+          vignette = vignette_name,
+          outcome = outcome_name,
+          difference = difference,
+          se = se,
+          z = difference / se,
+          p = 2 * pnorm(-abs(difference / se)),
+          ci_low_kr = ci_low_kr,
+          ci_high_kr = ci_high_kr,
+          significant = ci_low_kr > 0 | ci_high_kr < 0
+        ))
       }
     }
-    lookup_2 <- lookup %>%
-      rename(coefficient_2 = coefficient, term_label_2 = term_label,
-             technology_label_2 = technology_label)
-    #     What each row is: for a random coefficient of the mixed logit, the
-    #     parameters depend on its distribution (coefficient_draws())
-    distributions <- results$random_coefficients %>%
-      select(coefficient = name, distribution)
-    coefficients_spec <- results$coefficient_table %>%
-      left_join(lookup, by = "coefficient") %>%
-      left_join(lookup_2, by = "coefficient_2") %>%
-      left_join(distributions, by = "coefficient") %>%
-      mutate(
-        specification = spec_labels[[spec_name]],
-        is_random = model == "mixed" & !is.na(distribution),
-        parameter_label = case_when(
-          type == "cor" ~ "Correlation",
-          type == "coefficient" & !is_random ~ "Coefficient",
-          type == "coefficient" & distribution == "ln" ~ "Mean of the log",
-          type == "coefficient" & distribution == "cn" ~ "Mean before censoring",
-          type == "coefficient" ~ "Mean",
-          distribution == "ln" ~ "Standard deviation of the log",
-          distribution == "cn" ~ "Standard deviation before censoring",
-          distribution %in% c("u", "t") ~ "Half-width",
-          TRUE ~ "Standard deviation"
-        )
-      )
-    if (anyNA(coefficients_spec$term_label)) {
-      stop("Coefficients without a label in ", spec_name)
-    }
-    coefficients <- bind_rows(coefficients, coefficients_spec)
-
-    ames <- bind_rows(ames, results$ame_table %>%
-                        mutate(specification = spec_labels[[spec_name]]))
-    fit <- bind_rows(fit, results$fit_statistics %>%
-                       mutate(specification = spec_labels[[spec_name]]))
   }
-
-  # Labels of the variations, outcomes and profiles; a missing label would
-  # leave an empty cell, so check first
-  missing_labels <- c(setdiff(ames$vignette, names(labels$variations)),
-                      setdiff(ames$outcome, names(labels$technologies)),
-                      setdiff(ames$profile, names(labels$profiles)))
-  if (length(missing_labels) > 0) {
-    stop("No label for: ", paste(unique(missing_labels), collapse = ", "))
-  }
-
-  # The restrictions of the LR tests in words: the types of lr_restrictions(),
-  # several joined by " + "
-  restriction_labels <- c(
-    regressors = "the coefficients of the added regressors are zero",
-    correlations = "the correlations are zero",
-    group_covariances = "the (co)variances of the constants are equal across groups",
-    prices = "the coefficients of the prices are zero",
-    price_groups = "the price coefficients are equal across groups"
-  )
-  restriction_text <- character(nrow(lr))
-  for (i in seq_len(nrow(lr))) {
-    types <- strsplit(lr$restrictions[i], " + ", fixed = TRUE)[[1]]
-    restriction_text[i] <- paste(restriction_labels[types], collapse = "; ")
-  }
-
-  list(
-    Specifications = specifications,
-    Coefficients = coefficients %>%
-      transmute(Specification = specification,
-                Model = unname(labels$models[model]),
-                Parameter = parameter_label,
-                Regressor = term_label,
-                Technology = technology_label,
-                `Regressor 2` = term_label_2,
-                `Technology 2` = technology_label_2,
-                Estimate = estimate,
-                `Standard error` = se,
-                z = z,
-                p = p,
-                `CI low (95%)` = ci_low,
-                `CI high (95%)` = ci_high,
-                `Parameter in mlogit` = parameter),
-    `Marginal effects` = ames %>%
-      transmute(Specification = specification,
-                Model = unname(labels$models[model]),
-                Profile = unname(labels$profiles[profile]),
-                Variation = unname(labels$variations[vignette]),
-                Recommendation = unname(labels$technologies[outcome]),
-                `Probability at the reference vignette` = p_reference,
-                `Standard error of the probability` = se_p_reference,
-                `Marginal effect` = ame,
-                `Standard error` = se,
-                z = z,
-                p = p,
-                `CI low (95%)` = ci_low,
-                `CI high (95%)` = ci_high,
-                `CI low (95%, Krinsky-Robb)` = ci_low_kr,
-                `CI high (95%, Krinsky-Robb)` = ci_high_kr),
-    Fit = fit %>%
-      transmute(Specification = specification,
-                Model = unname(labels$models[model]),
-                Decisions = n_choices,
-                Experts = n_experts,
-                Parameters = n_parameters,
-                `Halton draws per expert` = n_draws_per_expert,
-                `Log-likelihood` = log_likelihood,
-                `Log-likelihood, constants only` = log_likelihood_constants_only,
-                `McFadden R2` = mcfadden_r2,
-                `LR test against constants only: chi2` = lr_constants_only,
-                `LR test against constants only: df` = lr_constants_only_df,
-                `LR test against constants only: p` = lr_constants_only_p,
-                `LR test against MNL: chi2` = lr_mnl,
-                `LR test against MNL: df` = lr_mnl_df,
-                `LR test against MNL: p` = lr_mnl_p,
-                AIC = aic,
-                BIC = bic),
-    `LR tests` = lr %>%
-      transmute(`Restricted specification` = unname(spec_labels[restricted]),
-                `More general specification` = unname(spec_labels[unrestricted]),
-                Restrictions = restriction_text,
-                Chi2 = lr,
-                `Degrees of freedom` = df,
-                p = p,
-                `p (robust)` = p_robust,
-                `Mean weight` = mean_weight)
-  )
+  table
 }
 
-# 5. Slides --------------------------------------------------------------------
-# Versions of the tables for the 16:9 slides of the economics-latex layout,
-# which a paper table is too long for. Each specification gets several short
-# tables, each a bare tabular: the slide frame around it (slide_frame()) has
-# the title and the notes. Estimates are rounded to two decimals, as on
-# slides; the paper tables and Excel have the precise values.
+# 3. Likelihood-ratio tests ----------------------------------------------------
 
-#' A slide table: one label column and n_value_columns centred columns
+#' Restrictions of a likelihood-ratio test, as functions of the coefficients
+#' theta of the larger (unrestricted) model: every element is 0 when theta
+#' satisfies the smaller (restricted) model. The robust test needs their
+#' derivative with respect to theta.
 #'
-#' @param header the line of the column headers
-#' @param body   the lines of the rows
-#' @return character vector, the lines of the tabular
-slide_tabular <- function(header, body, n_value_columns) {
-  c("\\setlength{\\tabcolsep}{4pt}",
-    paste0("\\begin{tabular}{l", strrep("c", n_value_columns), "}"),
-    "\\toprule",
-    header,
-    "\\midrule",
-    body,
-    "\\bottomrule",
-    "\\end{tabular}")
+#' Types:
+#'   regressors         the coefficients of the regressors the smaller model
+#'                      does not have (the Berufsgruppe shifts, the
+#'                      interactions), one per technology
+#'   prices             the coefficients of the price terms the smaller model
+#'                      does not have
+#'   group_covariances  (constants by Berufsgruppe) each group's covariance
+#'                      matrix of the constants minus the first group's,
+#'                      every variance and covariance once. The covariance
+#'                      matrices, not their Cholesky factors, because a
+#'                      covariance matrix has several Cholesky factors (the
+#'                      signs of their columns). The means need no
+#'                      restriction: model 6's group constants are model 4's
+#'                      constant plus shift, written differently.
+#'
+#' @param theta        coefficients of the larger model, coef()
+#' @param type         one of the three types
+#' @param unrestricted saved results of the larger model
+#' @param restricted   saved results of the smaller model
+#' @return numeric vector, one element per restriction
+lr_restrictions <- function(theta, type, unrestricted, restricted) {
+  technologies <- unrestricted$outcomes[-1]
+  if (type == "regressors") {
+    dropped <- setdiff(unrestricted$specification$regressors,
+                       restricted$specification$regressors)
+    if (length(dropped) == 0) stop("Restriction regressors: none to drop")
+    # outer(): every regressor with every technology, "<regressor>:<technology>"
+    restrictions <- theta[as.vector(outer(dropped, technologies, paste, sep = ":"))]
+  } else if (type == "prices") {
+    dropped <- setdiff(unrestricted$specification$prices,
+                       restricted$specification$prices)
+    if (length(dropped) == 0) stop("Restriction prices: none to drop")
+    restrictions <- theta[dropped]
+  } else if (type == "group_covariances") {
+    random <- unrestricted$random_coefficients
+    columns <- unique(random$column)
+    if (length(columns) < 2) {
+      stop("Restriction group_covariances needs constants by Berufsgruppe")
+    }
+    L <- cholesky_factor(theta, random, unrestricted$fixed_parameters)
+    Omega <- L %*% t(L)
+    first <- paste0(columns[1], ":", technologies)
+    restrictions <- numeric(0)
+    for (column_name in columns[-1]) {
+      members <- paste0(column_name, ":", technologies)
+      difference <- Omega[members, members] - Omega[first, first]
+      # lower.tri(diag = TRUE): the lower triangle with the diagonal, each
+      # variance and covariance once
+      restrictions <- c(restrictions,
+                        difference[lower.tri(difference, diag = TRUE)])
+    }
+  } else {
+    stop("Unknown restriction type: ", type)
+  }
+  if (anyNA(restrictions)) stop("Restriction ", type, ": coefficients missing")
+  as.numeric(restrictions)
 }
 
-#' Rows of a slide table of coefficients: for each row, the estimates of its
-#' parameters in the technology columns, and their standard errors in
-#' parentheses below
+#' Likelihood-ratio tests between nested models, classical and robust
 #'
-#' @param cells        from coefficient_cells()
-#' @param row_labels   LaTeX labels of the rows
-#' @param prefixes     for each row, its parameters without ":<technology>",
-#'                     e.g. "att_build_year2000" or "sd.(Intercept)"
-#' @param technologies the technology columns, in their order
-#' @return character vector, two lines per row
-slide_coefficient_rows <- function(cells, row_labels, prefixes, technologies) {
-  lines <- character(0)
-  for (k in seq_along(prefixes)) {
-    parameters <- paste0(prefixes[k], ":", technologies)
-    if (anyNA(cells$estimate_of[parameters])) {
-      stop("Parameters missing for ", prefixes[k])
-    }
-    lines <- c(lines,
-               paste0(row_labels[k], " & ",
-                      paste(cells$estimate_of[parameters], collapse = " & "),
-                      " \\\\"),
-               paste0(" & ", paste(cells$se_of[parameters], collapse = " & "),
-                      " \\\\"))
-  }
-  lines
-}
-
-#' LaTeX labels of the rows of the coefficients of some columns of the design
-#' matrix: the column's label, and for a random coefficient what its row shows
-#' (MEAN_SUFFIX)
+#' LR = 2 (logL_larger - logL_smaller), df = the number of parameters the
+#' larger model has more. Valid only if the smaller model is a special case of
+#' the larger one, on the same sample and with the same draws per expert. The
+#' sample and the number of draws are checked here. The Halton primes are the
+#' same by construction: the constants of every model get the primes 2, 3, 5,
+#' ... in the order of the technologies, by Berufsgruppe if they are by
+#' Berufsgruppe (estimate_mixed_logit()).
 #'
-#' @param columns_shown  the columns, in the order of the rows
-#' @param column_label   from column_labels()
-#' @param random         the random coefficients (results$random_coefficients)
-coefficient_row_labels <- function(columns_shown, column_label, random) {
-  row_labels <- character(0)
-  for (column in columns_shown) {
-    label <- column_label[[column]]
-    if (column %in% random$column) {
-      distribution <- random$distribution[random$column == column][1]
-      label <- paste0(label, MEAN_SUFFIX[[distribution]])
-    }
-    row_labels <- c(row_labels, latex_text(label))
-  }
-  row_labels
-}
-
-#' The slide tables of the mixed logit of one specification: the paper table
-#' (coefficient_table_tex()) split into tables that fit a slide
+#' Classical p-value: chi-squared with df degrees of freedom; it assumes the
+#' larger model is correctly specified, which the cluster-robust standard
+#' errors do not.
 #'
-#'   constants      the constants and the other regressors that are neither
-#'                  attributes nor interactions (the occupational group), then
-#'                  the standard deviations of the random coefficients
-#'   attributes     the effects of the vignette attributes
-#'   interactions_  one table per level of the first variable of the
-#'                  interactions, e.g. chimney sweeps x each attribute
-#'   correlations   the correlations, one table per correlation block, if each
-#'                  block holds the coefficients of one column (otherwise they
-#'                  are in the heat maps and Excel only)
-#'   prices         with prices: the rows of price_rows()
+#' Robust p-value (Kent 1982; White 1982, section 6): whether or not the model
+#' is correctly specified, under the restrictions LR is approximately
+#' distributed as sum_i lambda_i Z_i^2, with Z_i independent standard normal
+#' and lambda_i the eigenvalues of (R H^{-1} R')^{-1} (R V R'): H^{-1} the
+#' inverse Hessian of the larger model, V its cluster-robust covariance
+#' matrix, R the derivative of the restrictions at the estimates. With a
+#' correctly specified model every lambda_i is about 1 and the two tests
+#' agree; mean_weight above 1 means the classical test rejects too often. The
+#' cluster-robust variance of parameters that only a small Berufsgruppe
+#' identifies is biased downward, which pushes the weights below 1: in a small
+#' Berufsgruppe the robust test then rejects too often. (On simulated data from
+#' a correctly specified model, a group of about 60 experts had a mean weight
+#' of 0.7 in the test of its correlations; old lr_tests(), commit 93010be.)
 #'
-#' @param results saved results of one specification
-#' @param labels  list of labels, see the top of this file; labels$groups names
-#'                the groups of the group constants
-#' @return list of tables, each a list: name (part of the file name), title
-#'   (plain text), note (LaTeX, for the frame) and lines (the tabular)
-slide_coefficient_tables <- function(results, labels) {
-  technologies <- results$technologies
-  coefficients <- results$coefficient_table %>%
-    filter(model == "mixed")
-  cells <- coefficient_cells(coefficients, digits = 2)
-  random <- results$random_coefficients
-  columns <- results$columns
-  column_label <- column_labels(columns, labels)
-  random_columns <- unique(random$column)
-  n_columns <- length(technologies) + 1
-
-  column_headers <- paste0("\\begin{tabular}[b]{@{}c@{}}",
-                           labels$technology_headers[technologies],
-                           "\\end{tabular}")
-  header <- paste0(" & ", paste(column_headers, collapse = " & "), " \\\\")
-  stars_note <- paste("Standard errors clustered by expert in parentheses;",
-                      "$^{*}$ $p<0.10$, $^{**}$ $p<0.05$, $^{***}$ $p<0.01$.")
-
-  is_attribute <- columns$term %in% names(results$attribute_levels)
-  is_interaction <- grepl(":", columns$term, fixed = TRUE)
-  tables <- list()
-
-  # (a) Constants and the other regressors, then the standard deviations
-  constant_columns <- columns$column[!is_attribute & !is_interaction]
-  sd_labels <- character(0)
-  for (column in random_columns) {
-    distribution <- random$distribution[random$column == column][1]
-    sd_labels <- c(sd_labels, latex_text(paste0(column_label[[column]],
-                                                SPREAD_SUFFIX[[distribution]])))
-  }
-  constants_body <- c(
-    paste0("\\multicolumn{", n_columns, "}{l}{\\textit{Coefficients}} \\\\"),
-    slide_coefficient_rows(cells,
-                           coefficient_row_labels(constant_columns, column_label,
-                                                  random),
-                           constant_columns, technologies),
-    "\\midrule",
-    paste0("\\multicolumn{", n_columns,
-           "}{l}{\\textit{Standard deviations across experts}} \\\\"),
-    slide_coefficient_rows(cells, sd_labels, paste0("sd.", random_columns),
-                           technologies)
-  )
-  tables[["constants"]] <- list(
-    name = "constants",
-    title = "Constants and their standard deviations across experts",
-    note = paste(stars_note, "Standard deviations carry no stars."),
-    lines = slide_tabular(header, constants_body, length(technologies))
-  )
-
-  # (b) Attributes
-  attribute_columns <- columns$column[is_attribute]
-  attributes_body <- slide_coefficient_rows(
-    cells, coefficient_row_labels(attribute_columns, column_label, random),
-    attribute_columns, technologies
-  )
-  tables[["attributes"]] <- list(
-    name = "attributes",
-    title = "Effects of the vignette attributes",
-    note = stars_note,
-    lines = slide_tabular(header, attributes_body, length(technologies))
-  )
-
-  # (c) Interactions, one table per level of their first variable. The row
-  #     label is the label of the other parts of the column's name in R's
-  #     coding, e.g. "Income below €40,000" for "berufsgruppeSchornsteinfeger:
-  #     att_incomeunter 40.000 € brutto im Jahr".
-  #     The note names the variable whose reference category the difference
-  #     is from (labels$variables, e.g. "occupational group").
-  interaction_columns <- columns$column[is_interaction]
-  interaction_r_names <- columns$r_name[is_interaction]
-  interaction_terms <- columns$term[is_interaction]
-  first_parts <- character(0)
-  other_labels <- character(0)
-  first_variables <- character(0)
-  for (k in seq_along(interaction_r_names)) {
-    parts <- strsplit(interaction_r_names[k], ":", fixed = TRUE)[[1]]
-    first_parts <- c(first_parts, parts[1])
-    other_labels <- c(other_labels,
-                      paste(labels$terms[parts[-1]], collapse = " × "))
-    first_variables <- c(first_variables,
-                         strsplit(interaction_terms[k], ":", fixed = TRUE)[[1]][1])
-  }
-  for (first_part in unique(first_parts)) {
-    is_part <- first_parts == first_part
-    first_label <- labels$terms[[first_part]]
-    first_variable <- first_variables[is_part][1]
-    if (first_variable %in% names(labels$variables)) {
-      variable_label <- tolower(labels$variables[[first_variable]])
-    } else {
-      variable_label <- first_variable
-    }
-    interactions_body <- slide_coefficient_rows(
-      cells, latex_text(other_labels[is_part]), interaction_columns[is_part],
-      technologies
-    )
-    table_name <- paste0("interactions_", file_name(first_label))
-    tables[[table_name]] <- list(
-      name = table_name,
-      title = paste0("Interactions: ", first_label, " × attribute"),
-      note = paste0("Difference in the effect of the attribute from the ",
-                    "reference category of the ", latex_text(variable_label),
-                    ". ", stars_note),
-      lines = slide_tabular(header, interactions_body, length(technologies))
-    )
-  }
-
-  # (d) Correlations, one table per correlation block of one column
-  if (!identical(results$specification$correlation, "none")) {
-    blocks <- unique(random$block)
-    for (b in blocks) {
-      block_columns <- unique(random$column[random$block == b])
-      if (length(block_columns) > 1) next
-      block_term <- unique(random$term[random$block == b])
-      is_constant <- block_term == "(Intercept)" ||
-        block_term %in% results$specification$constants
-      if (is_constant) {
-        title <- "Correlations of the constants across experts"
-      } else {
-        title <- paste0("Correlations of the coefficients of ",
-                        column_label[[block_columns]], " across experts")
-      }
-      table_name <- "correlations"
-      if (length(blocks) > 1) {
-        if (block_columns %in% names(labels$groups)) {
-          block_label <- labels$groups[[block_columns]]
-        } else {
-          block_label <- column_label[[block_columns]]
-        }
-        title <- paste0(title, ": ", block_label)
-        table_name <- paste0("correlations_", file_name(block_label))
-      }
-      correlations_body <- correlation_rows(cells$estimate_of, cells$se_of,
-                                            block_columns, technologies, labels)
-      tables[[table_name]] <- list(
-        name = table_name,
-        title = title,
-        note = paste("Correlations implied by the estimated Cholesky factor,",
-                     "with delta-method standard errors in parentheses;",
-                     "$^{*}$ $p<0.10$, $^{**}$ $p<0.05$, $^{***}$ $p<0.01$."),
-        lines = slide_tabular(header, correlations_body, length(technologies))
-      )
-    }
-  }
-
-  # (e) Prices: the rows of the paper table (price_rows()), one panel per
-  #     kind of term side by side (e.g. the price coefficients left, the
-  #     dummies for a price not reported right), so that the table fits a
-  #     slide. Each panel: a label column and a coefficient column.
-  price_terms <- results$price_terms
-  if (!is.null(price_terms) && nrow(price_terms) > 0) {
-    price_table_rows <- price_rows(price_terms, labels)
-    kinds <- unique(price_table_rows$kind)
-    panels <- list()
-    for (price_kind in kinds) {
-      is_panel_row <- price_table_rows$kind == price_kind &
-        !is.na(price_table_rows$term)
-      panels[[price_kind]] <- price_table_rows[is_panel_row, ]
-    }
-    n_rows <- 0
-    for (panel in panels) {
-      n_rows <- max(n_rows, nrow(panel))
-    }
-    prices_body <- character(0)
-    for (r in seq_len(n_rows)) {
-      estimate_cells <- character(0)
-      se_cells <- character(0)
-      for (price_kind in kinds) {
-        panel <- panels[[price_kind]]
-        if (r <= nrow(panel)) {
-          estimate_cells <- c(estimate_cells, latex_text(panel$label[r]),
-                              cells$estimate_of[[panel$term[r]]])
-          se_cells <- c(se_cells, "", cells$se_of[[panel$term[r]]])
-        } else {
-          estimate_cells <- c(estimate_cells, "", "")
-          se_cells <- c(se_cells, "", "")
-        }
-      }
-      prices_body <- c(prices_body,
-                       paste0(paste(estimate_cells, collapse = " & "), " \\\\"),
-                       paste0(paste(se_cells, collapse = " & "), " \\\\"))
-    }
-    price_header <- paste0(paste0("\\multicolumn{2}{l}{",
-                                  latex_text(labels$prices[kinds]), "}",
-                                  collapse = " & "), " \\\\")
-    tables[["prices"]] <- list(
-      name = "prices",
-      title = "Energy prices",
-      note = paste("Each technology's price enters its own utility; prices",
-                   "centred at the mean over the experts.", stars_note),
-      lines = c("\\setlength{\\tabcolsep}{4pt}",
-                paste0("\\begin{tabular}{",
-                       paste(rep("lc", length(kinds)), collapse = "@{\\hspace{2em}}"),
-                       "}"),
-                "\\toprule",
-                price_header,
-                "\\midrule",
-                prices_body,
-                "\\bottomrule",
-                "\\end{tabular}")
-    )
-  }
-  tables
-}
-
-#' Slide table of the probabilities of the recommendations at the reference
-#' vignette, one row per profile of the AMEs, with their Krinsky-Robb standard
-#' errors in parentheses, in percent
-#'
-#' @return a list as the elements of slide_coefficient_tables()
-slide_baseline_table <- function(results, labels) {
-  outcomes <- results$outcomes
-  probabilities <- results$ame_table %>%
-    filter(model == "mixed") %>%
-    distinct(profile, outcome, p_reference, se_p_reference)
-  profiles <- unique(probabilities$profile)
-  if (nrow(probabilities) != length(profiles) * length(outcomes)) {
-    stop("More than one probability at the reference vignette per profile ",
-         "and outcome in ", results$name)
-  }
-  column_headers <- paste0("\\begin{tabular}[b]{@{}c@{}}",
-                           labels$technology_headers[outcomes],
-                           "\\end{tabular}")
-  header <- paste0(" & ", paste(column_headers, collapse = " & "), " \\\\")
-  body <- character(0)
-  for (profile_name in profiles) {
-    profile_rows <- probabilities %>%
-      filter(profile == profile_name)
-    # the outcomes in the order of the columns
-    profile_rows <- profile_rows[match(outcomes, profile_rows$outcome), ]
-    body <- c(body,
-              paste0(latex_text(labels$profiles[[profile_name]]), " & ",
-                     paste(latex_number(100 * profile_rows$p_reference, 1),
-                           collapse = " & "), " \\\\"),
-              paste0(" & ", paste0("(", latex_number(100 * profile_rows$se_p_reference,
-                                                     1), ")", collapse = " & "),
-                     " \\\\"))
-  }
-  list(
-    name = "baseline",
-    title = "Probabilities at the reference vignette (%)",
-    note = "Krinsky-Robb standard errors in parentheses, in percentage points.",
-    lines = slide_tabular(header, body, length(outcomes))
-  )
-}
-
-#' Slide table of the fit of the mixed logits, one row per specification of
-#' `numbers`, in its order; a specification without results gets a row that
-#' says so. The lowest AIC and BIC are in bold.
+#' The robust p-value is simulated with n_draws draws (with 1,000,000, its
+#' standard error is at most 0.0005). A negative LR means the larger model
+#' has not reached its maximum; its p-values are then NA.
 #'
 #' @param results_list named list of saved results
-#' @param numbers      number of each specification, e.g. "(5)", named by the
-#'                     specifications
-#' @return character vector, the lines of the tabular
-slide_fit_table <- function(results_list, numbers) {
-  fit <- tibble()
-  for (spec_name in names(results_list)) {
-    fit <- bind_rows(fit, results_list[[spec_name]]$fit_statistics %>%
-                       filter(model == "mixed") %>%
-                       mutate(specification = spec_name))
-  }
-  header <- paste("Specification & Parameters & Log-likelihood &",
-                  "McFadden $R^2$ & AIC & BIC \\\\")
-  body <- character(0)
-  for (spec_name in names(numbers)) {
-    if (!(spec_name %in% fit$specification)) {
-      body <- c(body, paste0(numbers[[spec_name]],
-                             " & \\multicolumn{5}{l}{\\textit{no results}} \\\\"))
+#' @param tests        tibble: restricted, unrestricted (model names),
+#'                     restrictions (types of lr_restrictions(), several
+#'                     joined by " + ")
+#' @param n_draws      draws for the robust p-value
+#' @param seed         set before the draws of each test, so that a test's
+#'                     p-value does not depend on the tests before it
+#' @return tibble, one row per test: restricted, unrestricted, restrictions,
+#'   lr, df, p, p_robust, mean_weight
+lr_tests <- function(results_list, tests, n_draws = 1e6, seed = 20261004) {
+  # the columns from the start, so that the result has them even without a test
+  table <- tibble(restricted = character(0), unrestricted = character(0),
+                  restrictions = character(0), lr = numeric(0), df = numeric(0),
+                  p = numeric(0), p_robust = numeric(0), mean_weight = numeric(0))
+  for (i in seq_len(nrow(tests))) {
+    restricted <- results_list[[tests$restricted[i]]]
+    unrestricted <- results_list[[tests$unrestricted[i]]]
+    if (is.null(restricted) || is.null(unrestricted)) {
+      message("LR test skipped, results missing: ", tests$restricted[i],
+              " against ", tests$unrestricted[i])
       next
     }
-    fit_spec <- fit %>%
-      filter(specification == spec_name)
-    aic_cell <- latex_number(fit_spec$aic, 1)
-    if (fit_spec$aic == min(fit$aic)) aic_cell <- paste0("\\textbf{", aic_cell, "}")
-    bic_cell <- latex_number(fit_spec$bic, 1)
-    if (fit_spec$bic == min(fit$bic)) bic_cell <- paste0("\\textbf{", bic_cell, "}")
-    body <- c(body, paste0(numbers[[spec_name]], " & ", fit_spec$n_parameters,
-                           " & ", latex_number(fit_spec$log_likelihood, 1),
-                           " & ", latex_number(fit_spec$mcfadden_r2, 3),
-                           " & ", aic_cell, " & ", bic_cell, " \\\\"))
-  }
-  slide_tabular(header, body, 5)
-}
 
-#' Slide table of the price coefficients of the mixed logits side by side:
-#' one row per row of `rows`, with the coefficient of the specification with
-#' one price coefficient, then those of the specification with one per group
-#' (labels$groups), standard errors in parentheses below. A specification
-#' without results gets "no results"; one that `rows` leaves out (NA), empty
-#' cells.
-#'
-#' @param results_list named list of saved results
-#' @param rows         tibble: prices and prices_by_group, names of
-#'                     specifications (NA where there is none)
-#' @param numbers      number of each specification, e.g. "(4p)", named by the
-#'                     specifications
-#' @return character vector, the lines of the tabular
-slide_price_comparison_table <- function(results_list, rows, labels, numbers) {
-  groups <- names(labels$groups)
-  header <- c(
-    paste0(" & One price & \\multicolumn{", length(groups), "}{c}{One per ",
-           labels$group_name, "} \\\\"),
-    paste0("\\cmidrule(lr){3-", length(groups) + 2, "}"),
-    paste0("Specifications & coefficient & ",
-           paste(latex_text(labels$groups[groups]), collapse = " & "), " \\\\")
-  )
-  body <- character(0)
-  for (r in seq_len(nrow(rows))) {
-    estimate_cells <- rep("", 1 + length(groups))
-    se_cells <- rep("", 1 + length(groups))
-    row_numbers <- character(0)
-    # the specification with one price coefficient fills the first column,
-    # the one with a price coefficient per group the columns of the groups
-    for (variant in c("prices", "prices_by_group")) {
-      spec_name <- rows[[variant]][r]
-      if (is.na(spec_name)) next
-      row_numbers <- c(row_numbers, numbers[[spec_name]])
-      if (variant == "prices") {
-        columns <- 1
-      } else {
-        columns <- 1 + seq_along(groups)
-      }
-      if (!(spec_name %in% names(results_list))) {
-        estimate_cells[columns[1]] <- "\\textit{no results}"
-        next
-      }
-      results <- results_list[[spec_name]]
-      cells <- coefficient_cells(results$coefficient_table %>%
-                                   filter(model == "mixed"), digits = 2)
-      price_terms <- results$price_terms
-      if (variant == "prices") {
-        terms_of_columns <- unique(price_terms$term[price_terms$kind == "price" &
-                                                      is.na(price_terms$group)])
-      } else {
-        terms_of_columns <- character(0)
-        for (group in groups) {
-          terms_of_columns <- c(terms_of_columns,
-                                unique(price_terms$term[!is.na(price_terms$group) &
-                                                          price_terms$group == group]))
-        }
-      }
-      if (length(terms_of_columns) != length(columns)) {
-        stop("The price coefficients of ", spec_name, " do not fit its columns")
-      }
-      estimate_cells[columns] <- cells$estimate_of[terms_of_columns]
-      se_cells[columns] <- cells$se_of[terms_of_columns]
+    # (a) The statistic: both models on the same sample with the same draws
+    if (restricted$fit$n_choices != unrestricted$fit$n_choices ||
+        restricted$fit$n_experts != unrestricted$fit$n_experts ||
+        restricted$draws$n_draws_model != unrestricted$draws$n_draws_model) {
+      stop("LR test ", tests$restricted[i], " against ", tests$unrestricted[i],
+           ": different samples or draws")
     }
-    body <- c(body,
-              paste0(paste(row_numbers, collapse = ", "), " & ",
-                     paste(estimate_cells, collapse = " & "), " \\\\"),
-              paste0(" & ", paste(se_cells, collapse = " & "), " \\\\"))
-  }
-  slide_tabular(header, body, 1 + length(groups))
-}
+    lr <- 2 * (unrestricted$fit$log_likelihood - restricted$fit$log_likelihood)
+    df <- unrestricted$fit$n_parameters - restricted$fit$n_parameters
 
-#' p-value in a table cell: "<0.001" below 0.001, three decimals otherwise,
-#' "--" if missing
-p_cell <- function(p) {
-  if (is.na(p)) {
-    "--"
-  } else if (p < 0.001) {
-    "$<$0.001"
-  } else {
-    math_number(p, 3)
-  }
-}
-
-#' Slide table of the likelihood-ratio tests (lr_tests()), one row per pair
-#' of `pairs`, in its order; a test that did not run, because one of the two
-#' specifications has no results, gets a row that says so
-#'
-#' @param pairs        the pairs of the tests (LR_TEST_PAIRS of 02_output.R)
-#' @param lr           tibble from lr_tests()
-#' @param results_list named list of saved results
-#' @param numbers      number of each specification, named by the
-#'                     specifications
-#' @return character vector, the lines of the tabular
-slide_lr_table <- function(pairs, lr, results_list, labels, numbers) {
-  restriction_labels <- c(
-    regressors = "Added regressors",
-    correlations = "Correlations",
-    group_covariances = "Group (co)variances",
-    prices = "Prices",
-    price_groups = "Price coefficient by group"
-  )
-  header <- paste("Test & Restriction & $\\chi^2$ & df & $p$ & Robust $p$ &",
-                  "Mean weight \\\\")
-  body <- character(0)
-  for (i in seq_len(nrow(pairs))) {
-    restricted_name <- pairs$restricted[i]
-    unrestricted_name <- pairs$unrestricted[i]
-    has_results <- restricted_name %in% names(results_list) &&
-      unrestricted_name %in% names(results_list)
-    # What the test restricts; for added regressors, which ones
-    types <- strsplit(pairs$restrictions[i], " + ", fixed = TRUE)[[1]]
-    restriction_items <- character(0)
+    # (b) R: one row per restriction, one column per coefficient of the larger
+    #     model. numDeriv::jacobian(): the numerical derivatives of the
+    #     restrictions with respect to theta; it passes the arguments after
+    #     theta on to lr_restrictions(). The rows must be df linearly
+    #     independent ones (qr()$rank: the number of linearly independent rows).
+    theta <- unrestricted$coefficients
+    # strsplit(): the types, e.g. "regressors + prices" -> both
+    types <- strsplit(tests$restrictions[i], " + ", fixed = TRUE)[[1]]
+    R <- NULL
     for (type in types) {
-      item <- restriction_labels[[type]]
-      if (type == "regressors" && has_results) {
-        added <- setdiff(results_list[[unrestricted_name]]$specification$regressors,
-                         results_list[[restricted_name]]$specification$regressors)
-        added_labels <- character(0)
-        for (regressor in added) {
-          added_labels <- c(added_labels, regressor_label(
-            regressor, labels, names(results_list[[unrestricted_name]]$attribute_levels)
-          ))
-        }
-        item <- paste(unique(added_labels), collapse = ", ")
-      }
-      restriction_items <- c(restriction_items, item)
+      R <- rbind(R, numDeriv::jacobian(lr_restrictions, theta, type = type,
+                                       unrestricted = unrestricted,
+                                       restricted = restricted))
     }
-    test_cells <- paste0(numbers[[restricted_name]], " vs ",
-                         numbers[[unrestricted_name]], " & ",
-                         latex_text(paste(restriction_items, collapse = "; ")))
-    test <- lr %>%
-      filter(restricted == restricted_name, unrestricted == unrestricted_name)
-    if (nrow(test) == 0) {
-      body <- c(body, paste0(test_cells,
-                             " & \\multicolumn{5}{l}{\\textit{not run: no results}} \\\\"))
-    } else if (test$lr < 0) {
-      body <- c(body, paste0(test_cells, " & ", latex_number(test$lr, 1),
-                             "$^{\\dagger}$ & ", test$df,
-                             " & -- & -- & -- \\\\"))
+    if (nrow(R) != df || qr(R)$rank != df) {
+      stop("LR test ", tests$restricted[i], " against ", tests$unrestricted[i],
+           ": the restrictions give ", qr(R)$rank, " distinct rows in ",
+           nrow(R), ", but the models differ by ", df, " parameters")
+    }
+
+    # (c) The weights: the eigenvalues of (R H^{-1} R')^{-1} (R V R'), which
+    #     are those of the symmetric matrix C'^{-1} (R V R') C^{-1}, with C
+    #     the Cholesky factor of R H^{-1} R' (chol(): C'C = R H^{-1} R'), so
+    #     that eigen() returns real values
+    inverse_hessian <- unrestricted$inverse_hessian[names(theta), names(theta)]
+    V <- unrestricted$vcov[names(theta), names(theta)]
+    C_inverse <- solve(chol(R %*% inverse_hessian %*% t(R)))
+    weights_matrix <- t(C_inverse) %*% (R %*% V %*% t(R)) %*% C_inverse
+    weights <- eigen(weights_matrix, symmetric = TRUE, only.values = TRUE)$values
+
+    # (d) p-values. Robust: the share of draws of sum_i lambda_i Z_i^2 at
+    #     least as large as LR (rchisq(df = 1): draws of Z^2)
+    if (lr < 0) {
+      message("Negative LR statistic: ", tests$unrestricted[i],
+              " has a lower log-likelihood than ", tests$restricted[i])
+      p_classical <- NA_real_
+      p_robust <- NA_real_
     } else {
-      body <- c(body, paste0(test_cells, " & ", math_number(test$lr, 1), " & ",
-                             test$df, " & ", p_cell(test$p), " & ",
-                             p_cell(test$p_robust), " & ",
-                             latex_number(test$mean_weight, 2), " \\\\"))
+      p_classical <- pchisq(lr, df = df, lower.tail = FALSE)
+      set.seed(seed)
+      weighted_sum <- numeric(n_draws)
+      for (weight in weights) {
+        weighted_sum <- weighted_sum + weight * rchisq(n_draws, df = 1)
+      }
+      p_robust <- mean(weighted_sum >= lr)
     }
+
+    table <- bind_rows(table, tibble(
+      restricted = tests$restricted[i],
+      unrestricted = tests$unrestricted[i],
+      restrictions = tests$restrictions[i],
+      lr = lr,
+      df = df,
+      p = p_classical,
+      p_robust = p_robust,
+      mean_weight = mean(weights)
+    ))
   }
-  c("\\setlength{\\tabcolsep}{4pt}",
-    "\\begin{tabular}{llrrrrr}",
+  table
+}
+
+# 4. LaTeX tables --------------------------------------------------------------
+
+#' A complete table float: caption, label, a booktabs tabular and the notes,
+#' in a threeparttable (profile: the code writes the float). The preamble
+#' needs booktabs and threeparttable.
+#'
+#' @param column_spec the tabular's columns, e.g. "lcccccc"
+#' @param header      lines of the header, without the rules
+#' @param body        lines of the body
+#' @param caption     caption, LaTeX
+#' @param label       label, e.g. "tab:rcl_fit"
+#' @param notes       notes, LaTeX, one paragraph
+#' @param font_size   e.g. "\\scriptsize", for the table and the notes
+#' @return character vector, the lines of the .tex file
+table_float <- function(column_spec, header, body, caption, label, notes,
+                        font_size) {
+  c("\\begin{table}[htbp]",
+    "\\centering",
+    "\\begin{threeparttable}",
+    paste0("\\caption{", caption, "}"),
+    paste0("\\label{", label, "}"),
+    font_size,
+    "\\setlength{\\tabcolsep}{4pt}",
+    # rows a little closer than LaTeX's default, so that a table of eight
+    # attributes with standard errors fits a 16:9 frame
+    "\\renewcommand{\\arraystretch}{0.86}",
+    paste0("\\begin{tabular}{", column_spec, "}"),
     "\\toprule",
     header,
     "\\midrule",
     body,
     "\\bottomrule",
-    "\\end{tabular}")
+    "\\end{tabular}",
+    "\\begin{tablenotes}[flushleft]",
+    font_size,
+    # not justified: in a narrow table, justified notes have wide gaps
+    "\\raggedright",
+    paste0("\\item \\textit{Notes:} ", notes),
+    "\\end{tablenotes}",
+    "\\end{threeparttable}",
+    "\\end{table}")
 }
 
-#' Slide version of an AME figure (plot_ame()): the variations with their
-#' short labels, no title, the probabilities at the reference vignette as
-#' subtitle, saved at slide size with cairo_pdf (R's PDF device through the
-#' Cairo library), which embeds the fonts and prints a hyphen as a hyphen
-#'
-#' @param plot_data        as for plot_ame(), with the column vignette
-#' @param file_path        where to save the PDF
-#' @param variation_labels vignette -> short label, in the order of the rows
-#'                         from the top
-#' @param size             c(width, height) in inches
-#' @param base_size        font size in pt
-#' @param group_labels     as in baseline_subtitle()
-save_slide_ame_figure <- function(plot_data, file_path, variation_labels, size,
-                                  base_size, group_labels = NULL) {
-  slide_plot_data <- plot_data %>%
-    mutate(variation = factor(variation_labels[vignette],
-                              levels = rev(variation_labels)))
-  slide_plot <- plot_ame(slide_plot_data, NULL,
-                         baseline_subtitle(slide_plot_data, NULL, group_labels),
-                         base_size = base_size)
-  ggsave(file_path, slide_plot, width = size[["width"]],
-         height = size[["height"]], device = cairo_pdf)
+#' A header cell over several lines: a one-column tabular inside the cell, so
+#' that \\ breaks the line, e.g. "Heat\\\\pump"
+header_cell <- function(text) {
+  paste0("\\begin{tabular}[b]{@{}c@{}}", text, "\\end{tabular}")
 }
 
-#' One beamer frame of the slides
-#'
-#' @param title   the frame title (LaTeX)
-#' @param content the lines inside the frame
-#' @param note    a note at the bottom of the frame (LaTeX), or NULL
-#' @return character vector, the lines of the frame and an empty line
-slide_frame <- function(title, content, note = NULL) {
-  lines <- c(paste0("\\begin{frame}{", title, "}"), content)
-  if (!is.null(note)) {
-    lines <- c(lines, paste0("  \\slidenote{", note, "}"))
-  }
-  c(lines, "\\end{frame}", "")
+#' A row with one cell across the table, e.g. the title of a panel
+panel_row <- function(text, n_columns) {
+  paste0("\\multicolumn{", n_columns, "}{l}{\\textit{", text, "}} \\\\")
 }
 
-#' Numbers for the text of the slides as LaTeX macros, e.g.
-#' \newcommand{\nExperts}{1,929}
+#' Two rows of a table: the estimates, with stars if p is given, and below
+#' them the standard errors in parentheses. NA gives an empty cell.
 #'
-#' @param values named vector of the formatted numbers; the names are the
-#'               macro names, letters only (LaTeX command names have no digits)
-#' @return character vector, one line per macro
+#' @param label    row label, LaTeX
+#' @param estimate,se,p one value per column
+#' @param digits   decimals
+estimate_rows <- function(label, estimate, se, p = NULL, digits = 2) {
+  estimate_text <- latex_number(estimate, digits)
+  if (!is.null(p)) estimate_text <- paste0(estimate_text, star_text(p))
+  se_text <- paste0("(", latex_number(se, digits), ")")
+  se_text[is.na(se)] <- ""
+  c(paste0(label, " & ", paste(estimate_text, collapse = " & "), " \\\\"),
+    paste0(" & ", paste(se_text, collapse = " & "), " \\\\"))
+}
+
+#' One row of a table for one coefficient that holds for all columns, e.g.
+#' the price coefficient in a table with a column per technology: the
+#' estimate, with stars, and the standard error in parentheses beside it,
+#' centred across the columns (one row instead of two, so that the table
+#' still fits a frame)
+#'
+#' @param label     row label, LaTeX
+#' @param estimate,se,p one value each
+#' @param n_columns the columns the cell spans
+#' @param digits    decimals
+spanning_row <- function(label, estimate, se, p, n_columns, digits = 2) {
+  paste0(label, " & \\multicolumn{", n_columns, "}{c}{",
+         latex_number(estimate, digits), star_text(p), " (",
+         latex_number(se, digits), ")} \\\\")
+}
+
+#' Lines of a .tex file that defines numbers for the text of the slides, e.g.
+#' \newcommand{\rclExperts}{340}
 numbers_tex <- function(values) {
-  if (!all(grepl("^[A-Za-z]+$", names(values)))) {
-    stop("Macro names must be letters only: ", paste(names(values), collapse = ", "))
-  }
   paste0("\\newcommand{\\", names(values), "}{", values, "}")
+}
+
+# 5. Figures -------------------------------------------------------------------
+
+#' The look of every figure of the mixed logits: theme_minimal(), the legend
+#' at the bottom, the title and subtitle aligned with the plot's left edge
+#' (profile: these figures keep their titles), the caption below
+theme_rcl <- function(base_size) {
+  theme_minimal(base_size = base_size) +
+    theme(
+      plot.title = element_text(face = "bold", size = base_size + 1),
+      plot.subtitle = element_text(size = base_size - 1, colour = "grey25"),
+      plot.caption = element_text(size = base_size - 2, colour = "grey35",
+                                  hjust = 0),
+      plot.title.position = "plot",
+      plot.caption.position = "plot",
+      legend.position = "bottom",
+      legend.margin = margin(0, 0, 0, 0),
+      legend.title = element_blank(),
+      panel.grid.minor = element_blank(),
+      strip.text = element_text(face = "bold", size = base_size - 1)
+    )
+}
+
+#' Estimates with their 95% intervals, one row of the vertical axis per item
+#' (an attribute, an outcome) and one point per series (a Berufsgruppe, a
+#' model), optionally in panels
+#'
+#' @param plot_data one row per item x series (x panel): item (factor; its
+#'                  first level at the bottom), series (factor; its first
+#'                  level at the top of each item), estimate, ci_low,
+#'                  ci_high, and panel (factor) if in panels
+#' @param colours,shapes named by the levels of series; shapes with a fill
+#'                  (21 to 25), filled in the series' colour
+#' @param title,subtitle,caption texts of the figure
+#' @param x_title   title of the axis of the estimates
+#' @param base_size font size in pt
+#' @param legend_rows rows of the legend
+#' @return ggplot
+plot_estimates <- function(plot_data, colours, shapes, title, subtitle, caption,
+                           x_title, base_size, legend_rows = 1) {
+  series_levels <- levels(plot_data$series)
+  missing_series <- setdiff(series_levels, names(colours))
+  if (length(missing_series) > 0) {
+    stop("No colour for: ", paste(missing_series, collapse = ", "))
+  }
+
+  # coord_flip() puts the items on the vertical axis; position_dodge() places
+  # the series next to each other within an item, in the order of `group`:
+  # reversed, so that the first series is at the top
+  plot <- ggplot(plot_data,
+                 aes(x = item, y = estimate, ymin = ci_low, ymax = ci_high,
+                     colour = series, shape = series, fill = series,
+                     group = factor(series, levels = rev(series_levels)))) +
+    geom_hline(yintercept = 0, colour = "grey60", linewidth = 0.3) +
+    # key_glyph = "point": the legend shows the symbols without the lines
+    geom_pointrange(position = position_dodge(width = 0.7), size = 0.25,
+                    linewidth = 0.4, stroke = 0.6, key_glyph = "point") +
+    coord_flip() +
+    scale_colour_manual(values = colours[series_levels]) +
+    scale_shape_manual(values = shapes[series_levels]) +
+    scale_fill_manual(values = colours[series_levels]) +
+    # One legend for colour, symbol and fill, its symbols a little larger
+    guides(colour = guide_legend(nrow = legend_rows,
+                                 override.aes = list(size = 1.8)),
+           shape = guide_legend(nrow = legend_rows),
+           fill = guide_legend(nrow = legend_rows)) +
+    labs(title = title, subtitle = subtitle, caption = caption,
+         x = NULL, y = x_title) +
+    theme_rcl(base_size) +
+    theme(legend.key.height = unit(base_size, "pt"),
+          legend.key.spacing.y = unit(1, "pt"))
+  if ("panel" %in% names(plot_data)) {
+    plot <- plot + facet_wrap(~panel, nrow = 1)
+  }
+  plot
+}
+
+#' The rows of a table of all models (e.g. the probabilities or the AMEs) for
+#' the panels of a figure across models, one panel per Berufsgruppe: each
+#' model's rows of that Berufsgruppe, or, for a model without Berufsgruppe,
+#' its rows for all experts in every panel
+#'
+#' @param table  one row per model x group x ...: columns model and group
+#' @param models the models of the figure
+#' @param groups the Berufsgruppen, one panel each
+#' @return the rows, with the column panel (the Berufsgruppe of the panel)
+rows_by_panel <- function(table, models, groups) {
+  panel_rows <- tibble()
+  for (model_name in models) {
+    model_rows <- table %>%
+      filter(model == model_name)
+    for (group_name in groups) {
+      if ("All experts" %in% model_rows$group) {
+        rows <- model_rows %>%
+          filter(group == "All experts")
+      } else {
+        rows <- model_rows %>%
+          filter(group == group_name)
+      }
+      if (nrow(rows) == 0) stop("No rows of ", group_name, " in ", model_name)
+      panel_rows <- bind_rows(panel_rows, rows %>%
+                                mutate(panel = group_name))
+    }
+  }
+  panel_rows
+}
+
+#' Heat map of the correlations of the constants of one covariance block,
+#' with 1 on the diagonal. A correlation is bold if its 95% Krinsky-Robb
+#' percentile interval excludes 0.
+#'
+#' @param heatmap_data one row per pair of technologies, both orders and the
+#'                     diagonal: row, column (factors of the labels; the
+#'                     first level at the top and on the left), estimate,
+#'                     is_diagonal, is_significant (NA on the diagonal)
+#' @param title,subtitle,caption texts of the figure
+#' @param base_size    font size in pt
+#' @param text_size    size of the numbers in the tiles, in mm (geom_text())
+#' @return ggplot
+plot_correlations <- function(heatmap_data, title, subtitle, caption, base_size,
+                              text_size) {
+  # From red (-1) over light grey (0) to blue (1), the colours of the heat
+  # maps of the policy brief; the diagonal in grey, outside this scale. White
+  # numbers on the darkest tiles.
+  heatmap_data <- heatmap_data %>%
+    mutate(
+      fill_value = if_else(is_diagonal, NA_real_, estimate),
+      label = if_else(is_diagonal, "1",
+                      formatC(estimate, format = "f", digits = 2)),
+      text_colour = if_else(!is_diagonal & abs(estimate) > 0.7, "white", "#2F3B4A"),
+      fontface = if_else(!is_diagonal & is_significant, "bold", "plain")
+    )
+  ggplot(heatmap_data, aes(x = column, y = row, fill = fill_value)) +
+    geom_tile(colour = "white", linewidth = 0.6) +
+    geom_text(aes(label = label, colour = text_colour, fontface = fontface),
+              size = text_size) +
+    scale_fill_gradient2(low = "#E15759", mid = "#F2F2F2", high = "#4E79A7",
+                         midpoint = 0, limits = c(-1, 1), na.value = "grey85") +
+    scale_colour_identity() +
+    scale_x_discrete(position = "top") +
+    coord_fixed() +
+    labs(title = title, subtitle = subtitle, caption = caption, x = NULL, y = NULL) +
+    theme_rcl(base_size) +
+    theme(panel.grid = element_blank(),
+          legend.position = "none",
+          axis.text = element_text(colour = "#2F3B4A"),
+          # the column labels at an angle, so that neighbours do not touch
+          axis.text.x.top = element_text(angle = 45, hjust = 0, vjust = 0))
+}
+
+#' Save a figure as a vector PDF for pdfLaTeX, at a fixed size so that the
+#' text has the same size in every figure. cairo_pdf (R's PDF device through
+#' the Cairo library) embeds the fonts and prints a hyphen as a hyphen.
+#'
+#' @param size c(width, height) in inches
+save_figure_pdf <- function(plot, file, size) {
+  ggsave(file, plot, width = size[["width"]], height = size[["height"]],
+         device = cairo_pdf)
 }

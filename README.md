@@ -96,9 +96,9 @@ PROJECT (this folder, on GitHub)
                               recommendations differ across experts?
     00_functions_estimation.R   estimation, covariance matrix, AMEs with Krinsky-Robb
                                 standard errors, fit
-    00_functions_output.R       LaTeX tables, AME figures, heat maps, Excel (being reworked)
+    00_functions_output.R       the quantities of the tables, LR tests, LaTeX tables, figures
     01_run_specifications.R     settings, data and the models; estimates and saves each
-    02_output.R                 tables, figures and Excel from the saved results (being reworked)
+    02_output.R                 tables, figures, tests and Excel from the saved results
   R/geodata/
     build_plz_bundesland.R      run ONCE: downloads and builds the postcode lookup
   tests/selftest.R            checks on the cleaned output
@@ -841,13 +841,15 @@ English.
 
 ```r
 source("R/analysis/01_run_specifications.R")   # estimates the models; slow
+source("R/analysis/02_output.R")               # tables, figures, tests; a few minutes
 ```
 
 | Script | What it does |
 |---|---|
 | `00_functions_estimation.R` | the functions: estimation (with the starting values of the models by Berufsgruppe), covariance matrix clustered by expert, probabilities and AMEs with Krinsky–Robb standard errors, fit |
 | `01_run_specifications.R` | settings, data and the models; estimates each, saves the model to the secure drive and its aggregate results to Dropbox |
-| `00_functions_output.R`, `02_output.R` | tables, figures and Excel. They still expect the results of the earlier, larger version of `01_run_specifications.R` (commit `93010be`) and are being reworked |
+| `00_functions_output.R` | the functions of the output: the quantities every table shows the same way, the LR tests, the LaTeX tables and the figures |
+| `02_output.R` | settings and labels; the models compared, then each model: LaTeX tables, PDF figures, an Excel workbook and numbers for the slides, from the saved results (see [Tables and figures](#tables-and-figures)) |
 
 ### The models
 
@@ -1121,3 +1123,112 @@ the AMEs takes about 0.4 seconds with 100,000 draws, so a model with three
 Berufsgruppen needs about 1.5 hours for it, (2) about half an hour, and all
 eight models about 12 hours, on top of the estimation. For a first look, lower
 `n_draws_ame` and `n_draws_kr`, and list only some models in `MODELS_TO_RUN`.
+
+### Tables and figures
+
+`02_output.R` reads the saved results of one arm and reference outcome
+(`SELECTED_FW_ARM`, `REFERENCE_OUTCOME`), aggregates only, never the fitted
+models, and writes into the same run folder. Its outputs follow the story of a
+talk: first the models compared (which model, and do the results depend on
+it), then each model.
+
+| Folder | File | What |
+|---|---|---|
+| `tables/` | `tab_rcl_fit.tex` | the models (what differs by occupational group, prices) and their fit: parameters, log-likelihood, AIC, BIC, McFadden R² |
+| | `tab_rcl_lr_tests.tex` | likelihood-ratio tests between nested models, classical and robust |
+| | `tab_rcl_coefficients_<technology>.tex` | the attribute effects on one technology across the models whose attribute effects are the same for all groups |
+| | `tab_rcl_prices.tex` | the price coefficients of the models with prices |
+| | `tab_rcl_<model>_constants.tex` | mean (A) and standard deviation (B) of the constants, by group |
+| | `tab_rcl_<model>_coefficients[_<group>].tex` | the regression table: effects of the attributes, and in the models with prices the price coefficient; one table per group in the models with interactions |
+| | `tab_rcl_<model>_baseline.tex` | baseline probabilities (at the reference vignette), by group |
+| | `numbers_rcl.tex` | macros for the text of the slides: sample, draws, reference vignette, mean prices |
+| `figures/` | `fig_rcl_<model>_baseline.pdf` | baseline probabilities, by group |
+| | `fig_rcl_<model>_ame_<outcome>.pdf` | AMEs by group, one figure per outcome |
+| | `fig_rcl_<model>_correlations[_<group>].pdf` | correlations of the constants, one heat map per covariance matrix |
+| | `fig_rcl_comparison_baseline.pdf` | probabilities across the models of `COMPARISON_MODELS`, a panel per group |
+| | `fig_rcl_comparison_ame_<outcome>_<group>.pdf` | AMEs across the same models |
+| `excel/` | `rc_logit_results.xlsx` | all of it unrounded, every estimated parameter as `mlogit` names it, and the tests of group differences |
+
+**One meaning per row.** A row of a table, or a series of a figure, always
+shows a group's own value, never its difference to the reference group:
+
+- *mean constant* of a group: the mean utility of a technology relative to
+  the reference outcome at the reference vignette (and, with prices, for an
+  expert who reported the mean prices). In (4) the constant plus the group's
+  shift, in (6) the group's own constant, in (2) one for all experts.
+- *attribute effect* of a group: in the models with interactions the
+  attribute's coefficient plus the group's interaction, otherwise one for
+  all experts.
+- *standard deviation and correlation* of the constants: per covariance
+  matrix, so for all experts in (2) and (4), per group in (6). The heat maps
+  have 1 on the diagonal.
+
+Whether the groups differ is a question for the LR tests, and for the
+probabilities and AMEs for the Krinsky–Robb draws: the probabilities of all
+groups are saved at every draw of the parameters, so the difference between
+two groups at each draw gives a standard error and a percentile interval of
+the difference (`group_differences()`), for all pairs, in Excel. The figures
+do not mark them. Where the groups share the attribute coefficients, as in
+(4), their AMEs come from the same coefficient draws and are almost perfectly
+correlated (0.95 on simulated data). A small difference that comes only from
+the groups' different baseline probabilities is then significant although the
+two intervals in the figure overlap almost completely, which is easy to
+misread on a slide. The tests are cell by cell, without adjustment for the
+many cells of a figure.
+
+**Standard errors.** Tables have standard errors in parentheses: clustered by
+expert for the coefficients and their sums (a group's mean constant or
+attribute effect is a sum, so its standard error is exact), Krinsky–Robb for
+the standard deviations and the probabilities. Stars only where a test of zero
+makes sense, so not for the standard deviations (0 is on the boundary) or the
+probabilities. Figures show 95% Krinsky–Robb percentile intervals.
+
+**LR tests** (`LR_TESTS` in section 1): do the mean constants differ by group
+((2) vs (4)); do the covariances ((4) vs (6), (4i) vs (6i), (4p) vs (6p)); do
+the attribute effects ((4) vs (4i), (6) vs (6i), (4p) vs (4ip)); do the prices
+matter ((4) vs (4p), (6) vs (6p), (4i) vs (4ip)). Both models of a test have
+the same sample and draws. The classical p-value assumes the larger model is
+correctly specified; the robust one (Kent 1982; White 1982) compares LR with a
+weighted sum of χ²(1) variables, with weights from the inverse Hessian and the
+cluster-robust covariance matrix. The test of the covariances restricts the
+covariance matrices, not their Cholesky factors, which are not unique.
+
+**On slides.** Everything is sized for the 16:9 slides of the economics-latex
+layout: figures 5.5 × 2.8 in (heat maps 3.2 × 2.8 in), included at natural
+size with `\includegraphics{fig_rcl_m4_baseline.pdf}`; tables in
+`\scriptsize`, each a complete float with caption and label, included with
+`\input{\tablepath/tab_rcl_m4_constants.tex}` and checked to fit a frame. To
+fit, the technology columns have one-word headers (as the heat maps), the cell
+above the row labels says that the utilities are relative to the reference
+outcome, the single price coefficient has its standard error beside it in a
+cell across the columns, and the notes are one to three lines; the dummies
+for a price not reported are in `tab_rcl_prices.tex`. The sample and the
+draws are in the notes of
+`tab_rcl_fit.tex` and in the macros of `numbers_rcl.tex` (`\rclExperts`,
+`\rclReferenceVignette`, `\rclPriceGas`, ...), which the slides `\input` once.
+The macros have the same names in every run, so a deck inputs the
+`numbers_rcl.tex` of one run only.
+Groups have the same colour and symbol in every figure, models in every
+comparison. The tables need `booktabs` and `threeparttable`.
+
+**Changing things.** The models and their order (`MODELS`, `MAIN_MODEL`),
+the models of the comparison figures (`COMPARISON_MODELS`, at most about
+five) and of the comparison tables (`COEFFICIENT_COMPARISON_MODELS`), the
+tests (`LR_TESTS`), the labels, colours and sizes are all in section 1. A new
+regressor of `01_run_specifications.R` that is an attribute dummy needs a label
+in `ATTRIBUTE_LABELS`; the script stops and names any value without a label.
+
+**Reading the results.**
+
+- The constants, and so their correlations, are relative to the reference
+  outcome. An expert who dislikes heat pumps has higher constants for every
+  other technology, which makes those constants positively correlated; the
+  correlations change with `REFERENCE_OUTCOME`.
+- Coefficients are relative to the scale of the unexplained utility, which can
+  differ between models; compare the AMEs across models, not the coefficients.
+- The price enters linearly, in cent per kWh, centred at the mean over the
+  experts of both arms (`price_reference` in the results). Its coefficient is the change in utility from one cent more per kWh, so a
+  coefficient divided by minus the price coefficient is in cent per kWh: the
+  price change that has the same effect on that technology's utility. It is
+  identified only by differences between the prices the experts reported, not
+  by the vignettes, and "No recommendation" has no price.
