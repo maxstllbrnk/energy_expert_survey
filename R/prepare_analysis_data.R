@@ -11,6 +11,11 @@
 #   load_analysis_data()   reads both data sets and applies all of the above,
 #                          plus the time and risk preference scores
 #
+# and two that an analysis applies itself, because they depend on its sample:
+#
+#   clean_reported_prices()    the energy prices of Q15 as cent per kWh
+#   add_heating_degree_days()  the degree days of the expert's NUTS3 region
+#
 # Usage, from the project root:
 #
 #   source("R/prepare_analysis_data.R")      # also loads config.R
@@ -206,4 +211,135 @@ load_analysis_data <- function(completers_only = FALSE) {
     inner_join(main %>% select(resp_uid, berufsgruppe), by = "resp_uid")
 
   list(main = main, vignettes = vignettes)
+}
+
+
+# =============================================================================
+# energy prices (Q15) and expected price developments (Q17)
+# =============================================================================
+# Q15 asks what households among the expert's clients paid per kWh of each
+# fuel in January and February 2026, in cent. The question asks experts to
+# leave a field blank if none of their clients uses the fuel; a blank also
+# covers "do not know". Answers in another unit are converted, in this order:
+#   (1) below PRICE_EURO_BELOW: euro instead of cent, times 100
+#   (2) oil within OIL_PER_LITRE (after (1)): cent per litre, divided by 10
+#       (1 l of heating oil is about 10 kWh, as the question says)
+#   (3) pellets within PELLETS_PER_KG (after (1)): cent per kg, divided by 5
+#       (1 kg of pellets is about 5 kWh, as the question says)
+#   (4) an answer more than PRICE_VALID_FACTOR times above or below the median
+#       answer for its fuel cannot be read as a price per kWh: it counts as not
+#       reported, like a blank
+# The bounds are wide on purpose: the survey measures beliefs, so high and low
+# answers are kept. Band of (2): Max, 2026-10-19. Band of (3): pellets cost
+# about 400 euro per tonne, 40 cent per kg; it starts at 20, above plausible
+# answers per kWh (median about 8 cent), so that these stay per kWh (Max,
+# 2026-10-20). PRICE_VALID_FACTOR: first choice, to be confirmed.
+#
+# These are the rules of the mixed logit models. Section 1 of
+# R/analysis/01_run_specifications.R still has its own copy of them; it moves
+# to clean_reported_prices() once its estimation run of October 2026 has
+# finished (Max, 2026-10-28).
+PRICE_FUELS        <- c("gas", "hpelec", "dh", "oil", "pellet")
+PRICE_EURO_BELOW   <- 1
+OIL_PER_LITRE      <- c(40, 140)
+PELLETS_PER_KG     <- c(20, 70)
+PRICE_VALID_FACTOR <- 3
+
+# Q17: the price of each fuel in five years, compared with the start of 2026.
+# The answers exactly as in the data (note "10%" against "10 %"); the question
+# asks experts to leave a fuel blank if it is not available in their area. An
+# expert expects a rise if the answer is one of PEXP_RISE, both answers
+# "höher" (Max, 2026-10-27). The question asks about the price, not the price
+# after inflation: with inflation, "bis zu 10 % höher" is about flat in real
+# terms.
+PEXP_ANSWERS <- c("mehr als 10% niedriger", "bis zu 10 % niedriger",
+                  "ungefähr gleich", "bis zu 10 % höher", "mehr als 10% höher")
+PEXP_RISE    <- c("bis zu 10 % höher", "mehr als 10% höher")
+
+#' The reported prices of Q15 as cent per kWh, by rules (1) to (4) above
+#'
+#' @param main         one row per expert, with price_<fuel> for PRICE_FUELS
+#' @param in_reference TRUE for the experts whose answers set the median of
+#'                     rule (4) and the mean: in the mixed logit models, the
+#'                     completers of the three Berufsgruppen in both arms
+#' @return list:
+#'   data       main, plus price_<fuel>_kwh (cent per kWh; NA if blank or not
+#'              usable) and price_<fuel>_treatment ("blank", "as reported",
+#'              "euro", "per litre or kg", "euro and per litre or kg",
+#'              "not usable")
+#'   reference  one row per fuel: median (after (1) to (3)), lower and upper
+#'              bound of rule (4), mean of the usable prices
+clean_reported_prices <- function(main, in_reference) {
+  reference <- tibble()
+  for (fuel in PRICE_FUELS) {
+    reported <- main[[paste0("price_", fuel)]]
+    treatment <- if_else(is.na(reported), "blank", "as reported")
+
+    # (1) euro instead of cent
+    is_euro <- !is.na(reported) & reported < PRICE_EURO_BELOW
+    price <- if_else(is_euro, reported * 100, reported)
+    treatment[is_euro] <- "euro"
+
+    # (2) oil per litre, (3) pellets per kg
+    is_per_unit <- rep(FALSE, length(price))
+    if (fuel == "oil") {
+      is_per_unit <- !is.na(price) &
+        price >= OIL_PER_LITRE[1] & price <= OIL_PER_LITRE[2]
+      price <- if_else(is_per_unit, price / 10, price)
+    }
+    if (fuel == "pellet") {
+      is_per_unit <- !is.na(price) &
+        price >= PELLETS_PER_KG[1] & price <= PELLETS_PER_KG[2]
+      price <- if_else(is_per_unit, price / 5, price)
+    }
+    treatment[is_per_unit & !is_euro] <- "per litre or kg"
+    treatment[is_per_unit & is_euro] <- "euro and per litre or kg"
+
+    # (4) far from the median answer: not a price per kWh
+    price_median <- median(price[in_reference], na.rm = TRUE)
+    lower <- price_median / PRICE_VALID_FACTOR
+    upper <- price_median * PRICE_VALID_FACTOR
+    is_unusable <- !is.na(price) & (price < lower | price > upper)
+    price[is_unusable] <- NA
+    treatment[is_unusable] <- "not usable"
+
+    main[[paste0("price_", fuel, "_kwh")]] <- price
+    main[[paste0("price_", fuel, "_treatment")]] <- treatment
+    reference <- bind_rows(reference, tibble(
+      fuel = fuel, median = price_median, lower = lower, upper = upper,
+      mean = mean(price[in_reference], na.rm = TRUE)
+    ))
+  }
+  list(data = main, reference = reference)
+}
+
+
+# =============================================================================
+# heating degree days
+# =============================================================================
+# Of the NUTS3 region of the expert's postcode (nuts3, R/cleaning/03_recode.R)
+# in HDD_YEAR, from Eurostat (HDD_FILE in config.R), one year as in the mixed
+# logit models (Max, 2026-10-27). In 2025 the German regions range from 2,255
+# to 3,425 degree days.
+HDD_YEAR <- 2025
+
+#' Adds `hdd`, the heating degree days of the expert's NUTS3 region in
+#' HDD_YEAR: NA for an expert without nuts3 (no valid postcode, or a P.O.-box or
+#' large-customer postcode), and NA for a region without degree days. Whether
+#' that may happen depends on the sample, so the caller checks it.
+#'
+#' @param main one row per expert, with nuts3
+#' @return main with the column hdd, in the same rows
+add_heating_degree_days <- function(main) {
+  hdd <- read.csv(HDD_FILE) %>%
+    filter(indic_nrg == "HDD", TIME_PERIOD == HDD_YEAR) %>%
+    mutate(nuts3 = geo, hdd = OBS_VALUE) %>%
+    select(nuts3, hdd)
+  # One row per region in hdd: relationship = "many-to-one" stops the join if
+  # a region appeared twice
+  n_rows <- nrow(main)
+  main <- main %>%
+    left_join(hdd, by = "nuts3", relationship = "many-to-one")
+  stopifnot(nrow(main) == n_rows)
+  main
 }

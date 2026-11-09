@@ -98,6 +98,10 @@ VIGNETTE_FILE <- file.path(PUBLIC_DATA_DIR, "vignetten_kombinationen.xlsx")     
 # in the required list: without it, `nuts3` is NA with a message.
 PLZ_NUTS3_FILE <- file.path(PUBLIC_DATA_DIR, "pc2025_DE_NUTS-2024_v1.0.csv")       # postcode -> NUTS3
 
+# Eurostat's heating and cooling degree days by NUTS3 region (nrg_chddr2_a),
+# read by add_heating_degree_days() in R/prepare_analysis_data.R.
+HDD_FILE <- file.path(PUBLIC_DATA_DIR, "hdd_cdd_nuts3.csv")
+
 # --- geodata (Dropbox, downloaded once) --------------------------------------
 # Built by R/geodata/build_plz_bundesland.R, which downloads the two open data
 # sets once and leaves them here. Nothing in the pipeline ever downloads: the
@@ -132,6 +136,11 @@ FIRST_POLICY_BRIEF_DIR <- file.path(OUTPUT_DIR, "first_policy_brief")
 # covariance matrices, marginal effects, fit), tables and figures, one
 # rc_logit_<arm>_ref_<outcome>/ folder per run.
 RC_LOGIT_DIR <- file.path(OUTPUT_DIR, "rc_logit_heterogeneity")
+
+# English tables and figures describing the survey, for talks, written by
+# R/run_descriptives.R: LaTeX tables, PDF figures and an Excel workbook.
+# Aggregates only.
+DESCRIPTIVES_DIR <- file.path(OUTPUT_DIR, "descriptives")
 
 # =============================================================================
 # survey design constants

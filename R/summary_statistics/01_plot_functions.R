@@ -132,19 +132,26 @@ is_dark <- function(colors) farver::decode_colour(colors, to = "hcl")[, "l"] < 5
 # =============================================================================
 # outlier rule (see 00_settings.R)
 # =============================================================================
-# Returns the non-missing values that survive VALID_RANGE and TRIM_QUANTILES.
-remove_outliers <- function(values, variable) {
-  kept <- values[!is.na(values)]
-  if (variable %in% NOT_TRIMMED) return(kept)
+# The same values, with those that fail VALID_RANGE or TRIM_QUANTILES set to
+# NA. Every value keeps its place, so the rule can be applied once to a pooled
+# sample and the statistics then taken by group (R/run_descriptives.R).
+outliers_to_na <- function(values, variable) {
+  if (variable %in% NOT_TRIMMED) return(values)
 
   range <- VALID_RANGE[[variable]]
-  if (!is.null(range)) kept <- kept[kept >= range[1] & kept <= range[2]]
+  if (!is.null(range)) values[which(values < range[1] | values > range[2])] <- NA
 
-  if (length(kept) > 0) {
-    limits <- quantile(kept, TRIM_QUANTILES, names = FALSE)
-    kept <- kept[kept >= limits[1] & kept <= limits[2]]
+  if (any(!is.na(values))) {
+    limits <- quantile(values, TRIM_QUANTILES, names = FALSE, na.rm = TRUE)
+    values[which(values < limits[1] | values > limits[2])] <- NA
   }
-  kept
+  values
+}
+
+# Returns the non-missing values that survive VALID_RANGE and TRIM_QUANTILES.
+remove_outliers <- function(values, variable) {
+  kept <- outliers_to_na(values, variable)
+  kept[!is.na(kept)]
 }
 
 # "12 Ausreißer entfernt (außerhalb von 1920–2010 oder unter dem 0,5-%- bzw.

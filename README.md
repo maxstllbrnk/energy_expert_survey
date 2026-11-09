@@ -57,6 +57,9 @@ DROPBOX (DROPBOX_DIR)                  …/Heating Transition/analysis_survey
     rc_logit_heterogeneity/              ← written by R/analysis/
       rc_logit_<arm>_ref_<outcome>/        mixed logit specifications: results, tables, figures; see
                                            "Heterogeneity of the recommendations"
+    descriptives/                        ← written by R/run_descriptives.R
+      tables/, figures/, excel/            English tables and figures for talks; see "Descriptives
+                                           for talks"
 
 PROJECT (this folder, on GitHub)
   config.R                    the three roots and the paths derived from them
@@ -71,7 +74,8 @@ PROJECT (this folder, on GitHub)
     05_main.R                   DATA SET 3 + build report
   R/add_preferences.R         the GPS time- and risk-preference scores
   R/prepare_analysis_data.R   shared analysis decisions: Berufsgruppe, last question
-                              answered, loads both data sets with the preference scores
+                              answered, loads both data sets with the preference scores;
+                              the price rules (Q15) and the heating degree days
   R/run_summary_statistics.R  entry point for the summary statistics
   R/summary_statistics/
     00_settings.R               samples, groups, outlier rule, what is plotted, labels
@@ -99,6 +103,17 @@ PROJECT (this folder, on GitHub)
     00_functions_output.R       the quantities of the tables, LR tests, LaTeX tables, figures
     01_run_specifications.R     settings, data and the models; estimates and saves each
     02_output.R                 tables, figures, tests and Excel from the saved results
+  R/run_descriptives.R        entry point for the English descriptives for talks
+  R/descriptives/
+    00_settings.R               sample, rows of the tables, English labels, ZEW colours, sizes
+    01_functions.R              statistics, LaTeX tables and the bar charts by group
+    02_data.R                   the sample, the price and outlier rules, checks against the models
+    03_recruitment.R            response rate by state, invited and responses by group, sample flow
+    04_experts.R                summary statistics of the experts; the cleaning
+    05_policy_brief.R           price expectations (with tests), barriers, criteria of customers
+    06_vignettes.R              the design, recommendations by arm and group, who is in each arm
+    07_response_times.R         the questionnaire, its sections and the vignettes
+    08_excel_numbers.R          Excel, and the numbers and figure notes for the slides
   R/geodata/
     build_plz_bundesland.R      run ONCE: downloads and builds the postcode lookup
   tests/selftest.R            checks on the cleaned output
@@ -127,6 +142,7 @@ figures belong under `output_dropbox/`, each in their own sub-folder next to
 | `first_policy_brief/` | Dropbox (`FIRST_POLICY_BRIEF_DIR`) | — | the figures of the first policy brief in one report, the tests of the price expectations and the logit models of the recommendations — from the scripts in `R/first_policy_brief/`, see [First policy brief](#first-policy-brief) |
 | `rc_logit_heterogeneity/` | Dropbox (`RC_LOGIT_DIR`) | — | mixed logit specifications on how the recommendations differ across experts: aggregate results, tables, figures — from the scripts in `R/analysis/`, see [Heterogeneity of the recommendations](#heterogeneity-of-the-recommendations) |
 | `rc_logit_models/` | secure (`RC_LOGIT_MODEL_DIR`) | one file per specification | the fitted models of `R/analysis/`; they contain the estimation data, so they stay on the secure drive |
+| `descriptives/` | Dropbox (`DESCRIPTIVES_DIR`) | — | English LaTeX tables, PDF figures and Excel describing the experts, for talks — from `R/run_descriptives.R`, see [Descriptives for talks](#descriptives-for-talks) |
 
 The two data sets are written as `.rds` (keeps factors, dates and `NA` exactly —
 use this for analysis), `.csv` (portable) and `.xlsx` (for looking at).
@@ -149,6 +165,7 @@ source("R/run_summary_statistics.R")     # figures and tables, see "Summary stat
 source("R/first_policy_brief/01_figure_report.R")   # the figures of the first policy brief
 source("R/first_policy_brief/02_kl_divergence_prices.R")    # tests of the price expectations
 source("R/first_policy_brief/03_run_all_specifications.R")  # logit models of the recommendations; slow
+source("R/run_descriptives.R")           # English tables and figures for talks; after 02_kl_divergence_prices.R
 ```
 
 From a terminal, in the project folder:
@@ -663,6 +680,136 @@ dat$vignettes   # one row per expert x vignette, plus berufsgruppe
 
 The preference z-scores are standardised on the sample that is loaded.
 
+## Descriptives for talks
+
+`R/run_descriptives.R` writes the descriptive tables and figures of a talk, in
+English and sized for the 16:9 slides of the economics-latex layout: who was
+invited and who answered, who the experts are, the characteristics that enter
+the mixed logit models, the topics of the policy brief by group, the
+recommendations with and without the district-heating option, and the response
+times. Unlike the summary statistics, it writes LaTeX tables as well as
+figures, and only the exhibits a talk needs.
+
+```r
+source("R/first_policy_brief/02_kl_divergence_prices.R")   # the tests it reports
+source("R/run_descriptives.R")                             # a minute
+```
+
+It reads the cleaned data and the sampling frame (both secure) and writes only
+aggregates, to `output_dropbox/descriptives/`. Each run empties `tables/`,
+`figures/` and `excel/` there and nothing else, so slides can sit next to them.
+
+### Sample and cleaning
+
+- **Who:** the completed questionnaires of the three Berufsgruppen, in both
+  arms: the experts of the mixed logit models, and those over whom
+  `R/analysis/01_run_specifications.R` takes the reference prices. Only the
+  response rates count everyone invited and everyone who completed, as in
+  `R/ruecklauf/` (persons: an e-mail address once, an invitation once).
+- **Energy prices (Q15):** in cent per kWh of the energy carrier, as Q15
+  asked (district heating per kWh of heat), not converted to heat. By the
+  rules of the models, `clean_reported_prices()` in
+  `R/prepare_analysis_data.R`: euro read as cent, oil per litre and pellets
+  per kg converted at the questionnaire's rules of thumb (1 litre of heating
+  oil about 10 kWh, 1 kg of pellets about 5 kWh), answers more than three
+  times above or below the median not usable. The notes of the tables say
+  so; `tab_desc_price_cleaning.tex` counts every step.
+- **Other continuous answers** (year of birth, year of training, employees,
+  households advised): the outlier rule of the summary statistics
+  (`VALID_RANGE`, then the 0.5% lowest and highest), applied **once to the
+  pooled sample**, so that an answer is kept or removed in every column alike
+  (`outliers_to_na()`; `tabellen.xlsx` of the summary statistics trims within
+  each group instead). `tab_desc_other_cleaning.tex` counts what was removed.
+- **Shares of the technologies** among the recommendations (Q10b) and the
+  installations (Q11b): an expert gave shares if they sum to more than 0; a
+  technology left blank then counts as 0 (Max, 2026-10-29). Used as reported,
+  also where they do not sum to 100, and not trimmed (they lie between 0 and
+  100; the script stops if one does not); `tab_desc_other_cleaning.tex`
+  counts the experts whose shares do not sum to 100. The means are over the
+  firms, not shares of all recommendations or installations. The
+  questionnaire does not ask how many systems a firm installed.
+- **Response times** are shown as medians and quartiles, not trimmed.
+- **Small cells:** no statistic of fewer than `MIN_N` = 10 answers, medians
+  and quartiles included (shown as --); a state of the map needs 30 invited and
+  10 completed. Counts are shown at any size: N, the sample flow and the
+  cleaning steps.
+
+### What you get
+
+| Part | Figures (`figures/`) | Tables (`tables/`) |
+|---|---|---|
+| Recruitment | `fig_desc_response_rate_map`, `fig_desc_composition` | `tab_desc_recruitment` (invited, started, completed by group), `tab_desc_sample_flow` (from the invitation to the estimation sample) |
+| Who answered | | `tab_desc_experts` (the expert and the firm): N, mean, SD, quartiles; shares for answer options; `tab_desc_advice` (households advised, heat pumps among the recommendations and the installations), `tab_desc_technologies` (every technology among them) |
+| Characteristics in the models | | `tab_desc_prices_heating` (prices per kWh of the energy carrier and degree days; below them district heating in the service area and heating at home side by side; the expected rises are in `tab_desc_price_expectations`); the same means and shares with a column per group: `tab_desc_prices_groups` (prices, degree days) and `tab_desc_heating_groups` (district heating, heating at home); `tab_desc_price_cleaning`, `tab_desc_other_cleaning` |
+| Policy brief | `fig_desc_price_expectations`, `fig_desc_barriers_renewable`, `fig_desc_customer_criteria` | `tab_desc_price_expectations`, `tab_desc_barriers_renewable`, `tab_desc_customer_criteria` |
+| Vignettes | `fig_desc_recommendations` | `tab_desc_design` (attributes and levels), `tab_desc_recommendations` |
+| Appendix | `fig_desc_barriers_district_heating`, `fig_desc_barriers_conventional`, `fig_desc_vignette_times` | the four summary tables per group (`tab_desc_<table>_<group>`), `tab_desc_price_tests`, `tab_desc_price_pairs`, `tab_desc_barriers_district_heating`, `tab_desc_barriers_conventional`, `tab_desc_customer_weights`, `tab_desc_arms` (who is in each arm), `tab_desc_times_sections`, `tab_desc_times_vignettes` |
+
+`excel/descriptives.xlsx` has every number unrounded, and leaves out what the
+tables leave out (empty cells). `tables/numbers_desc.tex`
+defines macros for the text of the slides (`\descExperts`, `\descResponseRate`,
+...) and a note for every figure (`\descNoteResponseMap`, ...). In a deck:
+
+```latex
+\input{\tablepath/numbers_desc.tex}            % once, in the preamble
+\begin{frame}{Response rate by state}
+  \centering\includegraphics{fig_desc_response_rate_map.pdf}
+  \slidenote{\descNoteResponseMap}
+\end{frame}
+\begin{frame}{Who answered}
+  \input{\tablepath/tab_desc_experts.tex}
+\end{frame}
+```
+
+The tables are complete floats with caption and label, as those of the mixed
+logit models (they use the same `table_float()`), and need `booktabs` and
+`threeparttable`. The figures have no titles inside: the frame title says what
+they show. Every table and figure was checked to fit a 16:9 frame with its
+note. Groups, technologies and the arms have the names of the regression
+output; the figures use the ZEW chart colours.
+
+**All of them in one deck:** `slides/261029_descriptives/slides.tex` in
+`descriptives/` (Dropbox), next to `tables/` and `figures/`, shows every table
+and figure in the order above, the per-group tables, tests and response times
+as backup slides. After a rerun of `R/run_descriptives.R`, compile it with
+`pdflatex slides` twice in that folder. Its frame titles say in words what the
+run of 29 October 2026 shows; check them when the data change.
+
+### Checks
+
+The script stops if the price rules, the reference prices or the estimation
+sample differ from those saved with any model of the deck (`MODELS_IN_DECK` in
+the runs of `MODEL_RUNS`, `00_settings.R`): the descriptives and the models
+would then rest on different data. A model of the list without saved results
+(not estimated yet) gives a warning. It also stops if the tests of the price
+expectations rest on other answers (rerun `02_kl_divergence_prices.R`), if an
+answer has no English label or a table shows an answer option that is not in
+the data, and if a state of the data is no polygon of the map. The workbook
+leaves out what the tables and figures leave out.
+
+### Things to keep in mind
+
+- **The response rate of a group is approximate.** The invited are grouped by
+  the list they were drawn from, the respondents by Q2, and nothing links the
+  two (see `R/ruecklauf/02_link.R`).
+- **Repeat completions.** An invitation (token) that completed twice counts
+  once among the persons but twice among the completed questionnaires, and so
+  twice in the models. `tab_desc_sample_flow.tex` counts them.
+- **The arms are not random.** Q6a sets the arm, so the recommendations with
+  and without the district-heating option differ in the experts too
+  (`tab_desc_arms.tex`).
+- **Q10 and Q11b were routed** by Q2: Q10 to firms offering energy advice or
+  chimney sweeping, Q11b to HVAC firms. A group's numbers rest on those of its
+  experts who were asked; the tables of the energy advisers and the chimney
+  sweeps have no installations.
+
+### Changing things
+
+The sample, the rows of the tables, the English labels, colours and sizes are
+all in `R/descriptives/00_settings.R`; the rules shared with other analyses
+(Berufsgruppe, prices, `PEXP_RISE`, `HDD_YEAR`) in `R/prepare_analysis_data.R`,
+the outlier rule and `MIN_N` in `R/summary_statistics/00_settings.R`.
+
 ## First policy brief
 
 `R/first_policy_brief/` holds the scripts of the first policy brief, and
@@ -841,13 +988,15 @@ English.
 
 ```r
 source("R/analysis/01_run_specifications.R")   # estimates the models; slow
+source("R/analysis/01_run_term_effects.R")     # effects of all terms; slow
 source("R/analysis/02_output.R")               # tables, figures, tests; a few minutes
 ```
 
 | Script | What it does |
 |---|---|
-| `00_functions_estimation.R` | the functions: estimation (with the starting values of the models by Berufsgruppe), covariance matrix clustered by expert, probabilities and AMEs with Krinsky–Robb standard errors, fit |
+| `00_functions_estimation.R` | the functions: the variables of the models (shared by both `01` scripts), estimation (with its starting values), covariance matrix clustered by expert, probabilities and AMEs with Krinsky–Robb standard errors, fit |
 | `01_run_specifications.R` | settings, data and the models; estimates each, saves the model to the secure drive and its aggregate results to Dropbox |
+| `01_run_term_effects.R` | the effects of the prices, the expert characteristics and the interactions of the attributes on the probabilities, from the saved results (see [Effects of all terms](#effects-of-all-terms-on-the-probabilities)) |
 | `00_functions_output.R` | the functions of the output: the quantities every table shows the same way, the LR tests, the LaTeX tables and the figures |
 | `02_output.R` | settings and labels; the models compared, then each model: LaTeX tables, PDF figures, an Excel workbook and numbers for the slides, from the saved results (see [Tables and figures](#tables-and-figures)) |
 
@@ -857,15 +1006,22 @@ source("R/analysis/02_output.R")               # tables, figures, tests; a few m
 |---|---|---|---|---|
 | (2) | `m2` | one set for all experts, full covariance matrix | — | — |
 | (4) | `m4` | one set for all experts, full covariance matrix | Berufsgruppe | — |
-| (6) | `m6` | one set per Berufsgruppe, a covariance matrix within each | — | — |
 | (4i) | `m4i` | as (4) | Berufsgruppe, Berufsgruppe × attributes | — |
-| (6i) | `m6i` | as (6) | Berufsgruppe × attributes | — |
+| (6i) | `m6i` | one set per Berufsgruppe, a covariance matrix within each | Berufsgruppe × attributes | — |
 | (4p) | `m4p` | as (4) | Berufsgruppe | yes |
-| (6p) | `m6p` | as (6) | — | yes |
+| (6p) | `m6p` | as (6i) | — | yes |
 | (4ip) | `m4ip` | as (4) | Berufsgruppe, Berufsgruppe × attributes | yes |
+| (4pa) | `m4pa` | as (4) | Berufsgruppe, attribute × attribute | yes |
+| (4pd) | `m4pd` | as (4) | Berufsgruppe | yes, and price × heat demand |
+| (4pl) | `m4pl` | as (4) | Berufsgruppe | log prices |
+| (4pe) | `m4pe` | as (4) | Berufsgruppe, heating degree days, heat pump at home | yes, and expected price rise |
+| (6pe) | `m6pe` | as (6i) | heating degree days, heat pump at home | as (4pe) |
 
-(4) is the main specification; (6), (4i), (6i) and (2) are kept as
-alternatives (project team, October 2026). The numbers are those of the
+(4pe) is the main specification, and (6pe) its robustness check (Max, 29
+October 2026); (4) is the benchmark without the expert's prices and
+characteristics. (2), (4i), (6i), (4p), (6p), (4ip) and the other variants of
+(4p) are kept as alternatives. (6), (4) with one set of constants per
+Berufsgruppe, was dropped (Max, 29 October 2026). The numbers are those of the
 earlier version, whose other specifications (uncorrelated constants, (1), (3)
 and (5), and prices with one coefficient per Berufsgruppe) are in commit
 `93010be`.
@@ -874,8 +1030,8 @@ All have the eight attribute dummies as regressors, with one fixed coefficient
 per technology, as in the policy brief. In (4) the Berufsgruppe shifts the
 means of the constants (reference category: Energieberater, October 2026; the
 earlier version and the policy brief used the SHK-Handwerk), with one covariance
-matrix for all. In (6) every Berufsgruppe has its own means and covariance
-matrix. Every expert belongs to one Berufsgruppe, so the covariances between
+matrix for all. In (6i), (6p) and (6pe) every Berufsgruppe has its own means
+and covariance matrix. Every expert belongs to one Berufsgruppe, so the covariances between
 two groups' constants never enter the likelihood: they are set to zero as a
 normalisation, not as an assumption (the Cholesky elements that link two
 groups are fixed through `constPar`).
@@ -906,18 +1062,101 @@ for all technologies, so the prices come before the `|` of `mlogit`'s formula;
 the dummies have one coefficient per technology. The AMEs are for an expert
 who reported the mean prices.
 
+(4pa), (4pd), (4pl) and (4pe) are variants of (4p) (October 2026), each
+changing one thing:
+
+- **(4pa)** adds interactions of the attributes, each a product of two
+  attribute dummies with one coefficient per technology: heat demand × build
+  year, heat demand × underfloor heating, underfloor heating × build year. No
+  vignette has a house built in 2000 with 200 kWh/m², so heat demand × build
+  year exists for 70 kWh/m² only. The AMEs change one attribute at the
+  reference vignette (1970, 120 kWh/m², radiators), where every interaction is
+  0: the interactions show only in the coefficients.
+- **(4pd)** adds the price times the dummies of 70 and 200 kWh/m². The price
+  coefficient is then the effect of the price at 120 kWh/m², and the two
+  others the differences at 70 and 200. If the price mattered through the
+  running cost, price × heat demand, they would be −0.42 and +0.67 times the
+  price coefficient (70/120 − 1 and 200/120 − 1). Estimated from `mlogit`'s
+  default starting values on 28 October 2026, it ended below (4p); it now
+  starts from (4p), as do (4pa) and (4pe) (see
+  [Starting values](#starting-values)).
+- **(4pl)** has the log price instead of the price: the log of the price minus
+  the log of the mean price, so that, as in (4p), an expert who reported the
+  mean prices has 0 and a price not reported counts as the mean. For the heat
+  pump the COP cancels in logs; the hybrid's log price is the weighted
+  average of those of gas and the heat pump (the log of a weighted geometric
+  mean). (4pl) is not nested in (4p): it has as many parameters, so the
+  log-likelihoods compare directly.
+- **(4pe)** adds three expert characteristics. Two shift the mean constants
+  like the Berufsgruppe, with one coefficient per technology: the heating
+  degree days of the expert's NUTS3 region (Eurostat `nrg_chddr2_a`, 2025, in
+  1,000 degree days; an expert without `nuts3` gets the mean, without a
+  dummy, as they are few, Max, October 2026), and whether a heat pump heats
+  the expert's own home (Q20, `heat_pump_at_home`; "Sonstiges" and no answer
+  count as no heat pump). Each coefficient of the heat pump at home is the
+  difference it makes to a technology's utility relative to the heat pump,
+  also for "Keine Empfehlung", as for the degree days. The third has one
+  coefficient, like the price: whether the expert expects a technology's
+  price to rise in the next five years (Q17, "bis zu 10 % höher" or "mehr als
+  10% höher"; `PEXP_RISE`), in the utility of every technology. The hybrid's
+  expected rise is the weighted average of those of gas and electricity. A
+  blank in Q17 is set to the mean and gets a dummy per technology, as a price
+  not reported. Until 1 November 2026 the heating at home entered as whether
+  the technology heats the expert's own home, with one coefficient for all
+  six technologies (`own_heating_match`). That mixed different situations, a
+  heat pump an expert chose and a gas heating that came with the building, so
+  (4pe) and (6pe) now have the heat pump at home only, with one coefficient
+  per technology; how to treat the other heatings at home is open (Max, 1
+  November 2026; for a few hours the same day, one coefficient in the
+  utility of the heat pump, which forced the same shift on every other
+  technology).
+
+**(6pe)** is (4pe) with one set of constants per Berufsgruppe, each with its
+own means and covariance matrix, as (6p) is to (4p): the robustness check of
+the main specification (Max, 29 October 2026). It starts from (4pe).
+
+**Why the 0/1 variables are centred.** The heat pump at home and the expected
+rise enter as the dummy minus its share among the experts (for Q17, among
+those who answered), e.g. 1 − 0.3 = 0.7 and 0 − 0.3 = −0.3 if 30% of the
+experts have a heat pump at home. The mean of a 0/1 variable is its
+share of ones, so this centres it like the prices. It does not change its
+coefficients or the log-likelihood: the share times a coefficient is the same
+for every expert who answered, and the constant of the technology takes it up
+(for the heat pump at home, each technology's constant the share times its
+own coefficient). A blank in Q17 is 0, not minus the share, and its dummy
+takes up the difference. It changes only which expert the constants, baseline
+probabilities and AMEs describe. `01_run_specifications.R` computes them with
+every term of the `prices` element, the degree days and the heat pump at home
+at 0, an expert with average characteristics, as in (4p).
+That expert exists only on paper (e.g. 0.95 of "expects higher gas prices"),
+and the probabilities at average characteristics are not the average of the
+experts' probabilities; the gap has not been measured. **What the outputs
+report for (4pe) and (6pe)** is another expert: the mean prices and degree
+days, no expected price rise and no heat pump at home (Max, 30 October 2026;
+the heat pump since 1 November 2026, before that none of the six technologies
+at home).
+`01_run_term_effects.R` computes the AMEs, baseline probabilities and mean
+constants at that expert from the saved estimates and draws, without
+re-estimating (the model and its log-likelihood do not depend on the
+centring), and `02_output.R` uses them in place of those of
+`01_run_specifications.R` in every table, figure and Excel sheet (see "Effects
+of all terms" below). The degree days are centred at their
+mean for the same reason; all shares and means are taken over the experts of
+the three Berufsgruppen in both arms, as for the prices, and saved with the
+results (`expert_reference`).
+
 ### Writing a model
 
 Each model is one entry of `MODELS` in section 3 of
-`01_run_specifications.R`, e.g. (6):
+`01_run_specifications.R`, e.g. (6pe):
 
 ```r
-m6 = list(
-  label = "Random constants by occupational group, correlated",
+m6pe = list(
+  label = "Random constants by occupational group, correlated, with prices and expert characteristics",
   constants = GROUP_CONSTANTS,
-  regressors = ATTRIBUTES,
-  prices = character(0),
-  start_from = "m4"
+  regressors = c(ATTRIBUTES, EXPERT_CHARACTERISTICS),
+  prices = c(PRICES, EXPERT_TERMS),
+  start_from = "m4pe"
 )
 ```
 
@@ -926,18 +1165,22 @@ m6 = list(
 | `label` | name in tables and figures |
 | `constants` | `"(Intercept)"`: one constant per technology for all experts; `GROUP_CONSTANTS` (`is_shk`, `is_schornsteinfeger`, `is_energieberater`): one per technology and Berufsgruppe |
 | `regressors` | variables of the decisions, each with one coefficient per technology |
-| `prices` | `PRICES` (each technology's price with one coefficient, and the dummies for a price not reported), or `character(0)` |
-| `start_from` | for constants by Berufsgruppe: the model with one set of constants whose estimates are the starting values (see below) |
+| `prices` | the terms that differ between the technologies, each with one coefficient for all of them: `PRICES` (each technology's price, and the dummies for a price not reported), `PRICES_X_DEMAND`, `PRICES_LOG` (instead of `PRICES`), `EXPERT_TERMS`, or `character(0)` |
+| `start_from` | the model whose estimates are the starting values: for constants by Berufsgruppe, the same model with one set of constants; otherwise a model with the same constants that this one nests (see [Starting values](#starting-values)) |
 
-The building blocks `ATTRIBUTES`, `GROUP_SHIFTS`, `GROUP_CONSTANTS` and
-`GROUP_X_ATTRIBUTES` are written out above the list, so a regressor is added
-or removed by adding or deleting a line. The regressors are 0/1 variables that
-`add_regressors()` (section 2.3) builds from the attributes and the
+The building blocks `ATTRIBUTES`, `GROUP_SHIFTS`, `GROUP_CONSTANTS`,
+`GROUP_X_ATTRIBUTES`, `ATTRIBUTE_INTERACTIONS` and `EXPERT_CHARACTERISTICS` are
+written out above the list, so a regressor is added or removed by adding or
+deleting a line. Most regressors are 0/1 variables that
+`add_regressors()` (`00_functions_estimation.R`) builds from the attributes and the
 Berufsgruppe: one dummy per attribute level besides the reference level
 (`REFERENCE_LEVELS` and `ATTRIBUTE_DUMMIES` in section 1), the group dummies,
-and the interactions `is_<group>_x_<dummy>`. Before the first estimation, the
+the interactions `is_<group>_x_<dummy>` and the interactions of two attributes
+`<dummy>_x_<dummy>`; the degree days `hdd_c` are an expert characteristic
+(section 2.1). Before the first estimation, the
 script checks every model: its columns exist and are linearly independent, its
-prices are price terms, and the model it starts from has one set of constants.
+prices are price terms, and the model it starts from has one set of constants
+and, if this one has too, is nested in it.
 To run only some models, list them in `MODELS_TO_RUN`; the others keep their
 saved results.
 
@@ -948,15 +1191,15 @@ into the `regressors` of a model, or into a building block.
 
 **A variable built from the vignette attributes or the Berufsgruppe**, e.g. an
 interaction of low income and urgent replacement. Create it in
-`add_regressors()` (section 2.3), below the attribute dummies:
+`add_regressors()` (`00_functions_estimation.R`), below the attribute dummies:
 
 ```r
 data$income_low_x_urgent <- data$income_low * data$replacement_urgent
 ```
 
 and add `"income_low_x_urgent"` to the `regressors` of a model. Nothing else is
-needed: the vignettes of the AMEs go through the same function, so they get
-the variable too.
+needed: the vignettes of the AMEs and of `01_run_term_effects.R` go through the
+same function, so they get the variable too.
 
 **An expert characteristic**, e.g. from `survey_main` (a preference score, the
 firm size) or regional data joined by `nuts3`:
@@ -978,50 +1221,70 @@ firm size) or regional data joined by `nuts3`:
 4. Section 4.4: give it a value in the vignettes of the AMEs, which are
    evaluated for an expert with that value:
    ```r
-   mutate(berufsgruppe = profile_name, expert_var = 0)
+   vignettes_at_mean <- ame_vignettes %>%
+     mutate(hdd_c = 0, heat_pump_at_home = 0, expert_var = 0)
    ```
    For a continuous variable centred in step 1, 0 is the sample mean. Which
    value to use is a substantive choice. Without it the script stops with
-   "Not in the data: expert_var".
+   "Not in the data: expert_var". `01_run_term_effects.R` needs the same value
+   in `reference_state()`, and a change of its own if its effect should be
+   computed (`term_changes()`, with a label in `term_effect_labels()` of
+   `00_functions_output.R`).
 
 **A variable that differs between the technologies within one vignette**, like
 the price: a column in the long data (section 2.5) that holds each
-technology's value in its rows, as the loop over `PRICE_VARIABLES` does for the
-price. List it in the model's `prices` element, which takes any such term,
-each with one coefficient for all technologies.
+technology's value in its rows, as `long_terms()` (`00_functions_estimation.R`)
+does for the price with `PRICE_VARIABLES`. List it in the model's `prices`
+element, which takes any such term, each with one coefficient for all
+technologies.
 
 Things to keep in mind:
 
-- (6), (6i) and (6p) start from (4), (4i) and (4p). A regressor added to a
+- (6i), (6p) and (6pe) start from (4i), (4p) and (4pe). A regressor added to a
   model by Berufsgruppe needs the same regressor in the model it starts from;
   otherwise the script stops with "No starting value for ...". The other way
   round is fine: extra parameters of the common model are ignored.
+- (4pa), (4pd) and (4pe) start from (4p), so they must keep all of its
+  regressors and prices: a model with one set of constants only adds terms to
+  the model it starts from (checked before the first estimation).
 - The checks before the first estimation (columns exist and are not collinear,
   e.g. with the Berufsgruppe dummies) and after each estimation (every
   coefficient is used in the AMEs) cover new regressors as well.
 - To estimate only the new or changed models, list them in `MODELS_TO_RUN`,
   with a model's `start_from` model before it.
-- The output script needs a label for each new regressor.
+- The output script needs a label for each new regressor and term that
+  differs between the technologies (`02_output.R` stops and names any without
+  one), and a table for it if none of its tables shows it yet.
 
-### Starting values of the models by Berufsgruppe
+### Starting values
 
 `mlogit` starts the means at multinomial-logit estimates and every element of
 the Cholesky factor L of the covariance matrix at 0.1, also those off the
-diagonal. In every Berufsgruppe's block of (6), that is a set of constants with
-small variances and correlations close to one, far from the estimates. (6),
-(6i) and (6p) therefore start from (4), (4i) and (4p): each Berufsgruppe gets
-the constants of the common model plus its shift, and the common model's
-Cholesky factor as its block of L; the attributes, interactions and prices
-keep their values (`start_from_common()`). At these values (6) predicts
-exactly what (4) predicts, for every expert, so it starts at the maximum of
-(4) and can only improve on it. The script prints both log-likelihoods and
-stops if they differ, e.g. because the saved (4) comes from an earlier run on
-other data or with other draws; (4) must then be estimated again, before (6)
-in `MODELS_TO_RUN`. If the estimation stops with code 3 (no better point
-along the search direction), it restarts from the last iterate, at most three
-times. On simulated data (340 experts, 100 draws per expert), (6) with
-`mlogit`'s default starting values took 95 iterations and stopped 1.1 log
-points below the maximum that the new starting values reached in 53.
+diagonal. In every Berufsgruppe's block of (6p), that is a set of constants
+with small variances and correlations close to one, far from the estimates.
+(6i), (6p) and (6pe) therefore start from (4i), (4p) and (4pe): each
+Berufsgruppe gets the constants of the common model plus its shift, and the
+common model's Cholesky factor as its block of L; the attributes,
+interactions and prices keep their values (`start_from_common()`). At these
+values (6p) predicts exactly what (4p) predicts, for every expert, so it
+starts at the maximum of (4p) and can only improve on it.
+
+A model with one set of constants that adds terms to another, e.g. (4pd) to
+(4p), starts from that model's estimates, with the added parameters at 0
+(`start_from_nested()`): at these values the two are the same model, so the
+estimation starts at the log-likelihood of (4p) and cannot end below it.
+Without them, (3pg) on 22 October and (4pd) on 28 October 2026 stopped below
+the model they nest, although `mlogit` reported convergence (code 1 or 2).
+
+In both cases the script prints the log-likelihood at the starting values and
+that of the model it starts from, and stops if they differ, e.g. because the
+saved model comes from an earlier run on other data or with other draws; that
+model must then be estimated again, before the other in `MODELS_TO_RUN`. If
+the estimation stops with code 3 (no better point along the search direction),
+it restarts from the last iterate, at most three times. On simulated data (340
+experts, 100 draws per expert), the model by Berufsgruppe without prices (then
+(6)) with `mlogit`'s default starting values took 95 iterations and stopped
+1.1 log points below the maximum that the new starting values reached in 53.
 
 ### Sample
 
@@ -1043,8 +1306,8 @@ the last group would get the primes 41 to 61, whose Halton sequences cover the
 unit cube unevenly unless very many draws are used (Train 2009, section
 9.3.3). An expert's utility contains only the constants of their own
 Berufsgruppe, so the primes start again at 2 for each Berufsgruppe. Every
-expert then gets the same draws in (4) and (6), which is what makes the
-starting values above reproduce the log-likelihood of (4).
+expert then gets the same draws in (4p) and (6p), which is what makes the
+starting values above reproduce the log-likelihood of (4p).
 
 The order of the random constants follows the order of the outcomes. The data
 in `mlogit`'s format list the outcomes alphabetically, as `dfidx()` does with
@@ -1082,6 +1345,17 @@ For each model, `results/<model>.rds` in
   differences between Berufsgruppen can be tested without rerunning.
 - **Fit**: log-likelihood, McFadden R², AIC and BIC (with the number of experts
   as N).
+- **Convergence** (since 29 October 2026): the code, the iterations, the
+  largest element of the gradient, the model it started from and the
+  log-likelihood there.
+- **Reference values**: the mean prices and the rules for the reported prices
+  (`price_reference`, `price_settings`), and the means and shares at which the
+  expert characteristics of (4pe) and (6pe) are centred (`expert_reference`).
+
+Every run, also one that estimates no model, saves `results/data_reference.rds`:
+the same reference values, the 25th and 75th percentiles of the reported
+prices and of the degree days, and how the terms of section 2.5 are built, for
+`01_run_term_effects.R`.
 
 The fitted model contains the estimation data, one row per expert and vignette,
 so it goes to the secure drive instead,
@@ -1094,11 +1368,19 @@ carries the environment it was made in.
 The script stops before the first estimation if an attribute has a value that
 is neither its reference level nor one of its dummies (a different spelling
 would otherwise count as the reference level), a variable of the models has a
-missing value, a recommendation is never chosen, a price dummy is the same for
-every expert, a model's columns are linearly dependent, or `MODELS_TO_RUN`
-lists a model before the model it starts from. For each model it stops,
+missing value, a recommendation is never chosen, in a run with the heat pump
+at home a recommendation is never chosen by the experts with one or never by
+those without (it prints these counts), a price dummy is the same for every
+expert, an answer of Q17 or Q20 is not one of the known answers, a usable
+price is at or below 0 (its log), a NUTS3 region has more than one row of
+degree days or an expert's region has none, a model's columns or its price
+terms are linearly dependent, a model with one set of constants does not nest
+the model it starts from, or
+`MODELS_TO_RUN` lists a model before the model it starts from. A dummy for a
+blank in Q17 that is the same for every expert is left out of the models, with
+a message. For each model it stops,
 records the error and moves on to the next if the starting values do not
-reproduce the common model's log-likelihood, the model has not converged or
+reproduce the log-likelihood of the model it starts from, the model has not converged or
 does not use every choice situation, its parameters are not one per column of
 the design matrix and technology plus the prices and the elements of L (the
 AMEs would ignore a coefficient), the Cholesky factor that the AMEs use does
@@ -1108,7 +1390,9 @@ definite, or the probabilities do not sum to one. It prints the formula, the
 number of parameters, the convergence code, the largest element of the
 gradient and the log-likelihood. Convergence code 2 (successive
 log-likelihoods within tolerance) counts as converged; read the largest
-gradient element for (6), (6i) and (6p).
+gradient element for (6i), (6p) and (6pe). Neither code proves a maximum:
+`02_output.R` marks an LR statistic below 0, a larger model that ended below
+the smaller one.
 
 ### Runtime
 
@@ -1119,10 +1403,109 @@ the numerical Hessian grow with the number of parameters and with the number
 of experts times the draws per expert; the Hessian of a model with K
 parameters needs 2K evaluations of the gradient. The Krinsky–Robb step grows
 with the number of profiles and with both kinds of draws: one evaluation of
-the AMEs takes about 0.4 seconds with 100,000 draws, so a model with three
-Berufsgruppen needs about 1.5 hours for it, (2) about half an hour, and all
-eight models about 12 hours, on top of the estimation. For a first look, lower
+the AMEs took about 0.4 seconds with 100,000 draws, about 1.5 hours for a
+model with three Berufsgruppen. Since 29 October 2026, the probabilities of
+all vignettes come from two matrix products per draw, about six times faster
+on simulated data, with the same results (largest difference 3e-15). Each
+variant of (4p) takes about as long as (4p); (4pa) a little longer, as its
+Hessian has 24 more parameters. For a first look, lower
 `n_draws_ame` and `n_draws_kr`, and list only some models in `MODELS_TO_RUN`.
+
+### Effects of all terms on the probabilities
+
+The coefficients are in utility units relative to the heat pump, per unit of
+their term (a cent per kWh, 1,000 degree days, a yes instead of a no), and
+their scale differs between models, so they do not compare across terms. The
+AMEs of `01_run_specifications.R` change one attribute of the reference
+vignette. `01_run_term_effects.R` changes the other terms, one at a time, and
+gives the change in the probability of each recommendation, in percentage
+points, with Krinsky–Robb standard errors and percentile intervals from the
+saved draws: comparable across the terms of a model, and across models with
+the same base state (below).
+
+Every change starts from a **base state** (`TERM_EFFECTS_BASE`): the reference
+vignette and an expert of the profile's Berufsgruppe with the mean prices and
+degree days. With `"neutral"`, the setting, the expert of (4pe) and (6pe)
+expects no price to rise and has no heat pump at home (`neutral_state()`), so
+that each of these changes switches on one answer (Max, 30 October 2026; the
+heat pump since 1 November 2026). With `"average"`, the expected rises and
+the heat pump at home stay at their shares (e.g. 0.95 for "expects higher gas
+prices"), the reference state of `01_run_specifications.R`. In the other
+models the two settings are the same.
+
+All figures and tables of a model must describe the same expert, or the
+baseline probabilities of the term-effect figures differ from those of the
+AME and comparison figures (they did on 30 October 2026: chimney sweeps 36%
+against 42% for the heat pump in (4pe)). So at the neutral base state the
+script also saves, from the same draws:
+- the AMEs and the probabilities at every Krinsky–Robb draw at that expert,
+  laid out as `ame_table` and `probability_draws` of `01_run_specifications.R`
+  (`base_ame_table`, `base_probability_draws`);
+- what the expected rises and the heat pump at home add to each technology's
+  utility there (`base_constant_shift`; for the heat pump at home, minus its
+  share times the technology's coefficient), which `02_output.R` adds to the
+  mean constants; the script checks that the constants with it reproduce the
+  probabilities at the base state.
+
+`02_output.R` puts these in place of the AMEs and probabilities of
+`01_run_specifications.R`, so the baseline probabilities, AMEs, group
+differences, mean constants, comparison figures and term-effect figures of
+(4pe) and (6pe) all describe the neutral expert; it checks that the term
+effects start from the baseline probabilities of the other figures, records
+the expert of each model in the Excel sheet `models` (`expert_state`), and
+leaves out a neutral file without these (from before the evening of 30 October
+2026). The coefficients do not depend on the base state, only their
+translation into percentage points. On simulated data (1 November 2026), the
+term effects changed between the two settings by up to 1.6 points (median about
+0.1; the heat pump at home by up to 0.8), the AMEs by up to 1.9 (median 0.2), the
+baseline probabilities by up to 4.6, and the dummies for a blank in Q17 (Excel
+only) by up to 4.2 points.
+
+| Change | From | To |
+|---|---|---|
+| price of a fuel | its 25th percentile among the experts | its 75th percentile (Max, 29 October 2026) |
+| price of a fuel, in (4pd) | as above, in a house of 70 or 200 kWh/m² | |
+| price not reported | reported, at the mean | not reported |
+| expected rise of a fuel (Q17) | no rise expected for this fuel, the other fuels as in the base state | a rise expected for this fuel |
+| no expectation for a fuel | the base state | blank (coded as in `01_run_specifications.R`: expected rise 0, dummy 1) |
+| heat pump at home (Q20), (4pe) and (6pe) | no heat pump at home | a heat pump at home |
+| heating degree days | the 25th percentile among the experts with a region | the 75th |
+| interaction of two attributes (4pa) | one attribute at its other level | both |
+
+The heat pump at home moves the utility of every technology relative to the
+heat pump, each with its own coefficient, like the degree days. The script
+also handles a model with the match of every heating at home
+(`own_heating_match`, (4pe) and (6pe) until 1 November 2026; none at the
+moment): there each technology at home switches on from none of the six
+technologies at home, the others as in the base state, and the heat pump
+switches from a gas heating at home to a heat pump instead
+(`OWN_HEATING_BEFORE`), which moves the heat pump's and the gas heating's
+utilities, so its `p_before` in the sheet `term_effects` is the probability
+with a gas heating at home.
+
+A fuel's change moves every technology that uses it, as in the models:
+electricity the heat pump and the hybrid heating, gas the gas and the hybrid
+heating. Everything else stays at the base state. The script builds its vignettes
+with the same functions as `01_run_specifications.R` (section 2 of
+`00_functions_estimation.R`: `add_regressors()`, `add_alternative_prices()`,
+`long_terms()`, `design_by_profile()`), reads the percentiles from
+`data_reference.rds`, and checks that the reference values
+there are those of each model's results (same data) and that it reproduces
+the probabilities and AMEs of `01_run_specifications.R` at the estimates (same
+coding and draws). It saves `results/<model>_term_effects.rds` for the models
+of `MODELS_TO_COMPUTE`, with the coefficients they rest on: `02_output.R`
+leaves out effects of an earlier estimation of the model.
+
+A model with 22 changes, such as (4pe), takes up to two hours with 100,000
+draws and 5,000 Krinsky–Robb draws (on the real data, (6pe) took about 1.7
+hours on 30 October 2026, with 27 changes before the heat pump at home
+replaced the six technologies at home); models can run in separate R sessions, each with its own
+`MODELS_TO_COMPUTE`.
+
+Price equivalents (a coefficient divided by the price coefficient) would be
+free of the scale too, but the price is the price the expert reported, not a
+designed attribute: errors in the reports pull its coefficient towards zero
+and inflate every equivalent.
 
 ### Tables and figures
 
@@ -1134,20 +1517,30 @@ it), then each model.
 
 | Folder | File | What |
 |---|---|---|
-| `tables/` | `tab_rcl_fit.tex` | the models (what differs by occupational group, prices) and their fit: parameters, log-likelihood, AIC, BIC, McFadden R² |
-| | `tab_rcl_lr_tests.tex` | likelihood-ratio tests between nested models, classical and robust |
+| `tables/` | `tab_rcl_fit.tex` | the models (what differs by occupational group, prices, expert characteristics) and their fit: parameters, log-likelihood, AIC, BIC, McFadden R²; without the variants of (4p) but the main specification |
+| | `tab_rcl_lr_tests.tex` | likelihood-ratio tests between nested models, classical and robust; without the variants of (4p) |
+| | `tab_rcl_variants.tex` | (4p) and its variants: the change, the fit, and the LR test against (4p) |
 | | `tab_rcl_coefficients_<technology>.tex` | the attribute effects on one technology across the models whose attribute effects are the same for all groups |
-| | `tab_rcl_prices.tex` | the price coefficients of the models with prices |
+| | `tab_rcl_prices.tex` | the price coefficients of the models with prices: the price, the log price (4pl), the price × heat demand (4pd) |
+| | `tab_rcl_prices_not_reported.tex` | the dummies for a price not reported, of the same models |
 | | `tab_rcl_<model>_constants.tex` | mean (A) and standard deviation (B) of the constants, by group |
 | | `tab_rcl_<model>_coefficients[_<group>].tex` | the regression table: effects of the attributes, and in the models with prices the price coefficient; one table per group in the models with interactions |
 | | `tab_rcl_<model>_baseline.tex` | baseline probabilities (at the reference vignette), by group |
+| | `tab_rcl_<model>_price_by_demand.tex` | (4pd): the price coefficient at each heat demand, against a price effect proportional to the heat demand, with a Wald test |
+| | `tab_rcl_<model>_interactions.tex` | (4pa): the interactions of the attributes |
+| | `tab_rcl_<model>_expert.tex` | (4pe): the expert characteristics (degree days, heat pump at home, expected price rise) |
 | | `numbers_rcl.tex` | macros for the text of the slides: sample, draws, reference vignette, mean prices |
+| | `tab_rcl_<benchmark>_constants_slide.tex` | for the main slides: the constants of `BENCHMARK_MODEL` ((4)), one row per technology, the means of the groups and the standard deviation, narrow enough to sit beside a figure |
+| | `tab_rcl_spread_slide.tex` | for the main slides: the standard deviations of the constants across the models of `GAP_MODELS` with one covariance matrix for all groups |
 | `figures/` | `fig_rcl_<model>_baseline.pdf` | baseline probabilities, by group |
 | | `fig_rcl_<model>_ame_<outcome>.pdf` | AMEs by group, one figure per outcome |
 | | `fig_rcl_<model>_correlations[_<group>].pdf` | correlations of the constants, one heat map per covariance matrix |
 | | `fig_rcl_comparison_baseline.pdf` | probabilities across the models of `COMPARISON_MODELS`, a panel per group |
 | | `fig_rcl_comparison_ame_<outcome>_<group>.pdf` | AMEs across the same models |
-| `excel/` | `rc_logit_results.xlsx` | all of it unrounded, every estimated parameter as `mlogit` names it, and the tests of group differences |
+| | `fig_rcl_<model>_term_effects_<outcome>.pdf` | the effects of all terms (`01_run_term_effects.R`), by group, for the models of `TERM_FIGURE_MODELS`, with the baseline at the base state in the subtitle and the values of each change in the labels (e.g. "Price of electricity: 24 → 30 ct/kWh"), next to the attribute AMEs at the same expert; the slide version of `MAIN_MODEL` on the heat pump shows the changes of the terms only |
+| | `fig_rcl_<model>_ame_heat_pump_slide.pdf`, `fig_rcl_<benchmark>_baseline_slide.pdf`, `fig_rcl_comparison_baseline_slide.pdf` | for the main slides, narrow (3.2 × 2.8 in), with room for notes or a table beside them: the heat-pump AMEs of `MAIN_MODEL` and of `BENCHMARK_MODEL`, the baseline probabilities of `BENCHMARK_MODEL`, and the heat-pump probability by group across the models of `BASELINE_SLIDE_MODELS` ((4) and (4pe)) |
+| | `fig_rcl_<model>_term_effects_heat_pump_slide.pdf` | for the main slides, short (5.5 × 2.3 in), with room for notes below: the effects of all terms of `MAIN_MODEL` on the heat pump |
+| `excel/` | `rc_logit_results.xlsx` | all of it unrounded, every estimated parameter as `mlogit` names it, the tests of group differences, the convergence of each model and the expert its probabilities, AMEs and mean constants describe (sheet `models`, `expert_state`: `average` or `neutral`), and the effects of all terms (sheet `term_effects`, every change and outcome; sheet `term_effects_base`, the probabilities at each model's base state) |
 
 **One meaning per row.** A row of a table, or a series of a figure, always
 shows a group's own value, never its difference to the reference group:
@@ -1155,13 +1548,14 @@ shows a group's own value, never its difference to the reference group:
 - *mean constant* of a group: the mean utility of a technology relative to
   the reference outcome at the reference vignette (and, with prices, for an
   expert who reported the mean prices). In (4) the constant plus the group's
-  shift, in (6) the group's own constant, in (2) one for all experts.
+  shift, in (6i), (6p) and (6pe) the group's own constant, in (2) one for all
+  experts.
 - *attribute effect* of a group: in the models with interactions the
   attribute's coefficient plus the group's interaction, otherwise one for
   all experts.
 - *standard deviation and correlation* of the constants: per covariance
-  matrix, so for all experts in (2) and (4), per group in (6). The heat maps
-  have 1 on the diagonal.
+  matrix, so for all experts in (2) and (4), per group in (6i), (6p) and
+  (6pe). The heat maps have 1 on the diagonal.
 
 Whether the groups differ is a question for the LR tests, and for the
 probabilities and AMEs for the Krinsky–Robb draws: the probabilities of all
@@ -1184,10 +1578,20 @@ makes sense, so not for the standard deviations (0 is on the boundary) or the
 probabilities. Figures show 95% Krinsky–Robb percentile intervals.
 
 **LR tests** (`LR_TESTS` in section 1): do the mean constants differ by group
-((2) vs (4)); do the covariances ((4) vs (6), (4i) vs (6i), (4p) vs (6p)); do
-the attribute effects ((4) vs (4i), (6) vs (6i), (4p) vs (4ip)); do the prices
-matter ((4) vs (4p), (6) vs (6p), (4i) vs (4ip)). Both models of a test have
-the same sample and draws. The classical p-value assumes the larger model is
+((2) vs (4)); do the covariances ((4i) vs (6i), (4p) vs (6p), (4pe) vs
+(6pe)); do the attribute effects ((4) vs (4i), (4p) vs (4ip)); do the prices
+matter ((4) vs (4p), (4i) vs (4ip)); and for the variants of
+(4p): do the attributes interact ((4p) vs (4pa)), does the price effect differ
+by heat demand ((4p) vs (4pd)), do the expert characteristics matter ((4p) vs
+(4pe)), in `tab_rcl_variants.tex` next to their fit, as the table of the
+models and the table of the LR tests would no longer fit a frame with them.
+(4pl) is not nested in (4p); with as many parameters, their log-likelihoods
+compare directly. Whether the price effect is proportional to the heat demand
+is a Wald test in (4pd) alone (`tab_rcl_m4pd_price_by_demand.tex`). Both models
+of an LR test have the same sample and draws. A negative statistic, a larger
+model below the smaller one, gets a dagger and a note in the tables, and a
+message: that model stopped short of its maximum and must be estimated again
+from the smaller one (`start_from`). The classical p-value assumes the larger model is
 correctly specified; the robust one (Kent 1982; White 1982) compares LR with a
 weighted sum of χ²(1) variables, with weights from the inverse Hessian and the
 cluster-robust covariance matrix. The test of the covariances restricts the
@@ -1202,21 +1606,30 @@ fit, the technology columns have one-word headers (as the heat maps), the cell
 above the row labels says that the utilities are relative to the reference
 outcome, the single price coefficient has its standard error beside it in a
 cell across the columns, and the notes are one to three lines; the dummies
-for a price not reported are in `tab_rcl_prices.tex`. The sample and the
+for a price not reported are in `tab_rcl_prices_not_reported.tex`. The sample and the
 draws are in the notes of
 `tab_rcl_fit.tex` and in the macros of `numbers_rcl.tex` (`\rclExperts`,
 `\rclReferenceVignette`, `\rclPriceGas`, ...), which the slides `\input` once.
 The macros have the same names in every run, so a deck inputs the
 `numbers_rcl.tex` of one run only.
 Groups have the same colour and symbol in every figure, models in every
-comparison. The tables need `booktabs` and `threeparttable`.
+comparison. The colours are the ZEW chart colours, as in the descriptives
+(Max, 29 October 2026): energy advisers lime, HVAC installers gray, chimney
+sweeps ice, all experts slate, and the comparison models in that order; the
+symbols are filled with them, and symbols and intervals are drawn in dark
+grey so that the light colours stand out on white. The heat maps run from
+lime (−1) to slate (1). The tables need `booktabs` and `threeparttable`.
 
 **Changing things.** The models and their order (`MODELS`, `MAIN_MODEL`),
-the models of the comparison figures (`COMPARISON_MODELS`, at most about
-five) and of the comparison tables (`COEFFICIENT_COMPARISON_MODELS`), the
-tests (`LR_TESTS`), the labels, colours and sizes are all in section 1. A new
-regressor of `01_run_specifications.R` that is an attribute dummy needs a label
-in `ATTRIBUTE_LABELS`; the script stops and names any value without a label.
+the models of the comparison figures (`COMPARISON_MODELS`, at most four, one
+per colour) and of the comparison tables (`COEFFICIENT_COMPARISON_MODELS`),
+the models with figures of the effects of all terms (`TERM_FIGURE_MODELS`),
+the tests (`LR_TESTS`), the labels, colours and sizes are all in section 1, and so
+is the change of each variant of (4p) in its table (`VARIANT_CHANGES`). A new regressor of `01_run_specifications.R` that is an
+attribute dummy needs a label in `ATTRIBUTE_LABELS`, any other regressor or
+term one in `INTERACTION_LABELS`, `EXPERT_LABELS`, `PRICE_LABELS` or
+`PRICE_NA_LABELS` (the dummies for a blank in Q17, `RISE_NA_TERMS`, are in
+Excel only); the script stops and names any value without a label.
 
 **Reading the results.**
 
@@ -1226,9 +1639,18 @@ in `ATTRIBUTE_LABELS`; the script stops and names any value without a label.
   correlations change with `REFERENCE_OUTCOME`.
 - Coefficients are relative to the scale of the unexplained utility, which can
   differ between models; compare the AMEs across models, not the coefficients.
+  An exception is the price coefficient of (4p) and (4pe): what (4pe) adds is
+  the same in all of an expert's vignettes, so when it is left out the random
+  constants take it up, not the unexplained utility, and the scale stays about
+  the same. The two coefficients compare directly: if they differ, (4p)'s price
+  coefficient mixed in the heat pump at home, the expected rises or the region,
+  which can make it larger or smaller. The reported prices are beliefs, not
+  randomised like the vignettes. This does not hold for (4pa) and (4pd), which
+  add terms that differ between an expert's vignettes.
 - The price enters linearly, in cent per kWh, centred at the mean over the
   experts of both arms (`price_reference` in the results). Its coefficient is the change in utility from one cent more per kWh, so a
   coefficient divided by minus the price coefficient is in cent per kWh: the
   price change that has the same effect on that technology's utility. It is
   identified only by differences between the prices the experts reported, not
-  by the vignettes, and "No recommendation" has no price.
+  by the vignettes, and "No recommendation" has no price. In (4pl) that ratio
+  is in log points instead: 0.1 is a price about 10% higher.

@@ -34,12 +34,16 @@ load_respondents <- function() {
   dat <- load_analysis_data(completers_only = FALSE)
 
   dat$main %>%
+    # A questionnaire without a token cannot be matched to other attempts, so
+    # it is a person of its own; grouping on an NA token would merge all such
+    # questionnaires of a wave into one person (found 2026-10-28).
+    mutate(person = coalesce(meta_token, resp_uid)) %>%
     # Furthest-progressed attempt first: completed before not completed, and
     # among those the one that reached the highest page. slice_head then keeps
     # exactly that row, so the kept `is_complete` equals any(is_complete) over
     # the person's attempts.
     arrange(desc(is_complete), desc(meta_lastpage)) %>%
-    slice_head(n = 1, by = c(wave, meta_token)) %>%
+    slice_head(n = 1, by = c(wave, person)) %>%
     select(wave, meta_token, is_complete, plz, bundesland, bundesland_source,
            berufsgruppe, target_group)
 }
