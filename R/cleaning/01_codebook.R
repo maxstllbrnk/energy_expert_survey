@@ -148,18 +148,17 @@ att_rows <- tibble(
     value_codes = NA_character_, value_labels = NA_character_,
     in_main = "yes", in_softlaunch = "both")
 
-# The preference scores are built OUTSIDE the cleaning pipeline, by
-# R/add_preferences.R, because standardising them makes them sample-dependent.
-# They are documented here anyway - the codebook is the reference for the
-# project, not just for what run_cleaning.R happens to write.
+# The preference scores are built in step 06, R/cleaning/00_preferences.R. They
+# are documented here anyway - the codebook is the reference for the project, not
+# just for what the raw stage writes. A z-score depends on the sample, so it is
+# computed in the script that uses it.
 pref_rows <- tibble(
-  measure = rep(c("tp", "risk"), each = 5),
-  suffix  = rep(c("score", "z", "cell", "levels", "complete"), 2),
-  concept = rep(c("patience", "risk tolerance"), each = 5),
+  measure = rep(c("tp", "risk"), each = 4),
+  suffix  = rep(c("score", "cell", "levels", "complete"), 2),
+  concept = rep(c("patience", "risk tolerance"), each = 4),
   staircase = rep(c("Time1..Time5BBBB (14 arms at level 5)",
-                    "Risk1..Risk5BBBB (16 arms at level 5)"), each = 5),
+                    "Risk1..Risk5BBBB (16 arms at level 5)"), each = 4),
   role = rep(c("midpoint of the respondent's cell, in (0, 1); 0 = least",
-               "the same, z-standardised - the standardisation SAMPLE is a choice, see the script",
                "the cell itself, 0 .. 2^levels - 1, ordered from least to most",
                "how many of the five choices were answered (0-5)",
                "TRUE if the respondent went as deep as their own branch allows"), 2)) |>
@@ -169,7 +168,7 @@ pref_rows <- tibble(
     question_id = "-",
     variable_name = str_c(measure, "_", suffix),
     block = measure,
-    data_set = "preferences (R/add_preferences.R)",
+    data_set = "experts",
     value_codes = NA_character_, value_labels = NA_character_,
     in_main = "yes", in_softlaunch = "both")
 
@@ -235,8 +234,9 @@ readme <- tribble(
                              " - read from the Versandrunde column of the batch overview"),
   "Reference wave", REFERENCE_WAVE,
   "Variables", str_c(nrow(codebook_out), " (", nrow(codebook), " from the questionnaire, ",
-                     nrow(derived) + nrow(att_rows), " added by the pipeline, ",
-                     nrow(pref_rows), " added by R/add_preferences.R)"),
+                     nrow(derived) + nrow(att_rows), " added by the raw stage, ",
+                     nrow(pref_rows), " added by R/cleaning/00_preferences.R; the rest of what ",
+                     "step 06 adds is in the sheet variables of the cleaning report)"),
   "Naming", "lowercase snake_case, <block>_<concept>[_<item>]; unique and stable across waves",
   "Matching", str_c("Columns are matched to the raw exports BY QUESTION CODE, never by ",
                     "position. This is what lets the soft-launch waves (415 and 416 columns ",

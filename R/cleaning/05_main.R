@@ -7,7 +7,8 @@
 #
 # Join to the vignette data with `resp_uid`.
 #
-# Output: CLEAN_DATA_DIR/survey_main.{rds,csv,xlsx}
+# Output: CLEAN_DATA_DIR/survey_main.{rds,csv,xlsx}; raw_checks, recode_summary
+#         and data_quality for the cleaning report (07_report.R)
 # =============================================================================
 
 # everything that lives at vignette level belongs in data set 2, not here
@@ -47,16 +48,10 @@ write_out(vignettes_long, "vignettes_long")
 write_out(survey_main,    "survey_main")
 
 # =============================================================================
-# build report - read this after every run
+# what the raw stage did: the sheets raw_checks, harmonisation, recodes and
+# data_quality of the cleaning report, written by 07_report.R
 # =============================================================================
-per_wave <- survey_main |>
-  summarise(respondents = n(),
-            submitted   = sum(is_complete),
-            reached_vignettes = sum(reached_vignettes),
-            .by = c(wave, versandrunde, target_group)) |>
-  arrange(versandrunde, wave)
-
-checks <- tribble(
+raw_checks <- tribble(
   ~check, ~value,
   "waves read",                          as.character(n_distinct(survey_main$wave)),
   "respondents (all waves)",             as.character(nrow(survey_main)),
@@ -86,18 +81,20 @@ recode_summary <- bind_rows(
 # These values are as the respondents typed them. Nothing here is corrected,
 # because how to treat them is a research decision, not a cleaning one. Decide
 # in the analysis and document it there.
+# Counts only. The old build report also gave examples for most rows: individual
+# answers, among them postcodes of firms and the smallest values of a question.
+# The rules for outputs allow aggregates only (docs/data_contract.md), so they went,
+# as they had for the large-customer postcodes already.
 implausible <- function(var, lo, hi, note) {
   x <- survey_main[[var]]
   bad <- !is.na(x) & (x < lo | x > hi)
-  tibble(variable = var, rule = str_c("outside ", lo, "-", hi), n = sum(bad),
-         examples = str_c(head(sort(unique(x[bad])), 8), collapse = ", "), note = note)
+  tibble(variable = var, rule = str_c("outside ", lo, "-", hi), n = sum(bad), note = note)
 }
 
 sums_to_100 <- function(label, pattern, note) {
   tot <- rowSums(survey_main |> select(matches(pattern)), na.rm = TRUE)
   tibble(variable = label, rule = "row total should be 100",
          n = sum(tot > 0 & abs(tot - 100) > 1e-6),
-         examples = str_c("range ", str_c(round(range(tot[tot > 0]), 1), collapse = "-")),
          note = note)
 }
 
@@ -114,53 +111,31 @@ data_quality <- bind_rows(
               "Recommendation shares that do not sum to 100."),
   tibble(variable = "plz", rule = "not a German postcode",
          n = sum(!coalesce(survey_main$plz_valid, TRUE)),
-         examples = str_c(head(na.omit(survey_main$firm_zip[!coalesce(survey_main$plz_valid, TRUE)]), 8),
-                          collapse = ", "),
          note = "Fragments typed into Q0; plz is NA for these, plz_valid is FALSE."),
   tibble(variable = "bundesland", rule = "postcode in no known range",
          n = sum(survey_main$bundesland_source == "unmatched", na.rm = TRUE),
-         examples = str_c(head(sort(unique(
-           survey_main$plz[survey_main$bundesland_source == "unmatched"])), 8), collapse = ", "),
          note = str_c("Five digits, but no such postcode exists in Germany - typos. ",
                       "Left as NA rather than guessed.")),
   tibble(variable = "bundesland", rule = "assigned from the first three digits",
          n = sum(survey_main$bundesland_source == "plz_prefix", na.rm = TRUE),
-         examples = str_c(head(sort(unique(
-           survey_main$plz[survey_main$bundesland_source == "plz_prefix"])), 8), collapse = ", "),
          note = str_c("The postcode itself is not in the lookup, but every postcode ",
                       "sharing its first three digits is in one state. Exclude with ",
                       "bundesland_source if that is too generous.")),
   tibble(variable = "bundesland", rule = "postcode straddles a state line",
          n = sum(survey_main$bundesland_source == "plz_border", na.rm = TRUE),
-         examples = str_c(head(sort(unique(
-           survey_main$plz[survey_main$bundesland_source == "plz_border"])), 8), collapse = ", "),
          note = str_c("Postcodes are Deutsche Post routing areas and a few cross a ",
                       "state border. Assigned to the state holding most of the postcode.")),
-  # No examples in the two nuts3 rows: a large-customer postcode belongs to a
-  # single organisation and can identify the firm, and this report is on Dropbox
   tibble(variable = "nuts3", rule = "postcode not in Eurostat's list",
          n = sum(!coalesce(survey_main$plz_in_nuts_list, TRUE)),
-         examples = "",
          note = str_c("A valid postcode, but not in Eurostat's list of geographic postcodes - ",
                       "mostly P.O.-box or large-customer postcodes. nuts3 is NA; ",
                       "plz and bundesland are kept.")),
   tibble(variable = "nuts3", rule = "Kreis (nuts3) outside the state (bundesland)",
          n = sum(str_sub(survey_main$nuts3, 1, 3) !=
                    BUNDESLAND_NUTS1[as.character(survey_main$bundesland)], na.rm = TRUE),
-         examples = "",
          note = str_c("nuts3 comes from Eurostat, bundesland from GeoNames/BKG, and the two ",
-                      "lookups disagree for a few postcodes (README, section NUTS3). Use one ",
-                      "of the two consistently in an analysis."))
-)
-
-write_xlsx(
-  list(checks          = checks,
-       waves           = per_wave,
-       harmonisation   = harmonisation_log,
-       recodes         = recode_summary,
-       data_quality    = data_quality,
-       vignette_arms   = vignettes_long |> count(vig_arm, arm_source, arm_conflict)),
-  file.path(REPORT_DIR, "build_report.xlsx")
+                      "lookups disagree for a few postcodes (docs/data_notes.md, section NUTS3). ",
+                      "Use one of the two consistently in an analysis."))
 )
 
 message("\nCleaned data -> ", normalizePath(CLEAN_DATA_DIR))
@@ -168,4 +143,3 @@ message("  vignettes_long.rds / .csv / .xlsx")
 message("  survey_main.rds / .csv / .xlsx")
 message("Reports      -> ", normalizePath(REPORT_DIR))
 message("  codebook.xlsx / .csv")
-message("  build_report.xlsx  <- check this")
