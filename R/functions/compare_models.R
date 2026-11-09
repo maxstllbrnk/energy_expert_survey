@@ -207,6 +207,23 @@ fresh_log_likelihood <- function(set, theta, prepared, halton_sequences, primes,
 #'   held-out expert), code, iterations, minutes, error
 cross_validate_fold <- function(job) {
   start_time <- Sys.time()
+  # A term without variation in these data has no estimate, and makes mlogit's
+  # Hessian singular even at iterlim = 0: a rare dummy, among the few experts of a
+  # fold. It stays at its value in `start`, which does not matter where its column is
+  # 0. estimate = FALSE: mlogit() returns its data and does not estimate. colSums():
+  # the sum per column, here the number of rows that are not 0. Inside this function,
+  # as the sessions do not know the others of this file.
+  fix_terms_without_variation <- function(arguments) {
+    frame_arguments <- arguments
+    frame_arguments$estimate <- FALSE
+    X <- model.matrix(do.call("mlogit", frame_arguments))
+    without_variation <- colnames(X)[colSums(X != 0) == 0]
+    if (length(without_variation) > 0) {
+      arguments$constPar <- c(arguments$constPar, arguments$start[without_variation])
+    }
+    arguments
+  }
+
   # tryCatch(): an error comes back as text, so that one fold cannot lose the work
   # of the others. do.call(): as in fit_mixed_logit(), which explains why.
   # setNames(): the vector with these names. duplicated(): seen earlier in the vector.
@@ -215,6 +232,7 @@ cross_validate_fold <- function(job) {
     held_out_data <- job$held_out_data
     arguments <- job$arguments
     arguments$data <- quote(training_data)
+    arguments <- fix_terms_without_variation(arguments)
     fit <- do.call("mlogit", arguments)
     for (restart in 1:3) {
       if (fit$est.stat$code != 3) break
@@ -224,10 +242,12 @@ cross_validate_fold <- function(job) {
     }
     # iterlim = 0: the log-likelihood at these parameters, on the draws mlogit gives
     # the held-out experts. fitted(): the expert's probability, once per decision.
+    arguments <- job$arguments
     arguments$data <- quote(held_out_data)
     arguments$start <- setNames(as.numeric(fit$coefficients),
                                 names(fit$coefficients))
     arguments$iterlim <- 0
+    arguments <- fix_terms_without_variation(arguments)
     held_out <- do.call("mlogit", arguments)
     index <- idx(held_out)
     expert_of_decision <- as.character(index$resp_uid)[!duplicated(index$chid)]
@@ -268,8 +288,8 @@ p_text <- function(p_value) {
   sprintf("%.3f", p_value)
 }
 
-#' Run the protocol on the models of one estimation script: see
-#' docs/results_contract.md and docs/sessions/E_model_comparison.md
+#' Run the protocol on the models of one estimation script: the rule at the top of
+#' this file, the arguments and sheets in docs/results_contract.md
 #'
 #' Reads the models from est_dir, estimates nothing but the folds of the
 #' cross-validation, and saves the sheets. Stops if the models of a test differ in
@@ -810,6 +830,10 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
         saved <- readRDS(saved_file)
         if (identical(saved$fingerprint, fingerprint)) {
           message("Cross-validation of ", model_name, ": nothing changed, loaded")
+          if (any(!is.na(saved$folds$error))) {
+            message("  It holds a failed fold: delete ", saved_file,
+                    " to run its folds again")
+          }
           cv_saved[[model_name]] <- saved
           next
         }
@@ -847,8 +871,9 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
                                             chunk.size = 1)
     }
 
-    # (d) By model: the held-out experts, and how each fold went. A model is saved
-    # only if every fold ended without error.
+    # (d) By model: the held-out experts, and how each fold went. Saved also with a
+    # failed fold: such an error lies in the data, it would come back on every run
+    # after hours of estimation, and the sheet reports it.
     for (model_name in setdiff(cv_models, names(cv_saved))) {
       per_expert <- tibble()
       folds_of_model <- tibble()
@@ -871,10 +896,8 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
       cv_saved[[model_name]] <- list(fingerprint = fingerprint,
                                      per_expert = per_expert,
                                      folds = folds_of_model)
-      if (all(is.na(folds_of_model$error))) {
-        saveRDS(cv_saved[[model_name]],
-                file.path(est_dir, model_name, "cross_validation.rds"))
-      }
+      saveRDS(cv_saved[[model_name]],
+              file.path(est_dir, model_name, "cross_validation.rds"))
     }
 
     # (e) Per model, and per pair: the mean gain per expert, with its standard error
@@ -949,8 +972,9 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
       "the held-out experts with iterlim = 0, on the draws mlogit gives them. Gain: ",
       "larger minus smaller, mean per expert, with its SE over experts; the folds ",
       "share experts in training, so this SE is rather too small. A model is favoured ",
-      "if its gain exceeds one SE. A pair is not ",
-      "usable if a fold failed or did not converge: the decision then uses BIC. This ",
+      "if its gain exceeds one SE. A term without variation in a fold stays at its ",
+      "full-sample estimate. A pair is not usable if a fold failed or did not ",
+      "converge: the decision then uses BIC. This ",
       "run took %.1f minutes (the column minutes: estimation time of the folds, added ",
       "up, also from an earlier run if loaded)."
     ), CV_FOLDS, strata_text, cv_minutes)

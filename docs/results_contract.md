@@ -16,7 +16,8 @@
 `model.rds` holds the fitted `mlogit` object, with the data in it. `results.rds` holds
 aggregates only. `cross_validation.rds` exists for the models on the shortlist of
 `compare_models()` and holds one held-out log-likelihood per expert, so that a new run need not
-estimate the folds again. It is not an aggregate either, so it stays next to `model.rds`.
+estimate the folds again. It is not an aggregate either, so it stays next to `model.rds`. It is
+saved also if a fold failed: delete it to run its folds again.
 
 ## `fit_mixed_logit()` and `post_estimation()`
 

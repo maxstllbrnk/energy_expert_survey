@@ -99,20 +99,21 @@ row per question:
 
 **The rule, fixed before results are read.** A larger model is accepted only if it is valid, the robust test rejects
 at 5% after Holm, the gain survives fresh draws, and cross-validation improves by more than one paired standard error (BIC
-falls, if it was not run or a fold failed). If tests and parsimony disagree, the smaller stays. If all agree but no AME moves by 1 percentage point, the
-smaller stays as the main model and the larger is reported as robustness. Of two models that do not nest each other, one
-is preferred only if Vuong's test and cross-validation (or BIC) agree on it; otherwise the data cannot decide. The rule
-proposes and the researchers decide: the column `final_decision` of the sheet `decision` is theirs, also for terms of
-direct research interest that stay regardless.
+falls, if it was not run or a fold failed). If tests and parsimony disagree, the smaller stays. If all agree but no AME moves
+by 1 percentage point, the smaller stays as the main model and the larger is reported as robustness. Of two models that do not
+nest each other, one is preferred only if Vuong's test and cross-validation (or BIC) agree on it; otherwise the data cannot
+decide. The rule proposes and the researchers decide: the column `final_decision` of the sheet `decision` is theirs, also for
+terms of direct research interest that stay regardless. Open questions about the rule are in `docs/open_issues.md`.
 
-The gates are not redundant. On the synthetic data, with equal covariances by group and 100 draws per expert, the robust test
-wrongly rejected them (LR 61.2, robust p 0.006), and only the fresh draws (mean LR 39.9) and cross-validation caught it.
+The gates are not redundant. In one run on synthetic data, with equal covariances by group and 100 draws per expert, the robust
+test wrongly rejected them (LR 61.2, robust p 0.006), and only the fresh draws (mean LR 39.9) and cross-validation caught it.
 That is one draw, not an error rate, and at 1,000 draws the fresh-draw gate will bind less often.
 
 ## Summary statistics
 
 `run_summary_statistics()` works on any sample: what does not apply, such as response rates in a sub-sample, is
-skipped and listed in the deck. Every exhibit exists for all experts and for each expert group.
+skipped and listed in the deck. Exhibits exist for all experts and for each expert group, unless they compare the groups
+themselves.
 `summary_statistics.pdf` shows the current version of everything: it is rebuilt whenever the sample, the code or an input
 changes, and a run that changes nothing leaves it alone. If it is open in a PDF viewer, the run says so; close it and run again.
 `exhibits.csv` lists each exhibit with its caption and whether it is meant for the main text or the appendix.
@@ -153,12 +154,12 @@ R/functions/                   the estimation functions, labels and colours, tab
 R/summary_statistics/          one function per block of the summary statistics, and the deck
 R/geodata/                     builds the postcode lookup, once
 tests/                         synthetic data and tests
-docs/                          the columns of the cleaned data, the results, notes on the data
+docs/                          the columns of the cleaned data, the results, notes on the data, open issues
 ```
 
 Every data decision is made once, in `R/cleaning/06_experts_vignettes.R`, with its reason and date in the comments. English
 labels and colours are in `R/functions/labels.R`. More on the data, such as how the waves are merged and how the state is derived
-from the postcode, is in `docs/data_notes.md`.
+from the postcode, is in `docs/data_notes.md`. What the rebuild left open for the researchers to decide is in `docs/open_issues.md`.
 
 ## Testing without the real data
 

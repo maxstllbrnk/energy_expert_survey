@@ -9,8 +9,7 @@
 ################################################################################
 # 14 minutes on 4 sessions on a busy machine, from nothing; models and folds are
 # saved, so a second run takes 4. 2 sessions here, as the machine is shared.
-# compute_ames() is Session D's, so the AMEs are made by hand here, following
-# docs/results_contract.md.
+# The AMEs are made by hand here, following docs/results_contract.md.
 
 source(file.path("R", "setup.R"))
 est_dir <- file.path(OUTPUT_DIR, "test_compare_models")
@@ -640,12 +639,53 @@ comparison_failed <- compare_models(
 )
 failed_row <- comparison_failed$cross_validation %>%
   filter(item == "m_relevant")
+# Saved all the same: such an error would come back on every run, after hours of
+# estimation
 stopifnot(failed_row$folds_converged == 0, failed_row$experts == 0,
           nchar(failed_row$fold_errors) > 0,
-          !file.exists(file.path(est_dir_failed, "m_relevant", "cross_validation.rds")),
+          file.exists(file.path(est_dir_failed, "m_relevant", "cross_validation.rds")),
           grepl("not usable", comparison_failed$decision$verdict_cross_validation, fixed = TRUE),
           comparison_failed$decision$proposal == "accept larger",
           grepl("not usable", comparison_failed$decision$reason, fixed = TRUE))
+
+# (g2) A rare dummy: a fold whose experts do not hold it has a column of zeros, which
+# makes mlogit's Hessian singular even at iterlim = 0. Every fold runs all the same. A
+# folder of its own, as compare_models() reads every model of a folder.
+est_dir_rare <- file.path(est_dir, "rare_dummy")
+dir.create(file.path(est_dir_rare, "m_base"), recursive = TRUE, showWarnings = FALSE)
+file.copy(file.path(est_dir, "m_base", c("model.rds", "results.rds", "cross_validation.rds")),
+          file.path(est_dir_rare, "m_base"), overwrite = TRUE)
+index_base <- idx(choice_data)
+experts_with_oil <- unique(as.character(
+  index_base$resp_uid[choice_data$chosen & index_base$alternative == "Ölheizung"]
+))
+choice_data_rare <- choice_data
+choice_data_rare$rare_dummy <- as.numeric(
+  as.character(index_base$resp_uid) %in% experts_with_oil[1:3] &
+    index_base$alternative == "Ölheizung"
+)
+m_rare <- fit_mixed_logit(
+  "m_rare", chosen ~ price + rare_dummy | 1 + is_hvac + is_sweep + att_a + att_b,
+  choice_data_rare, reference, est_dir_rare, start_from = m_base, n_draws = n_draws_test
+)
+post_estimation(m_rare, est_dir_rare, label = "m_rare", n_draws_kr = 50,
+                n_workers = n_workers_test)
+comparison_rare <- compare_models(
+  est_dir_rare,
+  tests = tribble(
+    ~question,                ~smaller, ~larger,
+    "Does the dummy matter?", "m_base", "m_rare"
+  ),
+  cv_models = c("m_base", "m_rare"),
+  n_fresh_draws = 2,
+  n_workers = 2
+)
+rare_row <- comparison_rare$cross_validation %>%
+  filter(item == "m_rare")
+stopifnot(rare_row$folds_converged == 5, rare_row$experts == n_experts,
+          rare_row$fold_errors == "",
+          !grepl("not usable", comparison_rare$decision$verdict_cross_validation,
+                 fixed = TRUE))
 
 # (h) A smaller model above the larger: flagged in validity, and not compared, also if
 # no test names the smaller one. The Holm family keeps its size.

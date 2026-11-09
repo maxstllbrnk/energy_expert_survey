@@ -249,13 +249,50 @@ for (k in seq_len(nrow(sweep_counts))) {
 }
 cat("Chimney sweeps: states below the minimum cell, hidden:", n_hidden, "\n")
 
-# Item response: where the share is hidden, its two counts are too
+# Item response, in its two halves: no count below the minimum cell, and where the
+# share is hidden, the counts it rests on are too
 for (slug in GROUP_SLUGS) {
   item_lines <- readLines(file.path(tables_dir,
                                     paste0("tab_item_response_", slug, ".tex")),
                           encoding = "UTF-8")
-  stopifnot(!any(str_detect(item_lines, "& [0-9,]+ & [0-9,]+ & --")))
+  for (item_line in item_lines) {
+    # strsplit(): the cells of the line; [[1]]: of this one line
+    cells <- str_trim(str_remove(strsplit(item_line, " & ", fixed = TRUE)[[1]],
+                                 "\\\\\\\\$"))
+    if (length(cells) != 11 || cells[2] == "Reached") next
+    for (first_count in c(2, 8)) {
+      counts <- cells[first_count:(first_count + 2)]
+      shown <- counts[counts != "--" & counts != ""]
+      stopifnot(all(as.numeric(gsub(",", "", shown)) >= MIN_N))
+      if (cells[first_count + 3] == "--") {
+        stopifnot(all(counts[2:3] == "--"))
+      }
+    }
+  }
 }
+
+# Nobody below the minimum cell among those who stopped at a question, in any version
+for (slug in GROUP_SLUGS) {
+  stop_lines <- readLines(file.path(tables_dir,
+                                    paste0("tab_breakoff_question_", slug, ".tex")),
+                          encoding = "UTF-8")
+  for (stop_line in stop_lines) {
+    cells <- str_trim(str_remove(strsplit(stop_line, " & ", fixed = TRUE)[[1]],
+                                 "\\\\\\\\$"))
+    if (length(cells) != 7 || cells[2] == "N") next
+    counts <- cells[c(2, 6)]
+    shown <- counts[counts != "--" & counts != ""]
+    numbers <- as.numeric(gsub(",", "", shown))
+    stopifnot(all(numbers == 0 | numbers >= MIN_N))
+  }
+}
+
+# A second run with nothing changed writes nothing
+deck_time <- file.mtime(file.path(full_dir, "summary_statistics.pdf"))
+exhibits_again <- run_summary_statistics(experts, vignettes, full_dir, "Full sample",
+                                         frame = frame)
+stopifnot(file.mtime(file.path(full_dir, "summary_statistics.pdf")) == deck_time,
+          nrow(exhibits_again) == nrow(exhibits))
 
 # The waves: from the dispatch log, in the table
 wave_file <- file.path(tables_dir, "tab_response_wave_all.tex")
@@ -324,8 +361,10 @@ stopifnot(sum(str_detect(deck_lines, "^\\\\begin\\{frame\\}")) == nrow(exhibits)
           any(str_detect(deck_lines, "All experts \\(main\\)")))
 
 # 3.3 No German in the tables and figure notes, and no raw name
+# Ja and Nein as whole words, as January is English
 german_words <- paste0(
-  "\\b(Ja|Nein|Nicht Gew|Keine|Sonstig|Firmen|Personen|Fernw|Wärme|Heizung|Bayern|",
+  "\\b(Ja|Nein)\\b|",
+  "\\b(Nicht Gew|Keine|Sonstig|Firmen|Personen|Fernw|Wärme|Heizung|Bayern|",
   "Hessen|Niedersachsen|Sachsen|Thüringen|Nordrhein|Rheinland|bundesweit|Abschluss)"
 )
 for (file in c(list.files(tables_dir, full.names = TRUE))) {
@@ -440,7 +479,10 @@ vignettes_fw <- vignettes %>%
 sub_dir <- file.path(test_dir, "completers fw")
 sub_exhibits <- run_summary_statistics(completers_fw, vignettes_fw, sub_dir,
                                        "Completers, with district heating & more")
-stopifnot(setequal(unique(sub_exhibits$id), c("duration", "vignette_times")),
+metadata_ids <- sub_exhibits$id[sub_exhibits$block == "B. Survey metadata"]
+stopifnot(setequal(unique(metadata_ids), c("duration", "vignette_times")),
+          !any(sub_exhibits$block %in% c("0. Data cleaning", "A. Recruitment",
+                                         "C. Selection")),
           all(file.exists(file.path(sub_dir, sub_exhibits$file))),
           file.exists(file.path(sub_dir, "summary_statistics.pdf")))
 sub_deck <- readLines(file.path(sub_dir, "summary_statistics.tex"),
