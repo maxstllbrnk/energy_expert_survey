@@ -1,209 +1,296 @@
-# =============================================================================
-# tests/selftest.R  -  check the cleaned data sets after a run
-# =============================================================================
-# Run AFTER R/run_cleaning.R:   Rscript tests/selftest.R
+################################################################################
+# selftest.R — checks on the cleaned data sets, after R/run_cleaning.R
+# Inputs : survey_main.rds, vignettes_long.rds, experts.rds, vignettes.rds,
+#          reference_values.rds (CLEAN_DATA_DIR); cleaning_report.rds; in a real
+#          run also the raw exports
+# Outputs: one line per check in the log; exit status 1 if a check fails
+# Checks : waves, keys, joins, six rows per person, the design, the alignment of
+#          the soft launch, the staircases, the columns of the data contract,
+#          the cleaning report
+################################################################################
+# From the project root: Rscript tests/selftest.R, or source() it in RStudio.
 #
-# These are the checks that would fail if the soft-launch waves were merged
-# incorrectly - the failure mode the old pipeline had. The strongest one is the
-# vignette_id match: it only resolves if all nine design attributes landed in
-# the right columns, which cannot happen by chance if columns are misaligned.
-# =============================================================================
+# These are the checks that fail if the soft-launch waves are merged wrongly, the
+# failure of the first pipeline. The strongest is the vignette_id: it only
+# resolves if all nine design attributes landed in the right columns, which
+# cannot happen by chance if columns are misaligned.
+#
+# It also runs on synthetic data, without what only the raw stage can have: the
+# raw exports, the amounts in the labels of the staircases, the harmonisation of
+# Q7 and Q24a.
 
-source("config.R")
-source("R/cleaning/00_functions.R")
+source(file.path("R", "setup.R"))
+source(file.path("R", "cleaning", "00_functions.R"), encoding = "UTF-8")
 
-vl <- readRDS(file.path(CLEAN_DATA_DIR, "vignettes_long.rds"))
-sm <- readRDS(file.path(CLEAN_DATA_DIR, "survey_main.rds"))
-versand <- load_versand()
+survey_main <- readRDS(file.path(CLEAN_DATA_DIR, "survey_main.rds"))
+vignettes_long <- readRDS(file.path(CLEAN_DATA_DIR, "vignettes_long.rds"))
+experts <- readRDS(file.path(CLEAN_DATA_DIR, "experts.rds"))
+vignettes <- readRDS(file.path(CLEAN_DATA_DIR, "vignettes.rds"))
+reference_values <- readRDS(file.path(CLEAN_DATA_DIR, "reference_values.rds"))
 
-failed <- 0L
-ok <- function(label, cond, extra = "") {
-  passed <- isTRUE(cond)
-  cat(sprintf("%-58s %s%s\n", label, if (passed) "PASS" else "*** FAIL ***",
-              if (nzchar(extra)) str_c("  ", extra) else ""))
-  if (!passed) failed <<- failed + 1L
+checks <- tibble()
+
+#' Adds one check to the list
+#'
+#' @param checks the list so far
+#' @param label  what is checked
+#' @param passed TRUE if it holds
+#' @param detail what a reader needs to see, for example a count
+add_check <- function(checks, label, passed, detail = "") {
+  bind_rows(checks, tibble(check = label, passed = isTRUE(passed), detail = detail))
 }
 
-cat("\n===== waves =====\n")
-ok("all 12 waves present", n_distinct(sm$wave) == 12, str_c(n_distinct(sm$wave), " waves"))
-ok("both soft-launch waves present", sum(versand$is_softlaunch) == 2)
-ok("every wave has respondents", all(table(sm$wave) > 0))
-ok("soft launch flagged from Versandrunde, not hardcoded",
-   all(sm$is_softlaunch == (sm$versandrunde == "Soft Launch")))
+# 1. Waves ---------------------------------------------------------------------
+checks <- add_check(checks, "12 waves", n_distinct(survey_main$wave) == 12,
+                    paste(n_distinct(survey_main$wave), "waves"))
+checks <- add_check(checks, "every wave has persons",
+                    n_distinct(experts$wave) == n_distinct(survey_main$wave))
+checks <- add_check(checks, "two soft-launch waves",
+                    n_distinct(survey_main$wave[survey_main$is_softlaunch]) == 2)
+checks <- add_check(checks, "the soft launch follows the Versandrunde",
+                    all(survey_main$is_softlaunch ==
+                          (survey_main$versandrunde == "Soft Launch")))
 
-cat("\n===== keys =====\n")
-ok("resp_uid unique in survey_main", !anyDuplicated(sm$resp_uid))
-ok("every vignette row joins to survey_main", all(vl$resp_uid %in% sm$resp_uid))
-ok("every respondent appears in vignettes_long", all(sm$resp_uid %in% vl$resp_uid))
-ok("6 vignette rows per respondent (except arm conflicts)",
-   all(table(vl$resp_uid[!vl$arm_conflict]) == 6))
+# 2. Keys and joins ------------------------------------------------------------
+# anyDuplicated(): the position of the first repeated value, 0 if there is none
+checks <- add_check(checks, "resp_uid unique in survey_main",
+                    !anyDuplicated(survey_main$resp_uid))
+checks <- add_check(checks, "resp_uid unique in experts",
+                    !anyDuplicated(experts$resp_uid))
+checks <- add_check(checks, "wave x person unique in experts",
+                    !anyDuplicated(experts[c("wave", "person")]))
+checks <- add_check(checks, "resp_uid x vig_num unique in vignettes",
+                    !anyDuplicated(vignettes[c("resp_uid", "vig_num")]))
+checks <- add_check(checks, "every row of vignettes_long joins to survey_main",
+                    all(vignettes_long$resp_uid %in% survey_main$resp_uid))
+checks <- add_check(checks, "every questionnaire has rows in vignettes_long",
+                    all(survey_main$resp_uid %in% vignettes_long$resp_uid))
+checks <- add_check(checks, "every row of vignettes joins to experts",
+                    all(vignettes$resp_uid %in% experts$resp_uid))
 
-cat("\n===== soft-launch alignment (the old pipeline's failure mode) =====\n")
-by_group <- vl |> summarise(matched = mean(!is.na(vignette_id)), .by = is_softlaunch)
-ok("every vignette row matches a design combination (main)",
-   isTRUE(all.equal(by_group$matched[!by_group$is_softlaunch], 1)))
-ok("every vignette row matches a design combination (soft launch)",
-   isTRUE(all.equal(by_group$matched[by_group$is_softlaunch], 1)))
-ok("all 128 design combinations appear", n_distinct(vl$vignette_id) == 128)
+rows_per_person <- vignettes %>%
+  count(resp_uid)
+checks <- add_check(checks, "six rows per person in vignettes",
+                    all(rows_per_person$n == N_VIGNETTES))
+is_without_vignettes <- !(experts$resp_uid %in% vignettes$resp_uid)
+# identical(): whether two objects are exactly the same
+checks <- add_check(checks, "only an expert in both arms has no vignettes",
+                    identical(is_without_vignettes, experts$arm_conflict),
+                    paste(sum(is_without_vignettes), "without vignettes"))
+checks <- add_check(checks, "no completer has no vignettes",
+                    !any(is_without_vignettes & experts$is_complete))
 
-lv <- function(x) levels(droplevels(x))
-for (v in c("dem_own_heating", "dem_education", "co2_heard", "resp_is_owner")) {
-  ok(str_c("same answer options in both wave groups: ", v),
-     setequal(lv(sm[[v]][sm$is_softlaunch]), lv(sm[[v]][!sm$is_softlaunch])) ||
-       all(lv(sm[[v]][sm$is_softlaunch]) %in% lv(sm[[v]][!sm$is_softlaunch])))
+# The furthest attempt is read off the page counter: as text, 9 would beat 10
+checks <- add_check(checks, "meta_lastpage is a number",
+                    is.numeric(survey_main$meta_lastpage))
+n_completed_persons <- survey_main %>%
+  filter(is_complete) %>%
+  mutate(person = coalesce(meta_token, resp_uid)) %>%
+  distinct(wave, person) %>%
+  nrow()
+checks <- add_check(checks, "everyone who ever completed counts as a completer",
+                    sum(experts$is_complete) == n_completed_persons,
+                    paste(n_completed_persons, "persons completed"))
+
+# 3. The design ----------------------------------------------------------------
+checks <- add_check(checks, "every row of vignettes matches a design combination",
+                    all(!is.na(vignettes$vignette_id)))
+checks <- add_check(checks, "all 128 design combinations appear",
+                    n_distinct(vignettes$vignette_id) == 128,
+                    paste(n_distinct(vignettes$vignette_id), "combinations"))
+
+# 4. The alignment of the soft launch ------------------------------------------
+# The two soft-launch waves have other columns than the main waves (the old
+# pipeline's failure), so that each wave group has to resolve on its own
+is_soft_row <- vignettes_long$is_softlaunch
+checks <- add_check(checks, "every vignette row matches, soft launch",
+                    all(!is.na(vignettes_long$vignette_id[is_soft_row])))
+checks <- add_check(checks, "every vignette row matches, main waves",
+                    all(!is.na(vignettes_long$vignette_id[!is_soft_row])))
+is_soft_person <- survey_main$is_softlaunch
+for (variable in c("dem_own_heating", "dem_education", "co2_heard",
+                   "resp_is_owner")) {
+  answers_soft <- unique(as.character(survey_main[[variable]][is_soft_person]))
+  answers_main <- unique(as.character(survey_main[[variable]][!is_soft_person]))
+  checks <- add_check(checks,
+                      paste0("the soft launch has no other answers: ", variable),
+                      all(answers_soft %in% answers_main))
 }
-ok("design attributes have the same range in both groups",
-   identical(range(as.numeric(vl$att_build_year[vl$is_softlaunch]), na.rm = TRUE),
-             range(as.numeric(vl$att_build_year[!vl$is_softlaunch]), na.rm = TRUE)))
+build_years <- as.numeric(vignettes_long$att_build_year)
+checks <- add_check(checks, "design attributes have one range in both wave groups",
+                    identical(range(build_years[is_soft_row], na.rm = TRUE),
+                              range(build_years[!is_soft_row], na.rm = TRUE)))
 
-cat("\n===== soft-launch harmonisation =====\n")
-ok("cpd_other_text (Q24a) is NA in the soft launch", all(is.na(sm$cpd_other_text[sm$is_softlaunch])))
-ok("cpd_other_text is present in the main waves", any(!is.na(sm$cpd_other_text[!sm$is_softlaunch])))
-ok("cust_rank6 exists only in wave 334335",
-   "cust_rank6" %in% names(sm) && all(is.na(sm$cust_rank6[sm$wave != "334335"])))
-ok("'weiss nicht' removed from every cust_rank*",
-   !any(map_lgl(str_subset(names(sm), "^cust_rank"),
-                ~ any(as.character(sm[[.x]]) == "weiß nicht", na.rm = TRUE))))
-
-cat("\n===== vignette module =====\n")
-ok("'Keine Empfehlung' is a level of vig_rec", "Keine Empfehlung" %in% levels(vl$vig_rec))
-ok("'Keine Empfehlung' occurs", sum(vl$vig_rec == "Keine Empfehlung", na.rm = TRUE) > 0)
-ok("Fernwaerme never recommended in the nofw arm",
-   !any(vl$vig_rec[vl$vig_arm == "nofw"] == "Fernwärme", na.rm = TRUE))
-ok("Fernwaerme does occur in the fw arm",
-   any(vl$vig_rec[vl$vig_arm == "fw"] == "Fernwärme", na.rm = TRUE))
-ok("investment cost only on the last vignette",
-   all(is.na(vl$vig_cost[vl$vig_num != N_VIGNETTES])) &&
-     any(!is.na(vl$vig_cost[vl$vig_num == N_VIGNETTES])))
-ok("arm is constant within a respondent (bar conflicts)",
-   all(vl |> filter(!arm_conflict) |> summarise(k = n_distinct(vig_arm), .by = resp_uid) |> pull(k) == 1))
-
-cat("\n===== response times =====\n")
-ok("no colliding time_NA column", !"time_NA" %in% names(sm))
-ok("no duplicate column names", !anyDuplicated(names(sm)) && !anyDuplicated(names(vl)))
-ok("array-question timings kept separate",
-   all(c("time_barr_ren", "time_barr_dh", "time_barr_conv", "time_price",
-         "time_cust_rank") %in% names(sm)))
-ok("time_interview present and numeric",
-   "time_interview" %in% names(sm) && is.numeric(sm$time_interview))
-ok("vig_time is numeric and non-negative",
-   is.numeric(vl$vig_time) && all(vl$vig_time >= 0, na.rm = TRUE))
-ok("no per-vignette timings left in survey_main",
-   !any(str_detect(names(sm), "^(time_vig[0-9]|grouptime_vig[0-9])")))
-
-cat("\n===== separation of the two data sets =====\n")
-ok("no vignette or attribute columns in survey_main",
-   !any(str_detect(names(sm), "^(vig[0-9]_|att_|vig_intro$)")))
-# Count rows by parsing the exports, not by counting lines: free-text answers
-# contain embedded newlines, so a line count overstates the number of rows.
-raw_rows <- list.files(RAW_DIR, "^survey_[0-9]+_R_data_file\\.csv$",
-                       recursive = TRUE, full.names = TRUE) |>
-  map_int(~ nrow(read_raw_wave(.x)$data)) |>
-  sum()
-ok("survey_main keeps every respondent, none dropped",
-   nrow(sm) == raw_rows, str_c(nrow(sm), " cleaned vs ", raw_rows, " raw"))
-
-cat("\n===== recodes =====\n")
-ok("plz is 5 characters where valid",
-   all(nchar(sm$plz[!is.na(sm$plz)]) == 5))
-ok("plz recovers leading zeros", any(str_starts(na.omit(sm$plz), "0")))
-ok("firm_radius_recoded never loses an original answer",
-   all(!is.na(sm$firm_radius_recoded[!is.na(sm$firm_radius)])))
-ok("recode source is recorded for every respondent",
-   all(!is.na(sm$firm_radius_recode_source)))
-
-cat("\n===== bundesland =====\n")
-if (!file.exists(PLZ_LOOKUP_FILE)) {
-  cat("skipped - build the lookup first: Rscript R/geodata/build_plz_bundesland.R\n")
-} else {
-  ok("bundesland has all 16 federal states as levels", nlevels(sm$bundesland) == 16)
-  ok("a source is recorded for every respondent", all(!is.na(sm$bundesland_source)))
-  ok("bundesland is set exactly when a source found one",
-     all(is.na(sm$bundesland) == sm$bundesland_source %in% c("no_postcode", "unmatched")))
-  ok("no respondent with a valid plz is left unexplained",
-     !any(is.na(sm$plz) & sm$bundesland_source != "no_postcode"))
-  # The lookup is only useful if it covers the postcodes people actually gave.
-  cov <- mean(!is.na(sm$bundesland[!is.na(sm$plz)]))
-  ok("at least 99% of valid postcodes resolve to a state", cov >= 0.99,
-     str_c(sprintf("%.2f%%", 100 * cov), " of ", sum(!is.na(sm$plz))))
-  # Deutsche Post assigns postcodes geographically, so the leading digit tracks
-  # the state closely. A rebuild that shifted the state names or the AGS
-  # prefixes would break this long before anyone noticed it in a table.
-  region_ok <- sm |>
-    filter(!is.na(bundesland), bundesland_source %in% c("plz", "plz_border")) |>
-    mutate(plz_area = str_sub(plz, 1, 2)) |>
-    summarise(top = max(table(droplevels(bundesland))) / n(), .by = plz_area) |>
-    pull(top)
-  ok("each 2-digit postcode area is dominated by one state",
-     mean(region_ok) > 0.9, str_c("mean share ", sprintf("%.3f", mean(region_ok))))
+# Only the raw stage has these: the exports, and the differences of the soft launch
+if (!USE_SYNTHETIC_DATA) {
+  checks <- add_check(checks, "cpd_other_text (Q24a) is NA in the soft launch",
+                      all(is.na(survey_main$cpd_other_text[is_soft_person])))
+  checks <- add_check(checks, "cust_rank6 exists only in wave 334335",
+                      "cust_rank6" %in% names(survey_main) &&
+                        all(is.na(survey_main$cust_rank6[survey_main$wave != "334335"])))
+  # Rows of the exports by parsing, not lines: free text holds line breaks
+  raw_files <- list.files(RAW_DIR, "^survey_[0-9]+_R_data_file\\.csv$",
+                          recursive = TRUE, full.names = TRUE)
+  n_raw_rows <- 0
+  for (raw_file in raw_files) {
+    n_raw_rows <- n_raw_rows + nrow(read_raw_wave(raw_file)$data)
+  }
+  checks <- add_check(checks, "survey_main keeps every row of the raw exports",
+                      nrow(survey_main) == n_raw_rows,
+                      paste(nrow(survey_main), "cleaned,", n_raw_rows, "raw"))
 }
 
-cat("\n===== nuts3 =====\n")
-if (!file.exists(PLZ_NUTS3_FILE)) {
-  cat("skipped - ", PLZ_NUTS3_FILE, " does not exist\n")
-} else {
-  ok("nuts3 is set exactly when plz is in Eurostat's list",
-     all(is.na(sm$nuts3) == !coalesce(sm$plz_in_nuts_list, FALSE)))
-  ok("plz_in_nuts_list is NA exactly when plz is NA",
-     all(is.na(sm$plz_in_nuts_list) == is.na(sm$plz)))
-  ok("nuts3 codes are German NUTS3 codes (DE + 3 characters)",
-     all(str_detect(na.omit(sm$nuts3), "^DE[1-9A-G][0-9A-Z]{2}$")))
-  # The first three characters of a German NUTS3 code (NUTS1) are the federal
-  # state (BUNDESLAND_NUTS1). nuts3 (Eurostat) and bundesland (GeoNames/BKG) may
-  # differ only where the two lookups differ: postcodes that straddle a state
-  # line, states from the prefix rule, and three postcodes that Eurostat puts
-  # in another state than GeoNames (README, section NUTS3). Anything else means
-  # one of the lookups or the state names have changed.
-  ok("every bundesland level has a NUTS1 code",
-     all(levels(sm$bundesland) %in% names(BUNDESLAND_NUTS1)))
-  nuts3_differs <- !is.na(sm$nuts3) & !is.na(sm$bundesland) &
-    str_sub(sm$nuts3, 1, 3) != BUNDESLAND_NUTS1[as.character(sm$bundesland)]
-  known_case <- sm$bundesland_source %in% c("plz_border", "plz_prefix") |
-    sm$plz %in% c("22113", "26954", "64754")
-  ok("nuts3 lies in bundesland, apart from the known cases",
-     !any(nuts3_differs & !known_case),
-     str_c(sum(nuts3_differs), " differ, ",
-           sum(nuts3_differs & !known_case), " of them not a known case"))
+# 5. The staircases ------------------------------------------------------------
+# What the preference scores rest on. Option A must stay the first level, as the
+# score reads the answer off the level: a reversed export would invert the
+# measure with nothing looking wrong.
+option_a_patterns <- c(tp = "heute", risk = "^Verlosung")
+for (prefix in names(option_a_patterns)) {
+  # str_subset(): the values that match a pattern. str_remove(): the text without
+  # the pattern. str_sub(): a part of the text.
+  columns <- str_subset(names(survey_main), paste0("^", prefix, "_[0-9]"))
+  stems <- str_remove(columns, paste0("^", prefix, "_"))
+  node_levels <- as.integer(str_sub(stems, 1, 1))
+  node_paths <- str_to_upper(str_sub(stems, 2))
+
+  is_two_levels <- rep(FALSE, length(columns))
+  is_option_a_first <- rep(FALSE, length(columns))
+  # The amount on offer is in the label of option B
+  amounts <- rep(NA_real_, length(columns))
+  # The answers so far as a binary number, A counting as 1
+  path_codes <- rep(0L, length(columns))
+  for (k in seq_along(columns)) {
+    answer_levels <- levels(survey_main[[columns[k]]])
+    is_two_levels[k] <- length(answer_levels) == 2
+    # str_detect(): whether the text matches. str_extract(): the part that does.
+    # str_split_1(): the letters of one text.
+    is_option_a_first[k] <- str_detect(answer_levels[1],
+                                       option_a_patterns[[prefix]])
+    amounts[k] <- as.numeric(str_extract(answer_levels[2], "[0-9]+"))
+    for (letter in str_split_1(node_paths[k], "")) {
+      path_codes[k] <- path_codes[k] * 2L + as.integer(letter == "A")
+    }
+  }
+  checks <- add_check(checks, paste0(prefix, ": every node is a two-level factor"),
+                      all(is_two_levels))
+  checks <- add_check(checks, paste0(prefix, ": option A is the first level"),
+                      all(is_option_a_first))
+
+  # The staircase only orders experts if the amount rises with the number of "A"
+  # answers so far, at every level. The labels of the synthetic data hold no
+  # amounts.
+  if (!USE_SYNTHETIC_DATA) {
+    is_monotone <- TRUE
+    for (level in setdiff(unique(node_levels), 1L)) {
+      at_level <- node_levels == level
+      # cor(): the rank correlation of the two, 1 if the amounts rise throughout
+      correlation <- cor(path_codes[at_level], amounts[at_level],
+                         method = "spearman")
+      is_monotone <- is_monotone && abs(correlation - 1) < 1e-8
+    }
+    checks <- add_check(checks, paste0(prefix, ": offers rise along the branch"),
+                        is_monotone)
+  }
+
+  # Nobody may answer two branches of one level: the path would be undefined
+  is_one_per_level <- TRUE
+  for (level in unique(node_levels)) {
+    answers_at_level <- rowSums(!is.na(survey_main[columns[node_levels == level]]))
+    is_one_per_level <- is_one_per_level && all(answers_at_level <= 1)
+  }
+  checks <- add_check(checks, paste0(prefix, ": one answer per level at most"),
+                      is_one_per_level)
+
+  score <- experts[[paste0(prefix, "_score")]]
+  checks <- add_check(checks, paste0(prefix, ": the score lies in (0, 1)"),
+                      all(score > 0 & score < 1, na.rm = TRUE))
+}
+level_5_paths <- c("aaaa", "aaab", "aaba", "aabb", "abaa", "abab", "abba", "abbb",
+                   "baaa", "baab", "baba", "babb", "bbaa", "bbab", "bbba", "bbbb")
+checks <- add_check(
+  checks, "the time staircase lacks exactly its two known level-5 nodes",
+  identical(setdiff(paste0("tp_5", level_5_paths), names(survey_main)),
+            c("tp_5abba", "tp_5abbb"))
+)
+checks <- add_check(checks, "the risk staircase has all 16 level-5 nodes",
+                    all(paste0("risk_5", level_5_paths) %in% names(survey_main)))
+
+# 6. The columns of docs/data_contract.md --------------------------------------
+fuels <- c("gas", "hpelec", "dh", "oil", "pellet")
+technologies <- c("hp", "pellet", "dh", "gas", "oil", "hybrid", "other")
+expert_columns <- c(
+  "resp_uid", "person", "n_attempts", "is_complete", "expert_group",
+  "expert_group_note", "arm", "last_question", "last_section",
+  "last_question_position", paste0("price_", fuels, "_kwh"),
+  paste0("price_", fuels, "_treatment"), paste0("pexp_", fuels, "_rise"),
+  "own_heating", "heat_pump_at_home", "hdd", "tp_score", "tp_cell", "tp_levels",
+  "tp_complete", "risk_score", "risk_cell", "risk_levels", "risk_complete",
+  "dem_birthyear_clean", "dem_training_year_clean", "firm_employees_clean",
+  "adv_households_clean", "co2_est_low_clean", "co2_est_high_clean", "age",
+  "interview_minutes", paste0("adv_share_", technologies, "_filled"),
+  paste0("mix25_", technologies, "_filled")
+)
+vignette_columns <- c(
+  "resp_uid", "vig_num", "vig_arm", "arm_source", "vig_rec", "vig_rec_other",
+  "vignette_id", "att_image", "att_couple_age", "att_income",
+  "att_current_heating", "att_replacement_timing", "att_build_year",
+  "att_heat_demand", "att_heat_distribution", "att_renovation", "vig_time",
+  "vig_group_time", "vig_cost", "vig_cost_source", "vig_cost_time",
+  "expert_group", "is_complete"
+)
+missing_expert_columns <- setdiff(expert_columns, names(experts))
+missing_vignette_columns <- setdiff(vignette_columns, names(vignettes))
+checks <- add_check(checks, "experts has the columns of the contract",
+                    length(missing_expert_columns) == 0,
+                    paste(missing_expert_columns, collapse = ", "))
+checks <- add_check(checks, "vignettes has the columns of the contract",
+                    length(missing_vignette_columns) == 0,
+                    paste(missing_vignette_columns, collapse = ", "))
+checks <- add_check(checks, "expert_group has the three groups as levels",
+                    identical(levels(experts$expert_group), EXPERT_GROUPS))
+checks <- add_check(checks, "expert_group is NA exactly without an assignment",
+                    identical(is.na(experts$expert_group),
+                              experts$expert_group_note != "assigned"),
+                    paste(sum(is.na(experts$expert_group)), "without a group"))
+
+# 7. The cleaning report -------------------------------------------------------
+# The sample table has to end at the N of the reference values and the data sets
+report_file <- file.path(REPORT_DIR, "cleaning_report.rds")
+checks <- add_check(checks, "the cleaning report exists", file.exists(report_file))
+if (file.exists(report_file)) {
+  report <- readRDS(report_file)
+  overview <- report$overview
+  n_in_overview <- overview$all
+  names(n_in_overview) <- overview$step
+  checks <- add_check(checks, "the overview ends at the N of the reference values",
+                      n_in_overview[["Completed, with an expert group"]] ==
+                        reference_values$n_experts,
+                      paste(reference_values$n_experts, "experts"))
+  checks <- add_check(checks, "the overview counts the persons of experts",
+                      n_in_overview[["Furthest attempt of each invitation"]] ==
+                        nrow(experts))
+  checks <- add_check(checks, "the overview counts the rows of vignettes",
+                      n_in_overview[["Six rows per person"]] == nrow(vignettes))
+
+  report_tables <- file.path(tempdir(), "tab_clean")
+  dir.create(report_tables, showWarnings = FALSE)
+  cleaning_exhibits <- section_cleaning(list(tables = report_tables))
+  table_files <- file.path(report_tables, basename(cleaning_exhibits$file))
+  checks <- add_check(checks, "section_cleaning() writes its four tables",
+                      nrow(cleaning_exhibits) == 4 && all(file.exists(table_files)))
 }
 
-cat("\n===== preference staircases =====\n")
-# The scores are built outside the pipeline, but the RAW answers live here and
-# the two properties everything downstream rests on can be checked on them.
-for (p in c("tp_", "risk_")) {
-  cols <- str_subset(names(sm), str_c("^", p, "[0-9]"))
-  lvl  <- as.integer(str_sub(str_remove(cols, p), 1, 1))
-  pth  <- str_to_upper(str_sub(str_remove(cols, p), 2))
-  ok(str_c(p, "* columns are all two-level factors"),
-     all(map_lgl(cols, ~ is.factor(sm[[.x]]) && nlevels(sm[[.x]]) == 2)))
-  # Option A must stay the first level: the score reads the choice off the level
-  # index, so a reversed export would invert the whole measure silently.
-  first_lab <- map_chr(cols, ~ levels(sm[[.x]])[1])
-  ok(str_c(p, "* keep option A as the first level"),
-     if (p == "tp_") all(str_detect(first_lab, "heute"))
-     else all(str_detect(first_lab, "^Verlosung")))
-  # The staircase only orders respondents if the amount offered rises
-  # monotonically with the number of "A" answers so far, at every level.
-  amt <- map_dbl(cols, ~ as.numeric(str_extract(levels(sm[[.x]])[2], "[0-9]+")))
-  mono <- map_lgl(sort(unique(lvl[lvl > 1])), function(k) {
-    i <- lvl == k
-    code <- map_int(pth[i], ~ Reduce(function(a, b) a * 2L + as.integer(b == "A"),
-                                     str_split_1(.x, ""), 0L))
-    isTRUE(all.equal(cor(code, amt[i], method = "spearman"), 1))
-  })
-  ok(str_c(p, "* offers rise monotonically along the branch"), all(mono))
-  # Nobody may answer two branches of the same level: the path would be undefined.
-  per_level <- map(sort(unique(lvl)), ~ rowSums(!is.na(sm[, cols[lvl == .x], drop = FALSE])))
-  ok(str_c(p, "* one answer per level at most"),
-     all(map_lgl(per_level, ~ all(.x <= 1))))
+# 8. Result --------------------------------------------------------------------
+for (k in seq_len(nrow(checks))) {
+  cat(sprintf("%-60s %s  %s\n", checks$check[k],
+              if (checks$passed[k]) "PASS" else "*** FAIL ***", checks$detail[k]))
 }
-ok("the time staircase is missing exactly its two known level-5 arms",
-   setdiff(str_c("tp_5", c("aaaa","aaab","aaba","aabb","abaa","abab","abba","abbb",
-                           "baaa","baab","baba","babb","bbaa","bbab","bbba","bbbb")),
-           names(sm)) |> identical(c("tp_5abba", "tp_5abbb")))
-ok("the risk staircase has all 16 level-5 arms",
-   sum(str_detect(names(sm), "^risk_5")) == 16)
-
-cat(str_c("\n================= ",
-          if (failed == 0) "ALL CHECKS PASSED" else str_c(failed, " CHECK(S) FAILED"),
-          " =================\n"))
-if (!interactive()) quit(status = if (failed == 0) 0 else 1)
+n_failed <- sum(!checks$passed)
+result_text <- paste(n_failed, "CHECK(S) FAILED")
+if (n_failed == 0) {
+  result_text <- "ALL CHECKS PASSED"
+}
+cat("\n", result_text, " (", nrow(checks), " checks)\n", sep = "")
+if (!interactive()) {
+  quit(status = if (n_failed == 0) 0 else 1)
+}
