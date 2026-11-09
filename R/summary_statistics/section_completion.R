@@ -36,7 +36,8 @@ GROUP_LINETYPES <- c(
 #'
 #' @param label the label in QUESTIONNAIRE
 question_code <- function(label) {
-  # word(): the first word of the text, the second below
+  # str_detect(): whether the pattern occurs; word(): the first word of the text, the
+  # second below; str_sub(): the last character
   case_when(
     str_detect(label, "^Q[0-9]") ~ word(label, 1),
     str_detect(label, "^Vignette") ~ paste0("V", word(label, 2)),
@@ -464,6 +465,7 @@ section_completion <- function(experts, vignettes, dirs) {
           is_answered <- group_experts$resp_uid %in%
             group_vignettes$resp_uid[!is.na(group_vignettes$vig_cost)]
         } else {
+          # str_remove(): the text without the part that matches
           vignette_number <- as.integer(str_remove(item_name, "vignette_"))
           is_answered <- group_experts$resp_uid %in%
             group_vignettes$resp_uid[!is.na(group_vignettes$vig_rec) &
