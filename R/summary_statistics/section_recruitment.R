@@ -33,15 +33,6 @@ response_rate <- function(answers, contacted) {
           answers / contacted, NA_real_)
 }
 
-#' A count of answers with the minimum cell: NA below MIN_N answers, or below
-#' MIN_CONTACTS contacted persons, as the rate could be computed from it
-#'
-#' @param count     the answers
-#' @param contacted the persons behind a rate; leave out if the table has no rate
-shown_count <- function(count, contacted = MIN_CONTACTS) {
-  if_else(contacted >= MIN_CONTACTS & count >= MIN_N, as.numeric(count), NA_real_)
-}
-
 #' The formatted cells of rows of a table of rates. The denominator without t-online
 #' addresses is hidden below MIN_CONTACTS too: next to the answers it would give the
 #' rate, and next to all the invited the t-online addresses of a small cell.
@@ -64,8 +55,9 @@ rate_cells <- function(label, n_invited, n_invited_no_tonline, n_started,
   )
 }
 
-#' A row of a table of rates with counts only: persons whose list or state is not
-#' known have no denominator. A count of what the data lack may be small.
+#' A row of a table of rates with counts only: persons whose list or state the
+#' cleaning could not assign have no denominator. Their number may be small, as a
+#' count of what a cleaning step did (Max, 2026-10-29).
 count_cells <- function(label, n_invited, n_started, n_completed) {
   tibble(label = label, invited = n_invited, started = fmt_int(n_started),
          completed = fmt_int(n_completed), rate_started = "", rate_completed = "",
@@ -431,7 +423,9 @@ section_recruitment <- function(experts, vignettes, frame, dirs) {
     all_waves
   ) %>%
     mutate(rate_started = response_rate(started, invitations),
-           rate_completed = response_rate(completed, invitations)) %>%
+           rate_completed = response_rate(completed, invitations),
+           started = shown_count(started, invitations),
+           completed = shown_count(completed, invitations)) %>%
     transmute(wave, target_group, first_sent = "",
               invitations = fmt_int(invitations),
               started = fmt_int(started),

@@ -15,7 +15,7 @@
 
 source(file.path("R", "setup.R"))
 if (!USE_SYNTHETIC_DATA) {
-  stop("tests/test_deck.R relabels waves and writes test decks: synthetic data only")
+  stop("tests/test_deck.R writes test decks: synthetic data only")
 }
 test_dir <- file.path(OUTPUT_DIR, "test deck")
 unlink(test_dir, recursive = TRUE)

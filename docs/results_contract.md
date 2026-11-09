@@ -7,7 +7,7 @@
   cleaning/                         cleaning_report.xlsx, cleaning_report.rds, codebook
   full_sample/summary_statistics/   everything, including response rates and the deck
   district_heating/                 one folder per estimation script
-    summary_statistics/             tables/ figures/ maps/ exhibits.csv summary_statistics.pdf
+    summary_statistics/             tables/ figures/ maps/ exhibits.csv summary_statistics.pdf fingerprint.rds
     m4pe/                           model.rds  results.rds  results.xlsx  cross_validation.rds
     model_comparison/               model_comparison.rds  model_comparison.xlsx
   no_district_heating/              the same
@@ -61,10 +61,12 @@ ames <- compute_ames(
 )
 ```
 
+- `name`: at most 22 characters, as an Excel sheet name holds 31.
 - `at`: the reference state in the source variables of `make_regressors()`, one value each.
 - `changes`: named list. Each change sets `from` (optional, default: `at`) and `to`, on top of
   `at`. Several variables may change together. The effect is P(`to`) - P(`from`), for every
-  outcome.
+  outcome. A state is built in this order: `at`, the profile's columns, the change's, so a change
+  can also move the group.
 - `profiles`: a character vector sets `expert_group`; or a named list of lists for any other
   column, e.g. `list("All experts" = list(expert_group = "Energy advisers"))`.
 - States go through `make_regressors()`, the same function that built the data, so no variable
@@ -91,6 +93,14 @@ Adds to `results$ames[[name]]` a list:
 
 It saves `results.rds` and rewrites `results.xlsx`, and returns the updated `results`. A call with
 the same arguments on the same coefficients loads instead of computing.
+
+## `results.xlsx`
+
+The sheets to read come first, rounded, with frozen headers: `overview`,
+`coefficients_by_technology`, `constants_sd`, `constants_correlations`, `pp_<name>` (the effects
+in percentage points, one per call of `compute_ames()`), `effect_definitions`, `choice_counts`. The
+long sheets with every digit follow, with grey tabs: `fit`, `coefficients`, `ame_<name>`,
+`baseline_<name>`.
 
 ## `compare_models()`
 

@@ -228,11 +228,10 @@ fit_mixed_logit <- function(name, formula, data, reference, est_dir,
     }
     fixed_parameters <- setNames(rep(0, length(fixed_names)), fixed_names)
     arguments$constPar <- fixed_parameters
-    primes <- c(2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37)
     halton_primes <- rep(NA_real_, nrow(random))
     for (constant in constants) {
       is_group <- random$column == constant
-      halton_primes[is_group] <- primes[seq_len(sum(is_group))]
+      halton_primes[is_group] <- HALTON_PRIMES[seq_len(sum(is_group))]
     }
     arguments$halton <- list(prime = halton_primes)
   }

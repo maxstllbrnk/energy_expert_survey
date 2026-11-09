@@ -1,6 +1,6 @@
 ################################################################################
 # presentation.R — the deck of the summary statistics: every table, figure and map
-#                  of a sample on a frame of its own, rebuilt with every run
+#                  of a sample on a frame of its own, rebuilt whenever they change
 # Inputs : the list of exhibits, or exhibits.csv in output_dir; the files it names;
 #          econslides.sty next to this code
 # Outputs: in output_dir: summary_statistics.tex, .pdf and .log, econslides.sty
@@ -26,11 +26,12 @@ DECK_BLOCKS <- tribble(
 DECK_FILE <- "summary_statistics"
 
 #' The deck of the summary statistics of one sample, written and compiled in its
-#' folder. It always shows the current files: it is rebuilt on every run, and it
-#' can run alone on an existing folder, as it needs only exhibits.csv.
+#' folder. It always shows the current files: run_summary_statistics() rebuilds it
+#' whenever they change, and it can run alone on an existing folder, as it needs only
+#' exhibits.csv.
 #'
-#' If pdflatex is missing or fails, this gives a message with the path of the log
-#' and does not stop: the .tex stays, and the exhibits are not lost.
+#' If pdflatex is missing or fails, or a viewer holds the old deck open, this gives a
+#' message and does not stop: the .tex stays, and the exhibits are not lost.
 #'
 #' @param exhibits     the list of exhibits, from the sections; NULL: read
 #'                     exhibits.csv in output_dir
@@ -81,9 +82,12 @@ build_presentation <- function(exhibits = NULL, output_dir, sample_label,
   }
   sample_size <- "Number of experts and vignettes not given"
   if (!is.null(experts) && !is.null(vignettes)) {
-    sample_size <- paste0(fmt_int(nrow(experts)), " experts, ",
-                          fmt_int(nrow(vignettes)), " vignettes, of which ",
-                          fmt_int(sum(!is.na(vignettes$vig_rec))), " answered")
+    sample_size <- paste0("Fewer than ", MIN_N, " experts")
+    if (nrow(experts) >= MIN_N) {
+      sample_size <- paste0(fmt_int(nrow(experts)), " experts, ",
+                            fmt_int(nrow(vignettes)), " vignettes, of which ",
+                            fmt_int(sum(!is.na(vignettes$vig_rec))), " answered")
+    }
   }
   blocks <- unique(exhibits$block)
   lines <- c(
@@ -204,8 +208,15 @@ build_presentation <- function(exhibits = NULL, output_dir, sample_label,
   auxiliary_files <- paste0(DECK_FILE, c(".aux", ".nav", ".out", ".snm", ".toc",
                                          ".vrb"))
   # Nothing from an earlier run: no old deck that looks current after a failure,
-  # and no auxiliary files that could carry an error over. unlink(): deletes files
+  # and no auxiliary files that could carry an error over. unlink(): deletes files,
+  # and says nothing if a viewer holds one open
   unlink(c(paste0(DECK_FILE, c(".pdf", ".log")), auxiliary_files))
+  if (file.exists(paste0(DECK_FILE, ".pdf"))) {
+    message("The deck was not compiled, its old version could not be deleted: close ",
+            file.path(output_dir, paste0(DECK_FILE, ".pdf")),
+            " in the PDF viewer and run again")
+    return(invisible(NA_character_))
+  }
   # Sys.which(): the path of a program, empty if it is not on the PATH
   if (Sys.which("pdflatex") == "") {
     message("The deck was not compiled, pdflatex is missing. Its source: ", tex_file)

@@ -94,18 +94,22 @@ MIN_CONTACTS <- 30
 # and AMEs (5,000 Halton draws are at least as accurate as the 100,000
 # pseudo-random draws used before, benchmark of 2026-11-09); Krinsky-Robb draws,
 # so that each 2.5% tail rests on 125 draws. Fewer in a synthetic run, which only
-# tests the code.
+# tests the code. N_WORKERS: the R sessions for the Hessian and the Krinsky-Robb
+# loop; lower it if something else runs on this computer.
 if (USE_SYNTHETIC_DATA) {
   N_DRAWS_MODEL <- 100
   N_DRAWS_PREDICTION <- 1000
   N_DRAWS_KR <- 200
+  N_WORKERS <- 2
 } else {
   N_DRAWS_MODEL <- 1000
   N_DRAWS_PREDICTION <- 5000
   N_DRAWS_KR <- 5000
+  N_WORKERS <- parallel::detectCores()
 }
-# R sessions for the Hessian and the Krinsky-Robb loop
-N_WORKERS <- parallel::detectCores()
+# The primes of the Halton draws, one per random constant, in mlogit's order. They
+# start again at 2 for each group of constants.
+HALTON_PRIMES <- c(2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37)
 
 # 6. Create and check ----------------------------------------------------------
 dir.create(REPORT_DIR, showWarnings = FALSE, recursive = TRUE)

@@ -23,13 +23,16 @@
 #   the robust test, after Holm, says no    keep smaller
 #   the gain does not survive fresh draws   keep smaller: gain does not survive
 #                                           fresh draws
-#   cross-validation says no (BIC if it     keep smaller: tests and parsimony
-#   was not run or is not usable)           disagree
+#   cross-validation does not favour it by  keep smaller: tests and parsimony
+#   more than one paired SE (BIC if it was  disagree
+#   not run or is not usable)
 #   no AME moves by ame_threshold or more   keep smaller as main; report larger
 #                                           as robustness
 #   otherwise                               accept larger
 # For models that do not nest each other: prefer a model if Vuong's test and
 # cross-validation (or BIC, as above) agree on it, otherwise data cannot decide.
+# A model that did not converge, or whose Hessian is not positive definite, never
+# reaches this function: fit_mixed_logit() and post_estimation() stop on it.
 
 # The limits of the protocol, set before any result is read.
 # A Newton step would still add half of g' H^{-1} g to the log-likelihood: at 0.1,
@@ -45,8 +48,6 @@ ROBUST_DRAWS <- 1e6
 CV_FOLDS <- 5
 # The columns that tell an expert's group, if no model has constants by group
 CV_GROUP_COLUMNS <- c("is_adviser", "is_hvac", "is_sweep")
-# The primes of mlogit's Halton draws, as in fit_mixed_logit()
-HALTON_PRIMES <- c(2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37)
 
 #' Is model a a special case of model b? Read from the names of the parameters.
 #'
@@ -463,16 +464,10 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
       }
     }
     why <- character(0)
-    if (!(diagnostics$code %in% c(1, 2))) {
-      why <- c(why, paste0("convergence code ", diagnostics$code))
-    }
     if (diagnostics$scaled_gradient > MAX_SCALED_GRADIENT) {
       why <- c(why, paste0("scaled gradient ",
                            signif(diagnostics$scaled_gradient, 3),
                            ": not at a maximum"))
-    }
-    if (diagnostics$smallest_eigenvalue <= 0) {
-      why <- c(why, "the Hessian is not positive definite")
     }
     if (diagnostics$condition_number > MAX_CONDITION_NUMBER) {
       why <- c(why, paste0("condition number ",
@@ -953,7 +948,8 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
       "folds with mlogit from the full-sample estimates, then the log-likelihood of ",
       "the held-out experts with iterlim = 0, on the draws mlogit gives them. Gain: ",
       "larger minus smaller, mean per expert, with its SE over experts; the folds ",
-      "share experts in training, so this SE is rather too small. A pair is not ",
+      "share experts in training, so this SE is rather too small. A model is favoured ",
+      "if its gain exceeds one SE. A pair is not ",
       "usable if a fold failed or did not converge: the decision then uses BIC. This ",
       "run took %.1f minutes (the column minutes: estimation time of the folds, added ",
       "up, also from an earlier run if loaded)."

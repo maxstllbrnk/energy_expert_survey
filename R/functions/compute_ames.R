@@ -220,12 +220,11 @@ compute_ames <- function(results, make_regressors, name, at, changes,
   # The primes start again at 2 for each group, as in fit_mixed_logit().
   # mlogit:::halton(): a Halton sequence, here without its first 100 elements.
   # qnorm(): from uniform to standard normal.
-  primes <- c(2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37)
   Z <- matrix(NA_real_, n_draws, nrow(random))
   for (constant in unique(random$column)) {
     of_constant <- which(random$column == constant)
     for (position in seq_along(of_constant)) {
-      uniform_draws <- mlogit:::halton(primes[position], n_draws, 100)
+      uniform_draws <- mlogit:::halton(HALTON_PRIMES[position], n_draws, 100)
       Z[, of_constant[position]] <- qnorm(uniform_draws)
     }
   }

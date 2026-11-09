@@ -18,11 +18,6 @@
 # A sample of completers has no break-offs: then only duration and vignette_times
 # are written.
 
-GROUP_KNOWN_NOTE <- paste0(
-  "The group comes from Q2: persons who left before it have no group, and within ",
-  "a group nobody can stop before it."
-)
-
 #' The short name of a question on the axis of a figure: its number in the
 #' questionnaire; V, T and R with the number of a vignette or a decision
 #'
@@ -260,7 +255,10 @@ section_completion <- function(experts, vignettes, dirs) {
         left_join(section_stops, by = "section", relationship = "one-to-one") %>%
         mutate(n = coalesce(n, 0L),
                share = n / sum(n),
-               label = paste0(fmt_num(100 * share, 1), "% (", fmt_int(n), ")"),
+               # The number only from the minimum cell on
+               label = if_else(n >= MIN_N | n == 0L,
+                               paste0(fmt_num(100 * share, 1), "% (", fmt_int(n), ")"),
+                               paste0(fmt_num(100 * share, 1), "%")),
                section = factor(section, levels = rev(section)))
       plot_sections <- ggplot(stops_by_section, aes(x = share, y = section)) +
         geom_col(fill = COLOUR_BAR, width = 0.7) +
@@ -275,8 +273,8 @@ section_completion <- function(experts, vignettes, dirs) {
                   size = "full")
       sections_note <- paste0(
         "Persons who started and never completed: ", fmt_int(nrow(breakoffs)),
-        "; in brackets their number. A person stops in a section if the last ",
-        "question answered lies in it, so they left on the page after it: those ",
+        "; in brackets their number, from ", MIN_N, " on. A person stops in a section ",
+        "if the last question answered lies in it, so they left on the page after it: those ",
         "who answered Q6a last left when the vignettes began.", group_note
       )
       exhibits <- bind_rows(exhibits, exhibit_row(
@@ -302,12 +300,12 @@ section_completion <- function(experts, vignettes, dirs) {
                share = n / sum(n))
       question_cells <- stops_by_question %>%
         transmute(question = latex_text(question),
-                  n = fmt_int(n),
+                  n = fmt_int(if_else(n == 0L, 0, shown_count(n))),
                   share = fmt_pct(share))
       question_note <- paste0(
         "Persons who started and never completed, by the last question they ",
-        "answered: they left on the page after it. A count of who stopped may be ",
-        "small; the share is of all ", fmt_int(nrow(breakoffs)),
+        "answered: they left on the page after it. -- means fewer than ", MIN_N,
+        " persons. The share is of all ", fmt_int(nrow(breakoffs)),
         " who never completed.", group_note
       )
       question_column_names <- c("Last question answered", "N", "Share")
@@ -470,15 +468,12 @@ section_completion <- function(experts, vignettes, dirs) {
           answered = sum(is_answered & is_asked)
         ))
       }
-      # Below the minimum cell the counts go with the share, which they would give
       item_cells <- item_response %>%
-        mutate(share = if_else(asked >= MIN_N, answered / asked, NA_real_),
-               answered = if_else(asked >= MIN_N, as.numeric(answered),
-                                  NA_real_)) %>%
+        mutate(share = if_else(asked >= MIN_N, answered / asked, NA_real_)) %>%
         transmute(question = latex_text(question),
-                  reached = fmt_int(reached),
+                  reached = fmt_int(shown_count(reached)),
                   asked = fmt_int(shown_count(asked)),
-                  answered = fmt_int(answered),
+                  answered = fmt_int(shown_count(answered)),
                   share = fmt_pct(share))
       item_note <- paste0(
         "Reached: the last question answered lies at this question or later, or ",
@@ -489,7 +484,7 @@ section_completion <- function(experts, vignettes, dirs) {
         "only if the carbon price is known; Q24a only with other training, and not ",
         "in the soft launch; a staircase may end before its fifth decision. ",
         "Answered: at least one answer on the page, for tick boxes at least one ",
-        "tick; -- means fewer than ", MIN_N, " asked.", group_note
+        "tick. -- means fewer than ", MIN_N, " persons.", group_note
       )
       item_column_names <- c("Question", "Reached", "Asked", "Answered",
                              "\\makecell{Answered\\\\among asked}")
@@ -516,14 +511,18 @@ section_completion <- function(experts, vignettes, dirs) {
         left_join(arm_sources, by = "resp_uid", relationship = "one-to-one")
       arm_source <- meta_experts$arm_source
 
-      # A row of persons: their number and share, and how many of them completed
+      # A row of persons: their number and share, and how many of them completed;
+      # nothing below the minimum cell. The rows without a share are counts of what
+      # the cleaning did, which may be small (Max, 2026-10-29).
       meta_row <- function(label, is_in_row) {
         n_row <- sum(is_in_row)
-        share_completed <- mean(meta_experts$is_complete[is_in_row])
+        is_shown <- n_row >= MIN_N
         tibble(label = label,
-               persons = fmt_int(n_row),
-               share = fmt_pct(n_row / nrow(meta_experts)),
-               completed = fmt_pct(if_else(n_row >= MIN_N, share_completed,
+               persons = fmt_int(shown_count(n_row)),
+               share = fmt_pct(if_else(is_shown, n_row / nrow(meta_experts),
+                                       NA_real_)),
+               completed = fmt_pct(if_else(is_shown,
+                                           mean(meta_experts$is_complete[is_in_row]),
                                            NA_real_)))
       }
       meta_cells <- bind_rows(
@@ -534,8 +533,9 @@ section_completion <- function(experts, vignettes, dirs) {
                share = "", completed = ""),
         meta_row("Soft launch", meta_experts$is_softlaunch),
         meta_row("Main waves", !meta_experts$is_softlaunch),
-        meta_row("Answered in both arms (no arm, vignettes left out)",
-                 meta_experts$arm_conflict),
+        tibble(label = "Answered in both arms (no arm, vignettes left out)",
+               persons = fmt_int(sum(meta_experts$arm_conflict)),
+               share = "", completed = ""),
         meta_row("Arm from the vignettes answered", arm_source %in% "answered"),
         meta_row("Arm routed from Q6a, no vignette answered",
                  arm_source %in% "routed from Q6a"),
@@ -543,7 +543,7 @@ section_completion <- function(experts, vignettes, dirs) {
       )
       meta_note <- paste0(
         "One row per person: of those who started more than once the furthest ",
-        "attempt stays. Completed: share among the persons of the row; -- means ",
+        "attempt stays. Completed: share among the persons of the row. -- means ",
         "fewer than ", MIN_N, " persons. The soft launch differs in Q6 (no nationwide ",
         "answer) and Q7 (a different ranking task).", group_note
       )

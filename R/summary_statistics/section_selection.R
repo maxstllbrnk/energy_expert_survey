@@ -35,7 +35,8 @@ level_rows <- function(part, panel, item, variable, labels, prefix = "") {
 #' @param part,panel,item as in level_rows()
 #' @param variables the columns
 #' @param labels    the label of each column
-#' @param kind      "level", "num" or "dummy"
+#' @param kind      "level", "num", "year" (a number without a thousands separator)
+#'                  or "dummy"
 #' @param digits    decimals
 option_rows <- function(part, panel, item, variables, labels, kind = "level",
                         digits = 1) {
@@ -53,8 +54,9 @@ option_rows <- function(part, panel, item, variables, labels, kind = "level",
 #'   item      the question, as in QUESTIONNAIRE, whose position the expert must
 #'             have reached; NA: known of everyone who started
 #'   variable  the column of experts
-#'   kind      "num": a number; "level": the share of answers equal to `level`;
-#'             "dummy": a 0/1 column, as the share of ones
+#'   kind      "num": a number; "year": a number without a thousands separator;
+#'             "level": the share of answers equal to `level`; "dummy": a 0/1
+#'             column, as the share of ones
 #'   level     for "level": the answer, exactly as in the data; else NA
 #'   label     the row label, plain text with units
 #'   digits    decimals
@@ -155,7 +157,7 @@ selection_rows <- function() {
     level_rows(later, person, "time_dem_education", "dem_education_recoded",
                EDUCATION_LABELS, "Degree: "),
     option_rows(later, person, "time_dem_training_year", "dem_training_year_clean",
-                "Year training was completed", kind = "num", digits = 0),
+                "Year training was completed", kind = "year", digits = 0),
     option_rows(later, person, "time_cpd", names(TRAINING_LABELS),
                 paste0("Continuing education: ", TRAINING_LABELS)),
     level_rows(later, person, "time_dem_own_heating", "dem_own_heating",
@@ -192,7 +194,7 @@ write_selection_table <- function(experts, rows, file, note) {
     completers <- values[experts$is_complete & !is.na(values)]
     breakoffs <- values[!experts$is_complete & !is.na(values)]
 
-    is_share <- rows$kind[k] != "num"
+    is_share <- !(rows$kind[k] %in% c("num", "year"))
     digits <- rows$digits[k]
     row_cells <- tibble(label = latex_text(rows$label[k]), is_shown = FALSE)
     if (length(completers) >= MIN_N && length(breakoffs) >= MIN_N) {
@@ -217,6 +219,13 @@ write_selection_table <- function(experts, rows, file, note) {
           row_cells[[paste0("p25_", column)]] <- fmt_num(p25, digits)
           row_cells[[paste0("p50_", column)]] <- fmt_num(median(x), digits)
           row_cells[[paste0("p75_", column)]] <- fmt_num(p75, digits)
+        }
+        # A year has no thousands separator; gsub(): replaces every comma
+        if (rows$kind[k] == "year") {
+          for (statistic in c("mean_", "p25_", "p50_", "p75_")) {
+            cell <- paste0(statistic, column)
+            row_cells[[cell]] <- gsub(",", "", row_cells[[cell]], fixed = TRUE)
+          }
         }
       }
       # The normalised difference (Imbens and Rubin): the difference of the means
@@ -256,7 +265,7 @@ write_selection_table <- function(experts, rows, file, note) {
   }
   is_kept <- rows$panel %in% panels_shown
   # A table of shares only needs no columns for numbers
-  if (any(rows$kind[is_kept] == "num")) {
+  if (any(rows$kind[is_kept] %in% c("num", "year"))) {
     statistics <- c("N", "Mean", "SD", "P25", "Median", "P75")
     table_cells <- cells[is_kept, ] %>%
       select(label, n_c, mean_c, sd_c, p25_c, p50_c, p75_c,

@@ -94,7 +94,9 @@ post_estimation <- function(model, est_dir, label = "", n_draws_kr = N_DRAWS_KR,
   H <- (H + t(H)) / 2
   eigenvalues <- eigen(H, symmetric = TRUE, only.values = TRUE)$values
   if (any(eigenvalues <= 0)) {
-    stop("Model ", name, ": the numerical Hessian is not positive definite")
+    stop("Model ", name, ": the numerical Hessian is not positive definite, so it has ",
+         "no standard errors and no place in the comparison. Change the sample or the ",
+         "formula, or delete the model from the script and from its tests")
   }
   bread <- solve(H)
   V <- G / (G - 1) * bread %*% meat %*% bread

@@ -56,9 +56,9 @@ plz_nuts3 <- read_delim(PLZ_NUTS3_FILE, delim = ";", show_col_types = FALSE,
   transmute(plz = str_remove_all(CODE, "'"), nuts3 = str_remove_all(NUTS3, "'"))
 # Only regions with degree days in HDD_YEAR: a gap would stop the cleaning, as it
 # should on the real data
-hdd_regions <- read.csv(HDD_FILE) %>%
-  filter(indic_nrg == "HDD", TIME_PERIOD == HDD_YEAR) %>%
-  pull(geo)
+hdd_values <- read.csv(HDD_FILE) %>%
+  filter(indic_nrg == "HDD", TIME_PERIOD == HDD_YEAR)
+hdd_regions <- hdd_values$geo
 geographic_plz <- plz_nuts3 %>%
   filter(nuts3 %in% hdd_regions, plz %in% plz_lookup$plz)
 po_box_plz <- setdiff(plz_lookup$plz, plz_nuts3$plz)
@@ -371,12 +371,17 @@ true_L[lower.tri(true_L, diag = TRUE)] <- rnorm(21, 0, 0.3)
 diag(true_L) <- abs(diag(true_L)) + 0.7
 true_price_coefficient <- -0.10
 true_rise_coefficient <- -0.20
-HDD_MEAN_TRUE <- 3
 
 constants_by_person <- t(true_constants + true_L %*% matrix(rnorm(6 * N_EXPERTS), 6, N_EXPERTS))
 colnames(constants_by_person) <- TECHNOLOGIES
-hdd_c_true <- rnorm(N_EXPERTS, 0, 0.25)
-hp_home_true <- as.numeric(rbinom(N_EXPERTS, 1, 0.3))
+# The degree days and the heating at home that the data report for this attempt,
+# so that an estimation can recover their coefficients. In thousands around their
+# mean, 0 if missing, as in the estimation scripts: a different mean there moves
+# only the constants.
+hdd_of_row <- hdd_values$OBS_VALUE[match(main$nuts3, hdd_values$geo)]
+hdd_c_of_row <- coalesce((hdd_of_row - mean(hdd_of_row, na.rm = TRUE)) / 1000, 0)
+heat_pump_of_row <- as.numeric(as.character(main$dem_own_heating) %in% "Wärmepumpe")
+rows <- match(vignettes$resp_uid, main$resp_uid)
 
 v <- vignettes %>%
   mutate(age_60 = as.numeric(att_couple_age == "Mitte 60"),
@@ -389,10 +394,9 @@ v <- vignettes %>%
          floor_heating = as.numeric(att_heat_distribution == "eine Fußbodenheizung"),
          is_hvac = as.numeric(true_group == "HVAC installers"),
          is_sweep = as.numeric(true_group == "Chimney sweeps"),
-         hdd_c = hdd_c_true[person_number],
-         heat_pump_home = hp_home_true[person_number] - 0.3)
+         hdd_c = hdd_c_of_row[rows],
+         heat_pump_home = heat_pump_of_row[rows] - 0.3)
 X <- as.matrix(v[, true_regressors])
-rows <- match(v$resp_uid, main$resp_uid)
 utility <- matrix(0, nrow(v), length(OUTCOMES), dimnames = list(NULL, OUTCOMES))
 for (technology in TECHNOLOGIES) {
   utility[, technology] <- constants_by_person[v$person_number, technology] +

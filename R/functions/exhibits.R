@@ -212,6 +212,21 @@ cell_note <- function() {
   paste0("-- means fewer than ", MIN_N, " answers.")
 }
 
+#' A count of answers with the minimum cell: NA below MIN_N answers, or below
+#' MIN_CONTACTS contacted persons, as the rate could be computed from it
+#'
+#' @param count     the answers
+#' @param contacted the persons behind a rate; leave out if the table has no rate
+shown_count <- function(count, contacted = MIN_CONTACTS) {
+  if_else(contacted >= MIN_CONTACTS & count >= MIN_N, as.numeric(count), NA_real_)
+}
+
+# The note of the versions by group of the exhibits on who stopped
+GROUP_KNOWN_NOTE <- paste0(
+  "The group comes from Q2: persons who left before it have no group, and within ",
+  "a group nobody can stop before it."
+)
+
 # 4. Maps ----------------------------------------------------------------------
 
 # The labels of the small states would cover their neighbours' labels: they move

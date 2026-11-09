@@ -3,9 +3,9 @@
 #                         experts without the district-heating option (arm nofw,
 #                         six outcomes: no Fernwärme)
 # Inputs : experts.rds, vignettes.rds, reference_values.rds (CLEAN_DATA_DIR)
-# Outputs: OUTPUT_DIR/no_district_heating/: summary_statistics/ and, per model, a
-#          folder with results.rds, results.xlsx and model.rds. model.rds holds
-#          the data, so it stays on the secure drive.
+# Outputs: OUTPUT_DIR/no_district_heating/: summary_statistics/; per model, a
+#          folder with results.rds, results.xlsx and model.rds; model_comparison/.
+#          model.rds holds the data, so it stays on the secure drive.
 # Checks : the sample at every step; one row per expert x vignette; known levels
 #          and recommendations
 ################################################################################
@@ -17,7 +17,9 @@ source(file.path("R", "setup.R"))
 
 # 1. Settings ------------------------------------------------------------------
 est_dir <- file.path(OUTPUT_DIR, "no_district_heating")
-sample_label <- "Experts without the district-heating option"
+# What the sample is, in the notes of its tables and on its deck: change it with the
+# filters below
+sample_label <- "Experts who completed, without the district-heating option, with a group"
 reference <- "Wärmepumpe"
 # Alphabetical: this order sets the order of the random constants, so their
 # Halton primes and the elements of L. Written out, as sort() depends on the
@@ -406,22 +408,26 @@ results_m4pe <- compute_ames(
 )
 
 # 8. How the models compare ----------------------------------------------------
-# compare_models(), R/functions/compare_models.R; see docs/results_contract.md.
-# comparison <- compare_models(
-#   est_dir,
-#   tests = tribble(
-#     ~question,                                 ~smaller, ~larger,
-#     "Do the prices matter?",                   "m4",     "m4p",
-#     "Do the expert characteristics matter?",   "m4p",    "m4pe",
-#     "Do the covariances differ by group?",     "m4pe",   "m6pe"
-#   ),
-#   blocks = list(
-#     prices = c("price", "gas_price_na", "oil_price_na", "pellet_price_na",
-#                "hpelec_price_na", "hybrid_price_na"),
-#     expected_rises = c("expects_rise", "gas_rise_na", "oil_rise_na",
-#                        "pellet_rise_na", "hpelec_rise_na", "hybrid_rise_na")
-#   ),
-#   final_model = "m4pe",
-#   ame_name = "neutral",
-#   cv_models = c("m4pe", "m6pe")
-# )
+# The fixed protocol: compare_models(), the rule at the top of its file. The sheet
+# `decision` of model_comparison.xlsx has one row per question. A model on the
+# shortlist of the cross-validation is estimated five more times, on four sessions:
+# a fold of (6pe) needs an estimated 3 to 4 GB per session.
+comparison <- compare_models(
+  est_dir,
+  tests = tribble(
+    ~question,                                 ~smaller, ~larger,
+    "Do the prices matter?",                   "m4",     "m4p",
+    "Do the expert characteristics matter?",   "m4p",    "m4pe",
+    "Do the covariances differ by group?",     "m4pe",   "m6pe"
+  ),
+  blocks = list(
+    prices = c("price", "gas_price_na", "oil_price_na", "pellet_price_na",
+               "hpelec_price_na", "hybrid_price_na"),
+    expected_rises = c("expects_rise", "gas_rise_na", "oil_rise_na",
+                       "pellet_rise_na", "hpelec_rise_na", "hybrid_rise_na")
+  ),
+  final_model = "m4pe",
+  ame_name = "neutral",
+  cv_models = c("m4pe", "m6pe"),
+  n_workers = min(4, N_WORKERS)
+)
