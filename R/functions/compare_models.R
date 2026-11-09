@@ -32,9 +32,9 @@
 #                                           as robustness
 #   otherwise                               accept larger
 # The AMEs are those both models compute, and those only the larger model has,
-# which count as moving from 0, their value in the smaller model (Max,
-# 2026-11-09): a larger model passes if its new terms or its other effects move
-# by ame_threshold.
+# which count as moving from 0, their value in the smaller model, if their 95%
+# Krinsky-Robb interval excludes 0 (Max, 2026-11-09): a larger model passes if its
+# new terms or its other effects move by ame_threshold.
 # For models that do not nest each other: prefer a model if Vuong's test and
 # cross-validation (or BIC, as above) agree on it, otherwise data cannot decide.
 # A model that did not converge, or whose Hessian is not positive definite, never
@@ -1164,8 +1164,10 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
   # The AMEs and baseline probabilities in the two models, on the rows they share,
   # relative to the SE in the smaller model, the one kept if the change is small.
   # And the AMEs only the larger model has, as a change from 0, their value in the
-  # smaller model, relative to their own SE (Max, 2026-11-09). Only at one
-  # reference state: otherwise a change says nothing about the models.
+  # smaller model, relative to their own SE. Such an AME moves only if its 95%
+  # Krinsky-Robb interval also excludes 0, as otherwise it cannot be told apart from
+  # the smaller model's 0 (Max, 2026-11-09). Only at one reference state: otherwise
+  # a change says nothing about the models.
   ame_changes <- tibble(
     question = character(0), smaller = character(0), larger = character(0),
     quantity = character(0), rows = numeric(0),
@@ -1216,14 +1218,15 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
       rows_of_quantity <- list(
         "AME" = shared_ames %>%
           transmute(where, change = abs(value_larger - value_smaller),
-                    se = se_smaller),
+                    se = se_smaller, excludes_0 = TRUE),
         "baseline probability" = shared_baselines %>%
           transmute(where, change = abs(value_larger - value_smaller),
-                    se = se_smaller),
+                    se = se_smaller, excludes_0 = TRUE),
         "AME the larger model adds" = ames_larger$table %>%
           filter(effect %in% added_effects) %>%
           transmute(where = paste(profile, effect, outcome, sep = ", "),
-                    change = abs(ame), se = se)
+                    change = abs(ame), se = se,
+                    excludes_0 = ci_low_kr > 0 | ci_high_kr < 0)
       )
       for (quantity_name in names(rows_of_quantity)) {
         compared <- rows_of_quantity[[quantity_name]] %>%
@@ -1239,7 +1242,8 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
           median_change_pp = 100 * median(compared$change, na.rm = TRUE),
           largest_change_in_se = max(compared$change_in_se, na.rm = TRUE),
           median_change_in_se = median(compared$change_in_se, na.rm = TRUE),
-          rows_moved = sum(compared$change >= ame_threshold, na.rm = TRUE),
+          rows_moved = sum(compared$change >= ame_threshold & compared$excludes_0,
+                           na.rm = TRUE),
           # which.max(): the position of the largest value
           where_largest = compared$where[which.max(compared$change)]
         ))
@@ -1510,8 +1514,10 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
       "(changes); in_se: relative to the SE in the smaller model. AME the larger ",
       "model adds: an effect the smaller model does not have, whose value there is ",
       "0, so its change is the AME itself; in_se: relative to its own SE. ",
-      "rows_moved: rows that change by ", 100 * ame_threshold, " pp or more; the ",
-      "rule counts the rows of both kinds of AME, not the baselines. A test without ",
+      "rows_moved: rows that change by ", 100 * ame_threshold, " pp or more, and ",
+      "for an AME the larger model adds, whose 95% Krinsky-Robb interval excludes ",
+      "0; the rule counts the rows of both kinds of AME, not the baselines. A test ",
+      "without ",
       "a row: a model does not have this set, or has it at another reference state ",
       "(at)."
     )

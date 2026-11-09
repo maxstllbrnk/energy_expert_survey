@@ -547,26 +547,39 @@ comparison_ame <- compare_models(
 )
 stopifnot(comparison_ame$decision$proposal ==
             "keep smaller as main; report larger as robustness")
-# An effect only the larger model has, of 2 pp, is enough to accept it, although the
-# effects both have move by 0.5 pp only (Max, 2026-11-09)
-ames_added <- make_ames(ame_values + 0.005, se_values, baseline_values)
-ames_added$at_means$table$effect[18] <- "only_in_this_model"
-ames_added$at_means$table$ame[18] <- 0.02
-ames_added$at_means$changes$only_in_this_model <- list(to = list(x_relevant = 1))
-set_ames("m_relevant", ames_added)
-comparison_added <- compare_models(
-  est_dir,
-  tests = tests %>% filter(larger == "m_relevant"),
-  ame_name = "at_means",
-  n_fresh_draws = 2,
-  n_workers = 2
-)
-stopifnot(comparison_added$decision$proposal == "accept larger",
-          comparison_added$decision$verdict_ame == "moved",
-          comparison_added$decision$ame_rows_moved == 0,
-          comparison_added$decision$ame_added_rows_moved == 1,
-          grepl("largest AME that m_relevant adds 2.00 pp",
-                comparison_added$decision$reason, fixed = TRUE))
+# An effect only the larger model has, of 2 pp and with a 95% interval that excludes
+# 0, is enough to accept it, although the effects both have move by 0.5 pp only. The
+# same 2 pp with an interval that includes 0 is not (Max, 2026-11-09).
+added_values <- ame_values + 0.005
+added_values[18] <- 0.02
+for (added_se in c(0.005, 0.02)) {
+  added_ses <- se_values
+  added_ses[18] <- added_se
+  ames_added <- make_ames(added_values, added_ses, baseline_values)
+  ames_added$at_means$table$effect[18] <- "only_in_this_model"
+  ames_added$at_means$changes$only_in_this_model <- list(to = list(x_relevant = 1))
+  set_ames("m_relevant", ames_added)
+  comparison_added <- compare_models(
+    est_dir,
+    tests = tests %>% filter(larger == "m_relevant"),
+    ame_name = "at_means",
+    n_fresh_draws = 2,
+    n_workers = 2
+  )
+  is_clear <- added_se == 0.005
+  stopifnot(comparison_added$decision$ame_rows_moved == 0,
+            comparison_added$decision$ame_added_rows_moved == as.numeric(is_clear),
+            grepl("largest AME that m_relevant adds 2.00 pp",
+                  comparison_added$decision$reason, fixed = TRUE))
+  if (is_clear) {
+    stopifnot(comparison_added$decision$proposal == "accept larger",
+              comparison_added$decision$verdict_ame == "moved")
+  } else {
+    stopifnot(comparison_added$decision$proposal ==
+                "keep smaller as main; report larger as robustness",
+              comparison_added$decision$verdict_ame == "did not move")
+  }
+}
 # The same AMEs at another reference state: they are not compared. An effect that the
 # two models define differently: its rows are not compared.
 ames_other_state <- make_ames(ame_values + 0.005, se_values, baseline_values)

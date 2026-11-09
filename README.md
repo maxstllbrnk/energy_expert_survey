@@ -107,7 +107,8 @@ row per question:
 at 5% after Holm, the gain survives fresh draws, and cross-validation improves by more than one paired standard error (BIC
 falls, if it was not run or a fold failed). If tests and parsimony disagree, the smaller stays. If all agree but no AME moves
 by 1 percentage point, the smaller stays as the main model and the larger is reported as robustness. An AME that only the
-larger model has, such as a price effect in (4p) against (4), counts as moving from 0. Of two models that do not
+larger model has, such as a price effect in (4p) against (4), counts as moving from 0, if its 95% interval excludes 0. Of
+two models that do not
 nest each other, one is preferred only if Vuong's test and cross-validation (or BIC) agree on it; otherwise the data cannot
 decide. The rule proposes and the researchers decide: the column `final_decision` of the sheet `decision` is theirs, also for
 terms of direct research interest that stay regardless. A nested test that cannot be computed, because its restrictions are not

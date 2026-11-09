@@ -141,5 +141,6 @@ first kept as a copy, `model_comparison_<date_time>.xlsx`.
 `ame_changes` has three quantities per test: `AME`, the effects both models define alike, as the
 change between them; `AME the larger model adds`, the effects only the larger model has, as the
 change from 0; and `baseline probability`. The rule's 1 pp step counts the rows of the first two
-that move (Max, 2026-11-09). An effect of the same name that the two models define differently
+that move by 1 pp, an added AME only if its 95% Krinsky-Robb interval (`ci_low_kr`, `ci_high_kr`)
+excludes 0 (Max, 2026-11-09). An effect of the same name that the two models define differently
 counts in neither.

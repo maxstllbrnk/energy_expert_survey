@@ -10,7 +10,7 @@ Each is implemented where the last column says, with Max's name and the date in 
 
 | Topic | Decision | Where |
 |---|---|---|
-| AME step of the model rule | An AME that only the larger model has counts as moving from 0, its value in the smaller model. In the synthetic run, where prices matter, the price effects reached 5.4 pp while the shared effects moved 0.3 pp, and the old step kept (4) as the main model | `compare_models()` |
+| AME step of the model rule | An AME that only the larger model has counts as moving from 0, its value in the smaller model, if it is at least 1 pp and its 95% Krinsky-Robb interval excludes 0. In the synthetic run, where prices matter, the price effects reached 5.4 pp (z 3.5 to 6.1) while the shared effects moved 0.3 pp, and the old step kept (4) as the main model; the dummies for a missing answer (z 0.1 to 1.9) mostly do not count | `compare_models()` |
 | Cross-validation | Every model, so that every question has the same parsimony gate. A quick run leaves it out | estimation scripts |
 | Gaps in the rule | Kept as the code settles them: a gain that fails on fresh draws keeps the smaller model; a failed fold lets BIC decide; a term without variation in a fold keeps its full-sample estimate; cross-validation must win by one paired SE; the fresh-draw critical value is at 5%, not Holm's level; valid means a scaled gradient up to 0.1 and a condition number up to 1e8; a test with an invalid model counts as not rejected in the Holm family | `compare_models()` |
 | Minimum cell | A share needs 10 answers in its denominator, a count printed on its own needs 10, cells of vignettes count distinct experts. A numerator that follows from N and a share, or a hidden cell that follows from a total by subtraction, is accepted. Counts of what the cleaning did may be small | profile, data contract |
@@ -23,7 +23,7 @@ Each is implemented where the last column says, with Max's name and the date in 
 | Mean of the prices as reported | Dropped from the report and the appendix: it mixes units, and one typo can dominate it | step 07 |
 | Frame rows without an e-mail address | Not invited: they leave the denominator, and are counted | `load_frame()` |
 | Free text in `EDUCATION_MAP`, the respondent ID in the git history, the seminar's numbers in comments | Fine as they are | |
-| Standards | Four rules from the reviews go into the profile; a fifth, that two statistics whose difference rests on fewer than 10 answers count as one, is dropped, as recovery by subtraction is accepted | profile |
+| Standards | Six rules from the reviews go into the profile, among them that every new cleaning rule is tested on a case that sets it off, and that a test excuses an expected difference only by exact name; one, that two statistics whose difference rests on fewer than 10 answers count as one, is dropped, as recovery by subtraction is accepted | profile |
 
 ## 2. Left for later
 
@@ -76,11 +76,10 @@ Best with `QUICK_RUN <- TRUE` in `config.R` first (README, "How to run").
 - Vuong's normal limit is for strictly non-nested models; sets that share terms overlap, and no variance pre-test is run.
 - Holm depends on the tests declared and runs per call, so per arm. (4p) against (6p), robust p 0.034, no longer rejects once a second
   nested test is declared and its p-value is the smaller or larger (0.068).
-- The AME step uses the largest of many rows against a fixed 1 pp, and their SE plays no part. With the effects a larger model adds,
-  each counted at its full size, also the dummies for a missing answer (`price_na_*`, `rise_na_*`), it will rarely bind for a test
-  that adds terms: in the synthetic run, 42 of 210 added rows moved in (4) against (4p), 51 of 252 in (4p) against (4pe), and in the
-  small arm an added AME of 12 pp rested on few experts. Open: whether added rows should be limited to effects of substantive interest,
-  or need a change larger than their SE.
+- The AME step uses the largest of many rows against a fixed 1 pp. For the effects both models have, their SE plays no part, as no SE
+  of the difference between two models is at hand. An added effect also needs a 95% interval that excludes 0, so that noisy ones, such
+  as most dummies for a missing answer or an effect resting on few experts in the small arm, do not count. Still, a test that adds
+  terms of real size will nearly always pass the step.
 - Absolute fit has little power: RMSE by attribute level was 0.19 pp or less in all models, including wrong ones, as a model fits the
   cells of its own dummies by construction.
 - TIC can mislead: it favoured (6p) where the truth says no, as tr(H^-1 B) falls below K. It is not in the rule, but its verdict column
