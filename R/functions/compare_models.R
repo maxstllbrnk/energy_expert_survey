@@ -510,7 +510,10 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
   # Randomly shifted Halton draws, one shift per prime: (u + shift) mod 1 is again
   # evenly spread (Train 2009, section 9.3.4). The same shifts for every model, so
   # that differences between models do not reflect different draws. The parameters
-  # stay at the estimates, which were tuned on the estimation's draws.
+  # stay at the estimates, which were tuned on the estimation's draws: the more
+  # random parameters, the more they fit those draws. On synthetic data with equal
+  # covariances (703 experts, 6 constants, 100 draws, 2026-11-09), the model by group
+  # had an LR of 61.2 on the estimation's draws and of 39.9 on fresh ones.
   message("Fresh draws: ", length(model_names), " models, ", n_fresh_draws, " sets")
   all_primes <- sort(unique(unlist(primes_list[model_names])))
   set.seed(20261101)
