@@ -117,6 +117,7 @@ persons_by_wave <- experts %>%
             answered_a_vignette = sum(reached_vignettes),
             completed = sum(is_complete),
             completed_with_group = sum(is_complete & !is.na(expert_group)))
+# desc(): from the largest down, here the soft launch first
 waves <- survey_main %>%
   group_by(wave, versandrunde, target_group, is_softlaunch) %>%
   summarise(started = n()) %>%
