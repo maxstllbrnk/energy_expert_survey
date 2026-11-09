@@ -1,0 +1,73 @@
+% =============================================================================
+% econslides.sty — layout for 16:9 beamer slides (pdfLaTeX)
+% Core file of the economics-latex skill: identical in every project, no
+% project settings. Update it by copying a newer version from the skill.
+% Use with \documentclass[10pt, aspectratio=169]{beamer}; project settings
+% (title, paths, extra packages) go in the main file after \usepackage.
+%
+% The look is metropolis, through its maintained successor moloch, with Fira
+% Sans and the Okabe-Ito colours of the figures. Figures from the economics-r
+% skill are sized for these slides: include them at natural size.
+% =============================================================================
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{econslides}[2026/09/22 economics-latex slide layout]
+
+% 1. Engine and encoding -------------------------------------------------------
+\RequirePackage{iftex}
+\ifPDFTeX
+  % Figures from R (cairo) are PDF 1.7, the slides PDF 1.5. The difference
+  % doesn't matter to any viewer, so pdfTeX's warning for each figure is off.
+  % (Raising the version fails here: beamer has written to the PDF already.)
+  \pdfinclusionerrorlevel=-1
+\else
+  \PackageWarning{econslides}{This layout is made for pdfLaTeX}
+\fi
+\RequirePackage[T1]{fontenc}
+
+% 2. Theme and fonts -----------------------------------------------------------
+\usetheme[progressbar=frametitle, sectionpage=progressbar]{moloch}
+\setbeamertemplate{navigation symbols}{}
+% Slide numbers as "3/12"; backup slides after \appendix don't count
+\setbeamertemplate{page number in head/foot}[appendixframenumber]
+% Beamer's appendix bookmark contains \translate, which hyperref can't put in
+% a PDF string; this tells it to keep the translated word
+\pdfstringdefDisableCommands{\def\translate#1{#1}}
+% Fira Sans as in metropolis, with sans-serif maths to match
+\RequirePackage[sfdefault, lining]{FiraSans}
+\RequirePackage{newtxsf}
+\usefonttheme{professionalfonts}
+
+% 3. Colours: Okabe-Ito, the same values as paper_colors in R ------------------
+\definecolor{oiblue}{HTML}{0072B2}
+\definecolor{oivermillion}{HTML}{D55E00}
+\definecolor{oigreen}{HTML}{009E73}
+\definecolor{oipurple}{HTML}{CC79A7}
+\definecolor{oiorange}{HTML}{E69F00}
+\definecolor{oiskyblue}{HTML}{56B4E9}
+\setbeamercolor{alerted text}{fg=oivermillion}
+\setbeamercolor{progress bar}{fg=oiblue, bg=oiblue!15}
+\setbeamercolor{example text}{fg=oigreen!80!black}
+
+% 4. Tables, figures, citations ------------------------------------------------
+% Tables written by R need booktabs and threeparttable.
+\RequirePackage{booktabs, threeparttable, array, multirow, makecell}
+\setbeamerfont{caption}{size=\footnotesize}
+% natbib author-year, as in the paper: \citet{key}, \citep{key}
+\RequirePackage[round]{natbib}
+\setcitestyle{aysep={}}
+\setbeamertemplate{bibliography item}{}
+% The frame title says "References": no second heading from natbib, and no
+% "i, ii" when the list runs over several frames
+\renewcommand{\bibsection}{}
+\setbeamertemplate{frametitle continuation}{}
+
+% 5. Macros --------------------------------------------------------------------
+% A table from output/ at slide size: \slidetable{\tablepath/tab_x.tex}
+\newcommand{\slidetable}[1]{{\centering\footnotesize\input{#1}\par}}
+% A source or note line at the bottom of a slide: \slidenote{Source: SOEP.}
+\newcommand{\slidenote}[1]{\par\vfill{\scriptsize\color{black!60}#1\par}}
+% A button that jumps to a labelled slide, e.g. to a backup slide:
+%   \begin{frame}[label=backup-sample]{...}  and  \slidelink{backup-sample}{Details}
+\newcommand{\slidelink}[2]{\hyperlink{#1}{\beamergotobutton{#2}}}
+
+\endinput
