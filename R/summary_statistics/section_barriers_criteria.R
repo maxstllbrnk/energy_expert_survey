@@ -74,8 +74,14 @@ section_barriers_criteria <- function(experts, dirs) {
     option_columns <- paste0(questions$prefix[q], names(BARRIER_LABELS))
     is_shown <- rowSums(!is.na(experts[option_columns])) > 0
     n_ticks <- rowSums(experts[option_columns] == "Ja", na.rm = TRUE)
-    message(questions$question[q], ": ", sum(is_shown & n_ticks == 0), " of ",
-            sum(is_shown), " experts shown the question ticked no option")
+    n_no_tick <- sum(is_shown & n_ticks == 0)
+    # The minimum cell holds in the log too
+    if (sum(is_shown) >= MIN_N) {
+      message(questions$question[q], ": ",
+              if_else(n_no_tick >= MIN_N, as.character(n_no_tick),
+                      paste("fewer than", MIN_N)),
+              " of ", sum(is_shown), " experts shown the question ticked no option")
+    }
   }
 
   for (q in seq_len(nrow(questions))) {
