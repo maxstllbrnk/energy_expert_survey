@@ -283,8 +283,8 @@ section_completion <- function(experts, vignettes, dirs) {
       sections_note <- paste0(
         "Persons who started and never completed: ", fmt_int(nrow(breakoffs)),
         "; in brackets their number. A person stops in a section if the last ",
-        "question answered lies in it, so they left on the page after it: those who ",
-        "answered Q6a last left when the vignettes began.", group_note
+        "question answered lies in it, so they left on the page after it: those ",
+        "who answered Q6a last left when the vignettes began.", group_note
       )
       exhibits <- bind_rows(exhibits, exhibit_row(
         block, "breakoff_section", group, "figure",
@@ -332,10 +332,14 @@ section_completion <- function(experts, vignettes, dirs) {
 
     # 4. The break-off rate by state -------------------------------------------
     if (has_breakoffs && has_columns(group_experts, "bundesland")) {
+      # At least MIN_N completed too: the table of the states hides fewer, and the
+      # rate times the persons who started would give them
       state_values <- state_means(group_experts,
                                   as.numeric(!group_experts$is_complete),
                                   percent = TRUE) %>%
-        mutate(value = if_else(n >= MIN_CONTACTS, value, NA_real_))
+        mutate(n_completed = round(n * (1 - value)),
+               value = if_else(n >= MIN_CONTACTS & n_completed >= MIN_N,
+                               value, NA_real_))
       if (any(!is.na(state_values$value))) {
         plot_map <- plot_state_map(state_values, "Break-off\nrate",
                                    low = MAP_BREAKOFF_LOW, high = MAP_BREAKOFF_HIGH,
@@ -344,13 +348,14 @@ section_completion <- function(experts, vignettes, dirs) {
         save_figure(plot_map, file.path(dirs$maps, breakoff_map_file), size = "map")
         map_note <- paste0(
           "Share of the persons who started and never completed, by the federal ",
-          "state of the postcode. Persons who left before the postcode have no state."
+          "state of the postcode. Persons who left before the postcode have no ",
+          "state, so the rates are low by that much."
         )
         # Grey is explained only where a state is grey
         if (any(is.na(state_values$value)) ||
             nrow(state_values) < length(STATE_LABELS)) {
           map_note <- paste0(map_note, " Grey and \"–\": fewer than ", MIN_CONTACTS,
-                             " started.")
+                             " started or ", MIN_N, " completed.")
         }
         exhibits <- bind_rows(exhibits, exhibit_row(
           block, "breakoff_state", group, "map",
@@ -383,9 +388,9 @@ section_completion <- function(experts, vignettes, dirs) {
       )
       duration_note <- paste0(
         "Minutes, completed questionnaires, not trimmed: a questionnaire left open ",
-        "moves the mean and the standard deviation, not the quartiles. A section: the ",
-        "sum of the times of its questions, among the experts who answered at least ",
-        "one; some sections were shown to some firms only. ", cell_note()
+        "moves the mean and the standard deviation, not the quartiles. A section: ",
+        "the sum of the times of its questions, among the experts who answered at ",
+        "least one; some sections were shown to some firms only. ", cell_note()
       )
       duration_file <- paste0("tab_duration_", slug, ".tex")
       summary_table(duration_data, duration_rows,
@@ -471,23 +476,26 @@ section_completion <- function(experts, vignettes, dirs) {
           answered = sum(is_answered & is_asked)
         ))
       }
+      # Below the minimum cell the counts go with the share, which they would give
       item_cells <- item_response %>%
-        mutate(share = if_else(asked >= MIN_N, answered / asked, NA_real_)) %>%
+        mutate(share = if_else(asked >= MIN_N, answered / asked, NA_real_),
+               answered = if_else(asked >= MIN_N, as.numeric(answered),
+                                  NA_real_)) %>%
         transmute(question = latex_text(question),
                   reached = fmt_int(reached),
-                  asked = fmt_int(asked),
+                  asked = fmt_int(shown_count(asked)),
                   answered = fmt_int(answered),
                   share = fmt_pct(share))
       item_note <- paste0(
-        "Reached: the last question answered lies at this question or later, or the ",
-        "person completed. Asked: submitted its page, which has a response time; the ",
-        "others among those who reached it were routed past it. Routing: Q0b only if ",
-        "not the owner; Q8 and Q10 only for firms with energy advice, engineering or ",
-        "chimney sweeping; Q11b and Q11c only for HVAC firms; Q18b only if the carbon ",
-        "price is known; Q24a only with other training, and not in the soft launch; a ",
-        "staircase may end before its fifth decision. Answered: at least one answer ",
-        "on the page, for tick boxes at least one tick; -- in the share means fewer ",
-        "than ", MIN_N, " asked.", group_note
+        "Reached: the last question answered lies at this question or later, or ",
+        "the person completed. Asked: submitted its page, which has a response time; ",
+        "the others among those who reached it were routed past it. Routing: Q0b ",
+        "only if not the owner; Q8 and Q10 only for firms with energy advice, ",
+        "engineering or chimney sweeping; Q11b and Q11c only for HVAC firms; Q18b ",
+        "only if the carbon price is known; Q24a only with other training, and not ",
+        "in the soft launch; a staircase may end before its fifth decision. ",
+        "Answered: at least one answer on the page, for tick boxes at least one ",
+        "tick; -- means fewer than ", MIN_N, " asked.", group_note
       )
       item_column_names <- c("Question", "Reached", "Asked", "Answered",
                              "\\makecell{Answered\\\\among asked}")
@@ -540,10 +548,10 @@ section_completion <- function(experts, vignettes, dirs) {
         meta_row("Arm unknown", arm_source %in% "unknown")
       )
       meta_note <- paste0(
-        "One row per person: of those who started more than once the furthest attempt ",
-        "stays. Completed: share among the persons of the row; -- means fewer than ",
-        MIN_N, " persons. The soft launch differs in Q6 (no nationwide answer) and Q7 ",
-        "(a different ranking task).", group_note
+        "One row per person: of those who started more than once the furthest ",
+        "attempt stays. Completed: share among the persons of the row; -- means ",
+        "fewer than ", MIN_N, " persons. The soft launch differs in Q6 (no nationwide ",
+        "answer) and Q7 (a different ranking task).", group_note
       )
       meta_file <- paste0("tab_meta_", slug, ".tex")
       table_custom(meta_cells, file.path(dirs$tables, meta_file),

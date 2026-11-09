@@ -33,25 +33,34 @@ response_rate <- function(answers, contacted) {
           answers / contacted, NA_real_)
 }
 
-#' A count of answers with the minimum cell: NA below MIN_N, as the rate could be
-#' computed from it
-shown_count <- function(count) {
-  if_else(count >= MIN_N, as.numeric(count), NA_real_)
+#' A count of answers with the minimum cell: NA below MIN_N answers, or below
+#' MIN_CONTACTS contacted persons, as the rate could be computed from it
+#'
+#' @param count     the answers
+#' @param contacted the persons behind a rate; leave out if the table has no rate
+shown_count <- function(count, contacted = MIN_CONTACTS) {
+  if_else(contacted >= MIN_CONTACTS & count >= MIN_N, as.numeric(count), NA_real_)
 }
 
-#' The formatted cells of rows of a table of rates
+#' The formatted cells of rows of a table of rates. The denominator without t-online
+#' addresses is hidden below MIN_CONTACTS too: next to the answers it would give the
+#' rate, and next to all the invited the t-online addresses of a small cell.
 rate_cells <- function(label, n_invited, n_invited_no_tonline, n_started,
                        n_completed) {
   tibble(
     label = label,
     invited = fmt_int(n_invited),
-    started = fmt_int(shown_count(n_started)),
-    completed = fmt_int(shown_count(n_completed)),
+    started = fmt_int(shown_count(n_started, n_invited)),
+    completed = fmt_int(shown_count(n_completed, n_invited)),
     rate_started = fmt_pct(response_rate(n_started, n_invited)),
     rate_completed = fmt_pct(response_rate(n_completed, n_invited)),
-    invited_no_tonline = fmt_int(n_invited_no_tonline),
-    rate_started_no_tonline = fmt_pct(response_rate(n_started, n_invited_no_tonline)),
-    rate_completed_no_tonline = fmt_pct(response_rate(n_completed, n_invited_no_tonline))
+    invited_no_tonline = fmt_int(if_else(n_invited_no_tonline >= MIN_CONTACTS,
+                                         as.numeric(n_invited_no_tonline),
+                                         NA_real_)),
+    rate_started_no_tonline = fmt_pct(response_rate(n_started,
+                                                    n_invited_no_tonline)),
+    rate_completed_no_tonline = fmt_pct(response_rate(n_completed,
+                                                      n_invited_no_tonline))
   )
 }
 
@@ -131,9 +140,9 @@ section_recruitment <- function(experts, vignettes, frame, dirs) {
            STATE_LABELS, "federal state")
 
   rate_note <- paste0(
-    "Persons: an e-mail address of the lists once, an invitation once. Rates: per ",
-    "invited person; -- means fewer than ", MIN_CONTACTS, " invited or ", MIN_N,
-    " answers, for the counts fewer than ", MIN_N, " answers."
+    "Persons: an e-mail address of the lists once, an invitation once, so someone ",
+    "who started in two waves counts twice among the answers. Rates: per invited ",
+    "person; -- means fewer than ", MIN_CONTACTS, " invited or ", MIN_N, " answers."
   )
 
   # 1. Sample flow -------------------------------------------------------------
@@ -171,18 +180,22 @@ section_recruitment <- function(experts, vignettes, frame, dirs) {
         n_vignettes = nrow(arm_answered)
       ))
     }
+    # The minimum cell counts experts: the answers of one expert hang together
     flow_cells <- flow %>%
+      mutate(n_vignettes = if_else(n_experts >= MIN_N, n_vignettes, NA)) %>%
       transmute(step = latex_text(step),
-                n_experts = fmt_int(n_experts),
-                n_vignettes = if_else(is.na(n_vignettes), "",
-                                      fmt_int(n_vignettes)))
+                n_experts = fmt_int(shown_count(n_experts)),
+                n_vignettes = fmt_int(n_vignettes))
+    # The invited have answered nothing yet
+    flow_cells$n_vignettes[1] <- ""
 
     flow_note <- paste0(
       "Persons: an e-mail address of the lists once, an invitation once, however ",
-      "often it was used to start the questionnaire. Reached the vignettes: answered ",
-      "at least one. Answered vignettes: those of the persons of the row, without ",
-      "those of an expert who answered in both arms. By arm: persons who completed ",
-      "and answered at least one vignette; Q6a sets the arm, it is not randomized."
+      "often it was used to start the questionnaire. Reached the vignettes: ",
+      "answered at least one. Answered vignettes: those of the persons of the row, ",
+      "without those of an expert who answered in both arms. By arm: persons who ",
+      "completed and answered at least one vignette; Q6a sets the arm, it is not ",
+      "randomized. -- means fewer than ", MIN_N, " experts."
     )
     if (group == ALL_EXPERTS) {
       flow_note <- paste0(flow_note, " Group from Q2.")
@@ -255,10 +268,14 @@ section_recruitment <- function(experts, vignettes, frame, dirs) {
       rate_cells("Total", nrow(group_frame), sum(!group_frame$is_tonline),
                  nrow(group_experts), sum(group_experts$is_complete))
     )
+    state_note <- paste0(
+      rate_note, " Persons who left before the postcode (Q0) have no state, and are ",
+      "in the row without one, so the rates of the states are low by that much. ",
+      tonline_note(group_frame$is_tonline), group_note
+    )
     state_file <- paste0("tab_response_state_table_", group_slug(group), ".tex")
     table_custom(state_cells, file.path(dirs$tables, state_file),
-                 latex_text(paste0(rate_note, " ",
-                                   tonline_note(group_frame$is_tonline), group_note)),
+                 latex_text(state_note),
                  col_names = c("", RATE_COLUMN_NAMES), header = RATE_HEADER,
                  panels = c("Federal state of the postcode" = nrow(state_counts),
                             "All invited" = 2))
@@ -299,9 +316,10 @@ section_recruitment <- function(experts, vignettes, frame, dirs) {
   )
   group_note <- paste(
     rate_note, GROUP_RATE_NOTE, "A person who ticks several categories in Q2 gets",
-    "one group: HVAC before chimney sweeps before energy advice. Persons without a",
-    "group were invited from a list that is not known, so the rates of the groups",
-    "do not add up to the total.", tonline_note(frame$is_tonline)
+    "one group: HVAC before chimney sweeps before energy advice. Persons who left",
+    "before Q2 or ticked nothing have no group, and their list is not known, so the",
+    "rates of the groups are low by that much and do not add up to the total.",
+    tonline_note(frame$is_tonline)
   )
   group_file <- "tab_response_group_all.tex"
   table_custom(group_cells, file.path(dirs$tables, group_file),
@@ -344,14 +362,21 @@ section_recruitment <- function(experts, vignettes, frame, dirs) {
   composition_file <- "fig_composition_all.pdf"
   save_figure(plot_composition, file.path(dirs$figures, composition_file),
               size = "full")
+  composition_note <- paste0(
+    "Invited: ", fmt_int(sum(group_counts$invited)),
+    " persons, by the list they were drawn from. Completed: ",
+    fmt_int(sum(group_counts$completed)), " persons with a group, by Q2. ",
+    GROUP_RATE_NOTE
+  )
+  # A missing bar is explained only where one is missing
+  if (nrow(composition) < 2 * length(EXPERT_GROUPS)) {
+    composition_note <- paste0(composition_note, " A bar of fewer than ", MIN_N,
+                               " persons is left out.")
+  }
   exhibits <- bind_rows(exhibits, exhibit_row(
     block, "composition", ALL_EXPERTS, "figure",
     file.path("figures", composition_file),
-    "The groups among the invited and the completed", "main",
-    paste0("Invited: ", fmt_int(sum(group_counts$invited)),
-           " persons, by the list they were drawn from. Completed: ",
-           fmt_int(sum(group_counts$completed)),
-           " persons with a group, by Q2. ", GROUP_RATE_NOTE)
+    "The groups among the invited and the completed", "main", composition_note
   ))
 
   # 5. Response rates by wave, and the cross-check against the dispatch log ----
@@ -370,17 +395,20 @@ section_recruitment <- function(experts, vignettes, frame, dirs) {
             " waves are not in the dispatch log")
   }
 
+  # format(): the date as text. A wave that is not in the log has no rate that its
+  # counts could give, so they stand
   wave_cells <- wave_counts %>%
     mutate(rate_started = response_rate(started, invitations),
-           rate_completed = response_rate(completed, invitations)) %>%
+           rate_completed = response_rate(completed, invitations),
+           contacted = coalesce(invitations, MIN_CONTACTS)) %>%
     transmute(wave,
               target_group = label_of(target_group, TARGET_GROUP_LABELS,
                                       "target group"),
               first_sent = if_else(is.na(first_sent), "--",
                                    format(first_sent, "%Y-%m-%d")),
               invitations = fmt_int(invitations),
-              started = fmt_int(shown_count(started)),
-              completed = fmt_int(shown_count(completed)),
+              started = fmt_int(shown_count(started, contacted)),
+              completed = fmt_int(shown_count(completed, contacted)),
               rate_started = fmt_pct(rate_started),
               rate_completed = fmt_pct(rate_completed))
   # A wave has one target group, so here a response does go with its list type
@@ -390,8 +418,9 @@ section_recruitment <- function(experts, vignettes, frame, dirs) {
               started = sum(started),
               completed = sum(completed)) %>%
     ungroup()
+  # From the log itself: a wave without any starter counts among the invitations
   all_waves <- tibble(wave = "All waves", target_group = "",
-                      invitations = sum(wave_counts$invitations),
+                      invitations = sum(dispatch$invitations),
                       started = nrow(experts),
                       completed = sum(experts$is_complete))
   total_cells <- bind_rows(
@@ -427,16 +456,17 @@ section_recruitment <- function(experts, vignettes, frame, dirs) {
   }
   wave_note <- paste0(
     "Started and completed: persons, an invitation once. Rates here per invitation ",
-    "of the dispatch log, as the frame does not say who was invited in which wave; a ",
-    "wave has one target group, so that its rate needs no answer to Q2. -- means ",
-    "fewer than ", MIN_CONTACTS, " invitations or ", MIN_N, " answers, or a wave that ",
-    "is not in the log. An invitation is not a person: someone invited in two waves ",
+    "of the dispatch log, as the frame does not say who was invited in which wave, ",
+    "so they do not compare with the rates per person of the other tables. A wave ",
+    "has one target group, so that its rate needs no answer to Q2. -- means fewer ",
+    "than ", MIN_CONTACTS, " invitations or ", MIN_N, " answers, or a wave that is ",
+    "not in the log. An invitation is not a person: someone invited in two waves ",
     "received two, so the log may exceed the persons on the lists, but a large gap ",
     "would mean that the frame is not what was mailed. ",
-    sum(dispatch$n_partly_sent), " batches of the log are marked as only partly sent, ",
-    "so its count is an upper bound. Reminders went out on different days and not ",
-    "always to t-online addresses (dispatch log), so the rates of the waves differ ",
-    "for that reason too."
+    sum(dispatch$n_partly_sent), " batches of the log are marked as only partly ",
+    "sent, so its count is an upper bound. Reminders went out on different days and ",
+    "not always to t-online addresses (dispatch log), so the rates of the waves ",
+    "differ for that reason too."
   )
   wave_file <- "tab_response_wave_all.tex"
   table_custom(bind_rows(wave_cells, total_cells, check_cells),

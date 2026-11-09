@@ -2,20 +2,18 @@
 # section_selection.R — Block C. Selection: do those who never completed differ, on
 #                       what they did answer, from those who completed?
 # Inputs : experts and vignettes of the sample
-# Outputs: in dirs$tables: tab_selection_<group>, tab_selection_state_<group>,
-#          tab_selection_later_<group>, tab_selection_barriers_<group>,
-#          tab_selection_vignettes_<group>
-# Checks : unknown answers of a question with several levels stop; the minimum cell
-#          in both columns of a row
+# Outputs: in dirs$tables: tab_selection_<group>, tab_selection_prices_<group>,
+#          tab_selection_state_<group>, tab_selection_later_<group>,
+#          tab_selection_barriers_<group>, tab_selection_vignettes_<group>
+# Checks : unknown answers stop; the minimum cell in both columns of a row
 ################################################################################
 # Only experts who reached a question count: its position in QUESTIONNAIRE at most
 # last_question_position. The later a question, the fewer break-offs reached it,
 # and those are selected themselves: the comparison is among those who got that far.
 #
 # The rows of all blocks together are too many for one table, in a paper or on a
-# slide: the first table holds the firm, the invitation and the prices, the next
-# ones the federal state, the later blocks and the barriers (`part` in
-# selection_rows()).
+# slide: the first table holds the firm and the invitation, the next ones the prices,
+# the federal state, the later blocks and the barriers (`part` in selection_rows()).
 
 #' The rows of one categorical question, one per answer
 #'
@@ -49,8 +47,8 @@ option_rows <- function(part, panel, item, variables, labels, kind = "level",
 #' Every variable of the comparison, in the order of the questionnaire
 #'
 #' @return tibble, one row per line of a table:
-#'   part      the table: "selection", "selection_state", "selection_later",
-#'             "selection_barriers"
+#'   part      the table: "selection", "selection_prices", "selection_state",
+#'             "selection_later", "selection_barriers"
 #'   panel     the panel of the table
 #'   item      the question, as in QUESTIONNAIRE, whose position the expert must
 #'             have reached; NA: known of everyone who started
@@ -68,6 +66,7 @@ selection_rows <- function() {
   is_answer <- names(OWN_HEATING_LABELS) != "Keine Angabe"
 
   first <- "selection"
+  price_table <- "selection_prices"
   state <- "selection_state"
   later <- "selection_later"
   firm <- "The firm (Q0 to Q6a)"
@@ -79,6 +78,7 @@ selection_rows <- function() {
   customers <- "Main customers and their criteria (Q7, Q28, first rank)"
   person <- "The person (Q20 to Q24)"
 
+  # str_remove(): the text without the part that matches, here the last "_"
   barrier_rows <- tibble()
   for (k in seq_len(nrow(BARRIER_QUESTIONS))) {
     barrier_rows <- bind_rows(barrier_rows, option_rows(
@@ -115,14 +115,15 @@ selection_rows <- function() {
     level_rows(first, invitation, NA_character_, "target_group",
                TARGET_GROUP_LABELS, "Target group of the wave: "),
 
-    option_rows(first, prices, "time_price", paste0("price_", fuels, "_kwh"),
+    option_rows(price_table, prices, "time_price", paste0("price_", fuels, "_kwh"),
                 paste0("Price: ", FUEL_LABELS, " (cent/kWh)"), kind = "num"),
-    option_rows(first, prices, "time_pexp", paste0("pexp_", fuels, "_rise"),
+    option_rows(price_table, prices, "time_pexp", paste0("pexp_", fuels, "_rise"),
                 paste0("Expects a rise: ", FUEL_LABELS), kind = "dummy"),
-    option_rows(first, prices, "time_co2_heard", "co2_heard", "Carbon price known"),
-    option_rows(first, prices, "time_co2_est", "co2_est_low_clean",
+    option_rows(price_table, prices, "time_co2_heard", "co2_heard",
+                "Carbon price known"),
+    option_rows(price_table, prices, "time_co2_est", "co2_est_low_clean",
                 "Carbon price estimated, low (euro/t)", kind = "num"),
-    option_rows(first, prices, "time_co2_est", "co2_est_high_clean",
+    option_rows(price_table, prices, "time_co2_est", "co2_est_high_clean",
                 "Carbon price estimated, high (euro/t)", kind = "num"),
 
     level_rows(state, "Federal state of the postcode (Q0)", "time_firm_zip",
@@ -265,7 +266,8 @@ write_selection_table <- function(experts, rows, file, note) {
     table_cells <- cells[is_kept, ] %>%
       select(label, n_c, mean_c, n_b, mean_b, difference, p)
   }
-  # A row below the minimum cell shows -- in every column
+  # A row below the minimum cell shows -- in every column. coalesce(): the first
+  # value that is not NA
   for (column in names(table_cells)[-1]) {
     table_cells[[column]] <- coalesce(table_cells[[column]], "--")
   }
@@ -280,11 +282,12 @@ write_selection_table <- function(experts, rows, file, note) {
     note, " Completers: submitted the questionnaire; break-offs: never did. Only ",
     "persons who reached a question count, by the last question they answered; N: ",
     "those of them who answered it. Answers as shares of those who answered. Norm. ",
-    "diff.: the normalised difference (Imbens and Rubin), completers minus break-offs, ",
-    "over the root of the mean of the two variances. p: Welch t test for numbers, ",
-    "Pearson chi-squared test without continuity correction for shares (one answer ",
-    "against the others). The p-values are not adjusted for multiple testing, and ",
-    "they are descriptive. -- means fewer than ", MIN_N, " answers in either group."
+    "diff.: the normalised difference (Imbens and Rubin), completers minus ",
+    "break-offs, over the root of the mean of the two variances. p: Welch t test ",
+    "for numbers, Pearson chi-squared test without continuity correction for shares ",
+    "(one answer against the others). The p-values are not adjusted for multiple ",
+    "testing, and they are descriptive. -- means fewer than ", MIN_N, " answers in ",
+    "either group; in the last two columns alone, that neither group varies."
   )
   table_custom(
     table_cells, file, latex_text(full_note),
@@ -314,13 +317,22 @@ section_selection <- function(experts, vignettes, dirs) {
   exhibits <- tibble()
   rows <- selection_rows() %>%
     filter(variable %in% names(experts))
-  # An answer without a row would drop out of the question's shares unnoticed
+  # An answer without a row would drop out of the question's shares unnoticed. A
+  # yes-or-no question or a tick box has one row, for "Ja": its share stands with any
+  # other answer beside it, but without "Ja" the answers may be coded differently.
   for (variable_name in unique(rows$variable[rows$kind == "level"])) {
     levels_of_rows <- rows$level[rows$variable == variable_name]
     answers <- unique(as.character(experts[[variable_name]]))
+    answers <- answers[!is.na(answers)]
     # setdiff(): the values of the first that are not in the second
-    unknown_answers <- setdiff(answers[!is.na(answers)], levels_of_rows)
-    if (length(levels_of_rows) > 1 && length(unknown_answers) > 0) {
+    if (length(levels_of_rows) > 1) {
+      unknown_answers <- setdiff(answers, levels_of_rows)
+    } else if ("Ja" %in% answers) {
+      unknown_answers <- character(0)
+    } else {
+      unknown_answers <- setdiff(answers, c("Nein", "Nicht Gewählt"))
+    }
+    if (length(unknown_answers) > 0) {
       stop("No row of selection_rows() for the answers of ", variable_name, ": ",
            paste(unknown_answers, collapse = ", "))
     }
@@ -334,11 +346,12 @@ section_selection <- function(experts, vignettes, dirs) {
   label_of(vignettes$vig_rec, TECHNOLOGY_LABELS, "recommendation")
 
   parts <- tribble(
-    ~part,                ~caption,                                                             ~placement_all, ~part_note,
-    "selection",          "Completers and break-offs: the firm, the invitation and the prices", "main",         "The federal state and the later blocks are in tables of their own. In the soft launch Q6 had no nationwide answer.",
-    "selection_state",    "Completers and break-offs: the federal state",                       "appendix",     "Shares per state among those with a usable postcode.",
-    "selection_later",    "Completers and break-offs: the later blocks",                        "appendix",     "The blocks that enough break-offs reached; a question asked of some firms only among those. In the soft launch Q7 was a different ranking task.",
-    "selection_barriers", "Completers and break-offs: the barriers",                            "appendix",     "Q19: the share ticking each option, as far as enough break-offs reached it."
+    ~part,                ~caption,                                                   ~placement_all, ~part_note,
+    "selection",          "Completers and break-offs: the firm and the invitation",   "main",         "The prices, the federal state and the later blocks are in tables of their own. In the soft launch Q6 had no nationwide answer.",
+    "selection_prices",   "Completers and break-offs: energy and carbon prices",      "main",         "Prices after the unit rules of the cleaning; Q18b only if the carbon price is known.",
+    "selection_state",    "Completers and break-offs: the federal state",             "appendix",     "Shares per state among those with a usable postcode.",
+    "selection_later",    "Completers and break-offs: the later blocks",              "appendix",     "The blocks that enough break-offs reached; a question asked of some firms only among those. In the soft launch Q7 was a different ranking task.",
+    "selection_barriers", "Completers and break-offs: the barriers",                  "appendix",     "Q19: the share ticking each option, as far as enough break-offs reached it."
   )
   for (group in c(ALL_EXPERTS, EXPERT_GROUPS)) {
     group_experts <- subset_group(experts, group)
@@ -407,19 +420,22 @@ section_selection <- function(experts, vignettes, dirs) {
       if (vignette_columns$arm_name[k] == "nofw") {
         column_cells[technologies == "Fernwärme"] <- ""
       }
-      recommendation_cells[[vignette_columns$column[k]]] <- column_cells
-      experts_row[[vignette_columns$column[k]]] <- fmt_int(n_column_experts)
-      vignettes_row[[vignette_columns$column[k]]] <- fmt_int(nrow(column_rows))
+      column_name <- vignette_columns$column[k]
+      recommendation_cells[[column_name]] <- column_cells
+      experts_row[[column_name]] <- fmt_int(shown_count(n_column_experts))
+      vignettes_row[[column_name]] <- fmt_int(
+        if_else(n_column_experts >= MIN_N, as.numeric(nrow(column_rows)), NA_real_)
+      )
     }
     if (is_any_column_shown) {
       arm_header <- c(1, 2, 2)
       names(arm_header) <- c(" ", latex_text(unname(ARM_LABELS[c("fw", "nofw")])))
       vignettes_note <- paste0(
         "Shares of the recommendations in the answered vignettes. Completers: ",
-        "submitted the questionnaire; break-offs: never did, so they answered fewer ",
-        "vignettes, and the early positions only. No test, as the answers of one ",
-        "expert are not independent. Q6a sets the arm, it is not randomized. -- means ",
-        "fewer than ", MIN_N, " experts.", group_note
+        "submitted the questionnaire; break-offs: never did, so they answered ",
+        "fewer vignettes, and the early positions only. No test, as the answers of ",
+        "one expert are not independent. Q6a sets the arm, it is not randomized. ",
+        "-- means fewer than ", MIN_N, " experts.", group_note
       )
       vignettes_file <- paste0("tab_selection_vignettes_", group_slug(group), ".tex")
       table_custom(

@@ -2,12 +2,11 @@
 # test_deck.R — the sections on recruitment, completion and selection, the frame
 #               and the deck, on synthetic data
 # Inputs : experts.rds, vignettes.rds, frame.rds of a synthetic run
-# Outputs: in <SECURE_DIR>/output/test_deck/ (removed first), under a path with a
-#          space in it
+# Outputs: in <SECURE_DIR>/output/test deck/ (removed first), a path with a space
 # Checks : every exhibit file exists and is in the list; the numbers of the tables
-#          add up and match a computation by hand; the minimum cell; no German; the
-#          deck compiles without overfull boxes, also alone, and fails softly; a
-#          sub-sample writes only what applies
+#          add up and match a computation by hand; the minimum cell; no German;
+#          the deck compiles without overfull boxes, also alone, and fails softly;
+#          a sub-sample writes only what applies
 ################################################################################
 # From the project root, after tests/simulate_data.R and R/run_cleaning.R:
 #   Rscript tests/test_deck.R
@@ -15,6 +14,9 @@
 # this file while it runs: R reads it line by line.
 
 source(file.path("R", "setup.R"))
+if (!USE_SYNTHETIC_DATA) {
+  stop("tests/test_deck.R relabels waves and writes test decks: synthetic data only")
+}
 test_dir <- file.path(OUTPUT_DIR, "test deck")
 unlink(test_dir, recursive = TRUE)
 dir.create(test_dir, recursive = TRUE)
@@ -30,11 +32,14 @@ table_row <- function(file, label) {
   pattern <- paste0("^(\\\\hspace\\{1em\\})?", label, " &")
   row <- table_lines[str_detect(table_lines, pattern)]
   stopifnot(length(row) == 1)
+  # str_split(): the text between the "&"; str_trim(): without the blanks around it
   cells <- str_trim(str_split(str_remove(row, "\\\\\\\\.*$"), "&")[[1]])
   cells[-1]
 }
 
-#' The messages of an expression: it runs on, and the messages go into a vector
+#' The messages of an expression: it runs on, and the messages go into a vector.
+#' withCallingHandlers() catches each message, invokeRestart() lets the expression
+#' go on, and <<- adds to the vector of this function from inside the handler.
 messages_of <- function(expression) {
   messages <- character(0)
   withCallingHandlers(
@@ -47,13 +52,15 @@ messages_of <- function(expression) {
   messages
 }
 
-# 1. Small functions ------------------------------------------------------------
+# 1. Small functions ----------------------------------------------------------
 stopifnot(
   is.na(response_rate(9, 100)),
   is.na(response_rate(10, 29)),
   all.equal(response_rate(10, 30), 1 / 3),
   is.na(shown_count(9)),
-  shown_count(10) == 10
+  shown_count(10) == 10,
+  is.na(shown_count(10, 29)),
+  shown_count(10, 30) == 10
 )
 
 codes <- question_code(QUESTIONNAIRE$label)
@@ -61,66 +68,71 @@ stopifnot(!anyNA(codes), !anyDuplicated(codes))
 
 answer_columns <- question_columns(experts)
 vignette_items <- c(paste0("vignette_", 1:6), "vignette_cost")
-stopifnot(setequal(names(answer_columns), setdiff(QUESTIONNAIRE$item, vignette_items)),
+stopifnot(setequal(names(answer_columns),
+                   setdiff(QUESTIONNAIRE$item, vignette_items)),
           all(lengths(answer_columns) > 0))
 cat("Answer columns not in the data (optional):",
     setdiff(unlist(answer_columns), names(experts)), "\n")
 
 halves <- two_halves(tibble(label = letters[1:9], n = as.character(1:9)),
                      c(rep("A", 2), rep("B", 3), rep("C", 4)))
-# Three headings and nine rows: split after B, at the section end closest to the middle
+# Three headings and nine rows: split after B, the section end closest to the middle
 stopifnot(nrow(halves) == 7,
           ncol(halves) == 5,
           identical(halves$left_label[1], "\\textbf{A}"),
           identical(halves$right_label[1], "\\textbf{C}"),
           identical(halves$right_label[6], ""))
 
-# 2. The frame -----------------------------------------------------------------
+# 2. The frame ----------------------------------------------------------------
 stopifnot(all(FRAME_TYPE_LABELS %in% EXPERT_GROUPS))
 # One address twice (with another case, a blank, and on another list), a name in
-# latin1 as in the real file, a fragment of a postcode, a postcode the lookup does not
-# have, whose first three digits are unanimous
+# latin1 as in the real file, a fragment of a postcode, a postcode the lookup does
+# not have, whose first three digits are unanimous, and a row without an address
 plz_lookup <- read_csv(PLZ_LOOKUP_FILE, show_col_types = FALSE,
-                       col_types = cols(plz = col_character(), bl_code = col_character()))
+                       col_types = cols(plz = col_character(),
+                                        bl_code = col_character()))
 unanimous <- plz_lookup %>%
   count(plz3 = str_sub(plz, 1, 3), bundesland) %>%
   group_by(plz3) %>%
   filter(n() == 1) %>%
   ungroup()
 prefix_state <- unanimous$bundesland[1]
-prefix_plz <- setdiff(paste0(unanimous$plz3[1], sprintf("%02d", 0:99)), plz_lookup$plz)[1]
+prefix_candidates <- paste0(unanimous$plz3[1], sprintf("%02d", 0:99))
+prefix_plz <- setdiff(prefix_candidates, plz_lookup$plz)[1]
 tiny_frame <- data.frame(
-  id = 1:5,
-  Email = c("Anna@example.org", "anna@example.org ", "j\xf6rg@t-online.de", "b@example.org",
-            "c@example.org"),
-  type = c("DENA", "SHK", "SHK", "Schornsteinfeger", "DENA"),
-  PLZ = c("10115", "10115", "123", NA, prefix_plz)
+  id = 1:6,
+  Email = c("Anna@example.org", "anna@example.org ", "j\xf6rg@t-online.de",
+            "b@example.org", "c@example.org", NA),
+  type = c("DENA", "SHK", "SHK", "Schornsteinfeger", "DENA", "DENA"),
+  PLZ = c("10115", "10115", "123", NA, prefix_plz, "10115")
 )
 tiny_file <- file.path(test_dir, "tiny_frame.rds")
 saveRDS(tiny_frame, tiny_file)
 tiny <- load_frame(tiny_file)
 stopifnot(
-  nrow(tiny) == 4,
-  attr(tiny, "n_raw") == 5,
+  nrow(tiny) == 5,
+  attr(tiny, "n_raw") == 6,
   attr(tiny, "n_duplicate_contacts") == 1,
   attr(tiny, "n_type_conflicts") == 1,
   identical(as.character(tiny$expert_group),
-            c("Energy advisers", "HVAC installers", "Chimney sweeps", "Energy advisers")),
-  identical(tiny$is_tonline, c(FALSE, TRUE, FALSE, FALSE)),
-  identical(is.na(tiny$bundesland), c(FALSE, TRUE, TRUE, FALSE)),
+            c("Energy advisers", "HVAC installers", "Chimney sweeps",
+              "Energy advisers", "Energy advisers")),
+  identical(tiny$is_tonline, c(FALSE, TRUE, FALSE, FALSE, FALSE)),
+  identical(is.na(tiny$bundesland), c(FALSE, TRUE, TRUE, FALSE, FALSE)),
   as.character(tiny$bundesland[4]) == prefix_state,
   !("email" %in% names(tiny)),
   setequal(names(STATE_LABELS), levels(tiny$bundesland))
 )
 tiny_frame$type[1] <- "Unbekannt"
 saveRDS(tiny_frame, tiny_file)
+# tryCatch(): the message of the error instead of a stop
 unknown_list <- tryCatch(load_frame(tiny_file), error = conditionMessage)
 stopifnot(is.character(unknown_list), str_detect(unknown_list, "Unbekannt"))
 
 frame <- load_frame()
 stopifnot(nrow(frame) == n_distinct(readRDS(FRAME_FILE)$Email))
 
-# 3. The full sample, with the waves of the dispatch log ------------------------
+# 3. The full sample, with the waves of the dispatch log ----------------------
 # Synthetic waves have invented numbers: here they take the numbers of the dispatch
 # log, so that the cross-check has something to join
 dispatch <- load_versand_waves()
@@ -135,14 +147,17 @@ exhibits <- run_summary_statistics(experts_log, vignettes, full_dir, "Full sampl
                                    frame = frame)
 tables_dir <- file.path(full_dir, "tables")
 
+# cross_join(): every id with every group
 expected <- bind_rows(
   tibble(id = c("sample_flow", "response_state", "response_state_started",
                 "response_state_table")) %>%
     cross_join(tibble(group = c(ALL_EXPERTS, EXPERT_GROUPS))),
-  tibble(id = c("response_group", "composition", "response_wave"), group = ALL_EXPERTS),
-  tibble(id = c("survival", "breakoff_section", "breakoff_question", "breakoff_state",
-                "duration", "vignette_times", "item_response", "meta",
-                "selection", "selection_state", "selection_later", "selection_barriers",
+  tibble(id = c("response_group", "composition", "response_wave"),
+         group = ALL_EXPERTS),
+  tibble(id = c("survival", "breakoff_section", "breakoff_question",
+                "breakoff_state", "duration", "vignette_times", "item_response",
+                "meta", "selection", "selection_prices", "selection_state",
+                "selection_later", "selection_barriers",
                 "selection_vignettes")) %>%
     cross_join(tibble(group = c(ALL_EXPERTS, EXPERT_GROUPS)))
 )
@@ -157,8 +172,9 @@ main_exhibits <- written %>%
   transmute(id, group)
 stopifnot(all(main_exhibits$group == ALL_EXPERTS),
           setequal(main_exhibits$id,
-                   c("sample_flow", "response_state", "response_group", "composition",
-                     "survival", "breakoff_section", "selection", "selection_vignettes")))
+                   c("sample_flow", "response_state", "response_group",
+                     "composition", "survival", "breakoff_section", "selection",
+                     "selection_prices", "selection_vignettes")))
 # Every file on the disk is in the list
 files_on_disk <- c(file.path("tables", list.files(tables_dir)),
                    file.path("figures", list.files(file.path(full_dir, "figures"))),
@@ -171,9 +187,11 @@ stopifnot(identical(basename(written$file),
                     paste0(prefixes[written$type], written$id, "_",
                            group_slug(written$group), extensions[written$type])))
 # By group a note says what the rate rests on, in the table or below the figure
-for (k in which(written$block == "A. Recruitment" & written$group != ALL_EXPERTS)) {
+is_by_group <- written$block == "A. Recruitment" & written$group != ALL_EXPERTS
+for (k in which(is_by_group)) {
   if (written$type[k] == "table") {
-    stopifnot(any(str_detect(readLines(file.path(full_dir, written$file[k]), encoding = "UTF-8"),
+    table_lines <- readLines(file.path(full_dir, written$file[k]), encoding = "UTF-8")
+    stopifnot(any(str_detect(table_lines,
                              "the mailing list and the numerator the answer")))
   } else {
     stopifnot(str_detect(written$note[k], fixed(GROUP_RATE_NOTE)))
@@ -216,21 +234,34 @@ stopifnot(identical(
     fmt_pct(sum(is_hvac & experts$is_complete) / n_no_tonline))
 ))
 
-# The minimum cell of a state, in the group with the smallest cells: the chimney
-# sweeps of a state
+# The minimum cell of a state, in the group with the smallest cells, the chimney
+# sweeps: a count of answers goes with its rate, and the denominator without
+# t-online addresses with its own minimum
 sweeps <- experts %>%
   filter(expert_group == "Chimney sweeps")
 sweep_file <- file.path(tables_dir, "tab_response_state_table_chimney_sweeps.tex")
-sweep_counts <- count_by_state(frame %>% filter(expert_group == "Chimney sweeps"), sweeps)
+sweep_counts <- count_by_state(frame %>% filter(expert_group == "Chimney sweeps"),
+                               sweeps)
 n_hidden <- 0
 for (k in seq_len(nrow(sweep_counts))) {
   cells <- table_row(sweep_file, STATE_LABELS[[sweep_counts$state[k]]])
-  is_shown <- sweep_counts$invited[k] >= MIN_CONTACTS & sweep_counts$completed[k] >= MIN_N
+  is_shown <- sweep_counts$invited[k] >= MIN_CONTACTS &
+    sweep_counts$completed[k] >= MIN_N
   stopifnot(identical(cells[5] != "--", is_shown),
-            identical(cells[3] != "--", sweep_counts$completed[k] >= MIN_N))
+            identical(cells[3] != "--", is_shown),
+            identical(cells[6] != "--",
+                      sweep_counts$invited_no_tonline[k] >= MIN_CONTACTS))
   n_hidden <- n_hidden + as.integer(!is_shown)
 }
 cat("Chimney sweeps: states below the minimum cell, hidden:", n_hidden, "\n")
+
+# Item response: where the share is hidden, its two counts are too
+for (slug in GROUP_SLUGS) {
+  item_lines <- readLines(file.path(tables_dir,
+                                    paste0("tab_item_response_", slug, ".tex")),
+                          encoding = "UTF-8")
+  stopifnot(!any(str_detect(item_lines, "& [0-9,]+ & [0-9,]+ & --")))
+}
 
 # The waves: from the dispatch log, in the table
 wave_file <- file.path(tables_dir, "tab_response_wave_all.tex")
@@ -238,13 +269,16 @@ wave_row <- table_row(wave_file, dispatch$wave[1])
 stopifnot(wave_row[3] == fmt_int(dispatch$invitations[1]),
           wave_row[2] == format(dispatch$first_sent[1], "%Y-%m-%d"),
           table_row(wave_file, "Invitations in the dispatch log")[3] == "45,965",
-          table_row(wave_file, "Rows of the sampling frame")[3] == fmt_int(attr(frame, "n_raw")),
-          table_row(wave_file, "Persons on the lists \\(one row per e-mail address\\)")[3] ==
+          table_row(wave_file, "Rows of the sampling frame")[3] ==
+            fmt_int(attr(frame, "n_raw")),
+          table_row(wave_file,
+                    "Persons on the lists \\(one row per e-mail address\\)")[3] ==
             fmt_int(nrow(frame)),
           table_row(wave_file, "All waves")[3] == "45,965")
 
 # The comparison against a computation by hand: a number and a share
 selection_file <- file.path(tables_dir, "tab_selection_all.tex")
+prices_file <- file.path(tables_dir, "tab_selection_prices_all.tex")
 hdd_completers <- experts$hdd[experts$is_complete & !is.na(experts$hdd)]
 hdd_breakoffs <- experts$hdd[!experts$is_complete & !is.na(experts$hdd)]
 hdd_difference <- (mean(hdd_completers) - mean(hdd_breakoffs)) /
@@ -258,12 +292,13 @@ stopifnot(hdd_row[1] == fmt_int(length(hdd_completers)),
 
 price_position <- QUESTIONNAIRE$position[QUESTIONNAIRE$item == "time_pexp"]
 rise_reached <- experts %>%
-  filter(!is.na(pexp_gas_rise), is_complete | last_question_position >= price_position)
+  filter(!is.na(pexp_gas_rise),
+         is_complete | last_question_position >= price_position)
 rise_completers <- rise_reached$pexp_gas_rise[rise_reached$is_complete]
 rise_breakoffs <- rise_reached$pexp_gas_rise[!rise_reached$is_complete]
 rise_table <- matrix(c(sum(rise_completers), sum(1 - rise_completers),
                        sum(rise_breakoffs), sum(1 - rise_breakoffs)), nrow = 2)
-rise_row <- table_row(selection_file, "Expects a rise: Gas")
+rise_row <- table_row(prices_file, "Expects a rise: Gas")
 stopifnot(rise_row[1] == fmt_int(length(rise_completers)),
           rise_row[2] == fmt_pct(mean(rise_completers)),
           rise_row[3] == "",
@@ -272,9 +307,9 @@ stopifnot(rise_row[1] == fmt_int(length(rise_completers)),
 # The shares of a question sum to 100 percent, among those who answered
 revenue_shares <- numeric(length(REVENUE_LABELS))
 for (k in seq_along(REVENUE_LABELS)) {
-  revenue_shares[k] <- as.numeric(str_remove(
-    table_row(selection_file, paste0("Revenue: ", gsub("€", "\\\\\\\\texteuro\\\\{\\\\}",
-                                                        REVENUE_LABELS[[k]])))[2], "\\\\%"))
+  revenue_label <- gsub("€", "\\\\\\\\texteuro\\\\{\\\\}", REVENUE_LABELS[[k]])
+  revenue_row <- table_row(selection_file, paste0("Revenue: ", revenue_label))
+  revenue_shares[k] <- as.numeric(str_remove(revenue_row[2], "\\\\%"))
 }
 stopifnot(abs(sum(revenue_shares) - 100) < 0.5)
 
@@ -287,7 +322,8 @@ stopifnot(file.exists(file.path(full_dir, "summary_statistics.pdf")),
           sum(str_detect(log_lines, "Overfull")) == 0,
           sum(str_detect(log_lines, "^!")) == 0,
           identical(getwd(), project_dir))
-deck_lines <- readLines(file.path(full_dir, "summary_statistics.tex"), encoding = "UTF-8")
+deck_file <- file.path(full_dir, "summary_statistics.tex")
+deck_lines <- readLines(deck_file, encoding = "UTF-8")
 stopifnot(sum(str_detect(deck_lines, "^\\\\begin\\{frame\\}")) == nrow(exhibits) + 2,
           any(str_detect(deck_lines, "Commit [0-9a-f]+")),
           any(str_detect(deck_lines, "max totalheight=0.82")),
@@ -295,8 +331,8 @@ stopifnot(sum(str_detect(deck_lines, "^\\\\begin\\{frame\\}")) == nrow(exhibits)
 
 # 3.3 No German in the tables and figure notes, and no raw name
 german_words <- paste0(
-  "\\b(Ja|Nein|Nicht Gew|Keine|Sonstig|Firmen|Personen|Fernw|Wärme|Heizung|Bayern|Hessen|",
-  "Niedersachsen|Sachsen|Thüringen|Nordrhein|Rheinland|bundesweit|Abschluss)"
+  "\\b(Ja|Nein|Nicht Gew|Keine|Sonstig|Firmen|Personen|Fernw|Wärme|Heizung|Bayern|",
+  "Hessen|Niedersachsen|Sachsen|Thüringen|Nordrhein|Rheinland|bundesweit|Abschluss)"
 )
 for (file in c(list.files(tables_dir, full.names = TRUE))) {
   german <- str_subset(readLines(file, encoding = "UTF-8"), german_words)
@@ -307,13 +343,13 @@ for (file in c(list.files(tables_dir, full.names = TRUE))) {
 stopifnot(!any(str_detect(exhibits$note, german_words)),
           !any(str_detect(exhibits$caption, german_words)))
 
-# 4. The deck alone, on an existing folder --------------------------------------
+# 4. The deck alone, on an existing folder ------------------------------------
 unlink(file.path(full_dir, "summary_statistics.pdf"))
 alone <- build_presentation(NULL, full_dir, "Full sample")
 stopifnot(identical(alone, file.path(full_dir, "summary_statistics.pdf")),
           file.exists(alone),
           identical(getwd(), project_dir))
-deck_lines <- readLines(file.path(full_dir, "summary_statistics.tex"), encoding = "UTF-8")
+deck_lines <- readLines(deck_file, encoding = "UTF-8")
 stopifnot(any(str_detect(deck_lines, "Number of experts and vignettes not given")))
 
 # Exhibits as the other sections write them: nothing overflows, however long
@@ -323,73 +359,86 @@ dir.create(file.path(fake_dir, "maps"), recursive = TRUE)
 dir.create(file.path(fake_dir, "tables"), recursive = TRUE)
 plot_fake <- ggplot(tibble(x = 1:3, y = 1:3), aes(x = x, y = y)) +
   geom_line()
-long_note <- paste(rep("A note with 80 percent of a line, & more, as long as a note gets.", 7),
-                   collapse = " ")
-long_caption <- paste("A caption of a certain length, with & and % and a group after it",
-                      "so that it takes two lines of the frame title")
-save_figure(plot_fake, file.path(fake_dir, "figures", "fig_fake_full.pdf"), size = "full")
-save_figure(plot_fake, file.path(fake_dir, "figures", "fig_fake_tall.pdf"), size = "tall")
+long_note <- paste(
+  rep("A note with 80 percent of a line, & more, as long as a note gets.", 7),
+  collapse = " "
+)
+long_caption <- paste("A caption of a certain length, with & and % and a group",
+                      "after it so that it takes two lines of the frame title")
+save_figure(plot_fake, file.path(fake_dir, "figures", "fig_fake_full.pdf"),
+            size = "full")
+save_figure(plot_fake, file.path(fake_dir, "figures", "fig_fake_tall.pdf"),
+            size = "tall")
 save_figure(plot_fake, file.path(fake_dir, "maps", "map_fake.pdf"), size = "map")
 long_table <- tibble(label = paste("Row", 1:150), a = "1.0", b = "2.0")
 table_custom(long_table, file.path(fake_dir, "tables", "tab_fake_long.tex"), "A note.")
-wide_table <- as_tibble(matrix("1,000", 3, 40, dimnames = list(NULL, paste0("column", 1:40))))
+wide_table <- as_tibble(matrix("1,000", 3, 40,
+                               dimnames = list(NULL, paste0("column", 1:40))))
 table_custom(wide_table, file.path(fake_dir, "tables", "tab_fake_wide.tex"), "A note.")
 fake_block <- "D. Experts and firms"
 fake_exhibits <- bind_rows(
-  exhibit_row(fake_block, "full", "HVAC installers", "figure", "figures/fig_fake_full.pdf",
-              long_caption, "main", long_note),
-  exhibit_row(fake_block, "tall", ALL_EXPERTS, "figure", "figures/fig_fake_tall.pdf",
-              long_caption, "appendix", long_note),
+  exhibit_row(fake_block, "full", "HVAC installers", "figure",
+              "figures/fig_fake_full.pdf", long_caption, "main", long_note),
+  exhibit_row(fake_block, "tall", ALL_EXPERTS, "figure",
+              "figures/fig_fake_tall.pdf", long_caption, "appendix", long_note),
   exhibit_row(fake_block, "map", ALL_EXPERTS, "map", "maps/map_fake.pdf",
               long_caption, "appendix", long_note),
-  exhibit_row("J. Vignettes", "long", ALL_EXPERTS, "table", "tables/tab_fake_long.tex",
-              long_caption, "appendix"),
-  exhibit_row("J. Vignettes", "wide", ALL_EXPERTS, "table", "tables/tab_fake_wide.tex",
-              long_caption, "appendix")
+  exhibit_row(fake_block, "map without a note", ALL_EXPERTS, "map",
+              "maps/map_fake.pdf", "A short caption", "appendix"),
+  exhibit_row("J. Vignettes", "long", ALL_EXPERTS, "table",
+              "tables/tab_fake_long.tex", long_caption, "appendix"),
+  exhibit_row("J. Vignettes", "wide", ALL_EXPERTS, "table",
+              "tables/tab_fake_wide.tex", long_caption, "appendix")
 )
 fake_pdf <- build_presentation(fake_exhibits, fake_dir, "Fake")
 fake_log <- readLines(file.path(fake_dir, "summary_statistics.log"), warn = FALSE)
 stopifnot(file.exists(fake_pdf),
           sum(str_detect(fake_log, "Overfull")) == 0)
-fake_deck <- readLines(file.path(fake_dir, "summary_statistics.tex"), encoding = "UTF-8")
-# All experts first in a block, then the groups; the blocks without exhibits are named
+fake_deck <- readLines(file.path(fake_dir, "summary_statistics.tex"),
+                       encoding = "UTF-8")
+# All experts first in a block, then the groups; blocks without exhibits are named
 first_frames <- str_subset(fake_deck, "^\\\\begin\\{frame\\}.*(All experts|HVAC)")
 stopifnot(str_detect(first_frames[1], "All experts"),
-          str_detect(first_frames[3], "HVAC"),
+          str_detect(first_frames[4], "HVAC"),
           any(str_detect(fake_deck, "A. Recruitment")),
           !any(str_detect(fake_deck, "D. Experts and firms\\}: ")))
 
-# 5. The deck fails softly ------------------------------------------------------
+# 5. The deck fails softly ----------------------------------------------------
 # A file of the list is gone: it is named under "Not shown", and the rest compiles
 meta_file <- file.path(full_dir, "tables", "tab_meta_all.tex")
 meta_lines <- readLines(meta_file, encoding = "UTF-8")
 unlink(meta_file)
 gone <- build_presentation(NULL, full_dir, "Full sample")
-deck_lines <- readLines(file.path(full_dir, "summary_statistics.tex"), encoding = "UTF-8")
+deck_lines <- readLines(deck_file, encoding = "UTF-8")
 stopifnot(file.exists(gone),
-          any(str_detect(deck_lines, "the file does not exist: tables/tab\\\\_meta\\\\_all.tex")))
+          any(str_detect(deck_lines,
+                         "the file does not exist: tables/tab\\\\_meta\\\\_all.tex")))
 
 # A table that does not compile: a message with the log, the .tex stays, no stop
 writeLines(c("\\undefinedcommand", meta_lines), meta_file, useBytes = TRUE)
-broken_messages <- messages_of(broken <- build_presentation(NULL, full_dir, "Full sample"))
+broken_messages <- messages_of(
+  broken <- build_presentation(NULL, full_dir, "Full sample")
+)
 stopifnot(is.na(broken),
           any(str_detect(broken_messages, fixed(full_log))),
-          file.exists(file.path(full_dir, "summary_statistics.tex")),
+          file.exists(deck_file),
           identical(getwd(), project_dir))
 writeLines(meta_lines, meta_file, useBytes = TRUE)
 
 # No pdflatex: a message, the .tex stays, no stop, no old deck left behind
 old_path <- Sys.getenv("PATH")
 Sys.setenv(PATH = "")
-missing_messages <- messages_of(missing_deck <- build_presentation(NULL, full_dir, "Full sample"))
+missing_messages <- messages_of(
+  missing_deck <- build_presentation(NULL, full_dir, "Full sample")
+)
 Sys.setenv(PATH = old_path)
 stopifnot(is.na(missing_deck),
           any(str_detect(missing_messages, "pdflatex is missing")),
-          file.exists(file.path(full_dir, "summary_statistics.tex")),
+          file.exists(deck_file),
           !file.exists(file.path(full_dir, "summary_statistics.pdf")),
           identical(getwd(), project_dir))
 
-# 6. A sub-sample: completers of one arm, no frame ------------------------------
+# 6. A sub-sample: completers of one arm, no frame ----------------------------
 completers_fw <- experts %>%
   filter(is_complete, arm == "fw")
 vignettes_fw <- vignettes %>%
@@ -400,35 +449,41 @@ sub_exhibits <- run_summary_statistics(completers_fw, vignettes_fw, sub_dir,
 stopifnot(setequal(unique(sub_exhibits$id), c("duration", "vignette_times")),
           all(file.exists(file.path(sub_dir, sub_exhibits$file))),
           file.exists(file.path(sub_dir, "summary_statistics.pdf")))
-sub_deck <- readLines(file.path(sub_dir, "summary_statistics.tex"), encoding = "UTF-8")
+sub_deck <- readLines(file.path(sub_dir, "summary_statistics.tex"),
+                      encoding = "UTF-8")
 stopifnot(any(str_detect(sub_deck, "A. Recruitment.*sampling frame")),
           any(str_detect(sub_deck, "C. Selection")),
           any(str_detect(sub_deck, fixed("district heating \\& more"))))
 
-# 7. Other samples --------------------------------------------------------------
+# 7. Other samples ------------------------------------------------------------
+section_dirs <- list(tables = file.path(test_dir, "sections", "tables"),
+                     figures = file.path(test_dir, "sections", "figures"),
+                     maps = file.path(test_dir, "sections", "maps"))
+for (folder in section_dirs) {
+  dir.create(folder, recursive = TRUE)
+}
+
 # Without some columns: the rows and blocks that rest on them drop out
-no_mix_dir <- file.path(test_dir, "no mix")
 no_mix <- experts %>%
   select(-starts_with("mix25_"), -starts_with("cpd_"))
-no_mix_exhibits <- run_summary_statistics(no_mix, vignettes, no_mix_dir,
-                                          "Without the installations")
-no_mix_later <- readLines(file.path(no_mix_dir, "tables", "tab_selection_later_all.tex"),
+no_mix_selection <- section_selection(no_mix, vignettes, section_dirs)
+no_mix_completion <- section_completion(no_mix, vignettes, section_dirs)
+no_mix_later <- readLines(file.path(section_dirs$tables,
+                                    "tab_selection_later_all.tex"),
                           encoding = "UTF-8")
-stopifnot(file.exists(file.path(no_mix_dir, "summary_statistics.pdf")),
-          !any(str_detect(no_mix_later, "Heating systems installed")),
+stopifnot(!any(str_detect(no_mix_later, "Heating systems installed")),
           !any(str_detect(no_mix_later, "Continuing education")))
-item_row <- table_row(file.path(no_mix_dir, "tables", "tab_item_response_all.tex"),
+item_row <- table_row(file.path(section_dirs$tables, "tab_item_response_all.tex"),
                       "\\\\quad Q11b Heating systems installed 2025")
 stopifnot(item_row[3] == "--", item_row[4] == "--")
 
-# Without the times: no metadata, and the deck says so
+# Without the times: no metadata
 no_times <- experts %>%
   select(-starts_with("time_"))
-no_times_exhibits <- section_completion(no_times, vignettes, list())
-stopifnot(nrow(no_times_exhibits) == 0)
+stopifnot(nrow(section_completion(no_times, vignettes, section_dirs)) == 0)
 
-# A few break-offs: enough for the block on break-offs, for the comparison in the
-# first blocks, and not for later questions or the groups
+# A few break-offs: enough for the comparison in the first blocks, and not for later
+# questions or the groups
 breakoff_ids <- experts %>%
   filter(!is_complete, last_question_position >= 1) %>%
   arrange(desc(last_question_position)) %>%
@@ -437,23 +492,17 @@ few_breakoffs <- experts %>%
   filter(is_complete | resp_uid %in% breakoff_ids[seq_len(3 * MIN_N)])
 few_vignettes <- vignettes %>%
   filter(resp_uid %in% few_breakoffs$resp_uid)
-few_dirs <- list(tables = file.path(test_dir, "few", "tables"),
-                 figures = file.path(test_dir, "few", "figures"),
-                 maps = file.path(test_dir, "few", "maps"))
-for (folder in few_dirs) {
-  dir.create(folder, recursive = TRUE)
-}
-few_selection <- section_selection(few_breakoffs, few_vignettes, few_dirs)
+few_selection <- section_selection(few_breakoffs, few_vignettes, section_dirs)
 stopifnot("selection" %in% few_selection$id,
-          all(file.exists(file.path(test_dir, "few", few_selection$file))))
+          all(file.exists(file.path(test_dir, "sections", few_selection$file))))
 
 # Too few break-offs: nothing to compare, no break-off exhibits
 too_few <- experts %>%
   filter(is_complete | resp_uid %in% breakoff_ids[seq_len(MIN_N - 1)])
 too_few_vignettes <- vignettes %>%
   filter(resp_uid %in% too_few$resp_uid)
-stopifnot(nrow(section_selection(too_few, too_few_vignettes, few_dirs)) == 0)
-too_few_completion <- section_completion(too_few, too_few_vignettes, few_dirs)
+stopifnot(nrow(section_selection(too_few, too_few_vignettes, section_dirs)) == 0)
+too_few_completion <- section_completion(too_few, too_few_vignettes, section_dirs)
 stopifnot(setequal(unique(too_few_completion$id), c("duration", "vignette_times")))
 
 cat("Deck, frame and sections: all checks passed\n")

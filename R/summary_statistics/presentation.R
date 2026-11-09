@@ -55,8 +55,8 @@ build_presentation <- function(exhibits = NULL, output_dir, sample_label,
   }
   # A section per block in the order of the exhibits; in a block all experts first,
   # then the groups, each in the order of their exhibits. match(): the position in
-  # the vector, so that arrange() follows it
-  # A column of text read from a file has NA where a section wrote no note
+  # the vector, so that arrange() follows it. coalesce(): the first value that is
+  # not NA, as a column read from the file has NA where a section wrote no note
   exhibits <- exhibits %>%
     mutate(note = coalesce(note, ""),
            block_order = match(block, unique(block)),
@@ -69,8 +69,8 @@ build_presentation <- function(exhibits = NULL, output_dir, sample_label,
     filter(has_file)
 
   # 2. The first slide and the overview ----------------------------------------
-  # tryCatch(): an empty answer instead of a stop if git is missing or this is no
-  # repository; the question is only which run the deck shows
+  # system2(): runs a program. tryCatch(): an empty answer instead of a stop if git
+  # is missing or this is no repository; the question is only which run the deck shows
   commit <- tryCatch(
     suppressWarnings(system2("git", c("rev-parse", "--short", "HEAD"),
                              stdout = TRUE, stderr = FALSE)),
@@ -147,7 +147,8 @@ build_presentation <- function(exhibits = NULL, output_dir, sample_label,
       } else {
         # Natural size whenever it fits: only what is too tall for the frame shrinks.
         # A line of the note (of 120 characters) takes about 4.1% of the height.
-        max_height <- 0.88 - title_height - 0.041 * ceiling(nchar(exhibit$note) / 120)
+        note_height <- 0.041 * ceiling(nchar(exhibit$note) / 120)
+        max_height <- 0.88 - title_height - note_height
         lines <- c(
           lines,
           "\\centering",
@@ -163,13 +164,14 @@ build_presentation <- function(exhibits = NULL, output_dir, sample_label,
   }
 
   # 4. What the sample does not have -------------------------------------------
+  # str_extract(): the part of the text that matches, here up to the first period
   blocks_missing <- DECK_BLOCKS %>%
     filter(!(letter %in% str_extract(blocks, "^[^.]+")))
   lines <- c(lines, "\\section{Not shown}",
              "\\begin{frame}[label=notshown]{Not shown}", "\\footnotesize")
   if (nrow(blocks_missing) == 0 && length(files_missing) == 0) {
-    lines <- c(lines,
-               "Every block of the summary statistics wrote exhibits for this sample.")
+    lines <- c(lines, paste0("Every block of the summary statistics wrote exhibits ",
+                             "for this sample."))
   } else {
     lines <- c(lines, "\\begin{itemize}")
     for (k in seq_len(nrow(blocks_missing))) {
@@ -209,8 +211,8 @@ build_presentation <- function(exhibits = NULL, output_dir, sample_label,
     message("The deck was not compiled, pdflatex is missing. Its source: ", tex_file)
     return(invisible(NA_character_))
   }
-  # system2(): runs a program and gives its exit status. Two passes, for the links
-  # and the numbers of the frames
+  # Two passes, for the links and the numbers of the frames. status: the exit status
+  # of the program, 0 without errors
   for (pass in 1:2) {
     status <- system2("pdflatex",
                       c("-interaction=nonstopmode", paste0(DECK_FILE, ".tex")),

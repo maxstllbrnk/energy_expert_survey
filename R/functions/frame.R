@@ -75,6 +75,7 @@ TARGET_GROUP_LABELS <- c(
 #'   (factor). Attributes: n_raw (rows of the file), n_duplicate_contacts (rows
 #'   collapsed), n_type_conflicts (addresses on more than one list)
 load_frame <- function(path = FRAME_FILE) {
+  # as_tibble(): the data frame of the file as a tibble
   raw <- as_tibble(readRDS(path))
 
   # (1) The file was written on a latin1 locale without declaring it: without this
@@ -86,8 +87,9 @@ load_frame <- function(path = FRAME_FILE) {
       raw[[column]] <- enc2utf8(raw[[column]])
     }
   }
-  # str_squish(): no blanks at the ends, single blanks inside; coalesce(): the first
-  # value that is not NA
+  # str_squish(): no blanks at the ends, single blanks inside; str_to_lower(): small
+  # letters; str_detect(): whether the pattern occurs; coalesce(): the first value
+  # that is not NA
   contacts <- raw %>%
     transmute(frame_id = id,
               email = str_to_lower(str_squish(Email)),
@@ -95,6 +97,9 @@ load_frame <- function(path = FRAME_FILE) {
               plz = if_else(str_detect(coalesce(PLZ, ""), "^[0-9]{5}$"),
                             PLZ, NA_character_))
   n_raw <- nrow(contacts)
+  # Rows without an address cannot be told apart, so they collapse into one person
+  # below. Whether they were invited at all is not known: they are counted.
+  n_no_address <- sum(coalesce(contacts$email, "") == "")
 
   # (2) One row per person. Rows that share an e-mail address are one mailbox and
   # count once. An address on two lists stays on the first; these are counted, as
@@ -112,7 +117,7 @@ load_frame <- function(path = FRAME_FILE) {
     mutate(expert_group = factor(label_of(type, FRAME_TYPE_LABELS,
                                           "list of the frame"),
                                  levels = EXPERT_GROUPS),
-           is_tonline = str_detect(email, TONLINE_PATTERN)) %>%
+           is_tonline = coalesce(str_detect(email, TONLINE_PATTERN), FALSE)) %>%
     select(-email)
 
   # (4) The federal state, by the rule of R/cleaning/03_recode.R: the postcode, or
@@ -126,7 +131,8 @@ load_frame <- function(path = FRAME_FILE) {
     distinct(bl_code, bundesland) %>%
     arrange(bl_code) %>%
     pull(bundesland)
-  # A share of at least FRAME_PLZ_PREFIX_MIN_PURITY leaves one state per prefix
+  # A share of at least FRAME_PLZ_PREFIX_MIN_PURITY leaves one state per prefix.
+  # str_sub(): the characters from the first to the third
   plz3_lookup <- plz_lookup %>%
     count(plz3 = str_sub(plz, 1, 3), bundesland) %>%
     group_by(plz3) %>%
@@ -146,8 +152,8 @@ load_frame <- function(path = FRAME_FILE) {
   attr(frame, "n_duplicate_contacts") <- n_raw - nrow(frame)
   attr(frame, "n_type_conflicts") <- n_type_conflicts
   message("Frame: ", nrow(frame), " contacted persons from ", n_raw, " rows (",
-          n_type_conflicts, " addresses on more than one list), ",
-          sum(frame$is_tonline), " at t-online, ",
+          n_type_conflicts, " addresses on more than one list, ", n_no_address,
+          " rows without an address), ", sum(frame$is_tonline), " at t-online, ",
           sum(is.na(frame$bundesland)), " without a usable postcode")
   frame
 }
