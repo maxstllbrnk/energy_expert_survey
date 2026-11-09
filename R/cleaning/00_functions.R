@@ -166,25 +166,6 @@ read_raw_wave <- function(path) {
 }
 
 
-# --- the batch overview ------------------------------------------------------
-# One row per wave. Versandrunde tells us which waves were the soft launch, so
-# that is never hardcoded here.
-load_versand <- function(path = VERSAND_FILE) {
-  read_excel(path, sheet = "Versandübersicht", skip = 7, na = c("", "NA"),
-             .name_repair = "unique_quiet") |>
-    select(wave = `Umfrage-ID`, target_group = Zielgruppe,
-           versandrunde = Versandrunde, versanddatum = Versanddatum) |>
-    filter(!is.na(wave)) |>
-    mutate(wave = as.character(wave)) |>
-    summarise(target_group  = first(target_group),
-              versandrunde  = first(versandrunde),
-              first_sent    = suppressWarnings(min(as.Date(versanddatum), na.rm = TRUE)),
-              n_batches     = n(),
-              .by = wave) |>
-    mutate(is_softlaunch = str_detect(str_to_lower(versandrunde), "soft"))
-}
-
-
 # --- analysis variable names -------------------------------------------------
 # lowercase snake_case, <block>_<concept>[_<item>].
 #   meta_   LimeSurvey admin fields      vig_/att_  vignette module

@@ -14,14 +14,14 @@ plus the columns below. A person who started twice keeps the furthest attempt.
 | `is_complete` | lgl | submitted the questionnaire |
 | `expert_group` | factor | `Energy advisers`, `HVAC installers`, `Chimney sweeps`; `NA` if none can be assigned |
 | `expert_group_note` | chr | `assigned`, `Q2 not answered`, `no category ticked` |
-| `arm` | factor | `fw` (with the district-heating option), `nofw`; `NA` if unknown or answered in both |
-| `last_question`, `last_section` | chr | the last question answered and its section, in English |
+| `arm` | factor | `fw` (with the district-heating option), `nofw`; `NA` if unknown or answered in both. Use this, not `vig_arm` in `experts`, which holds only the arm that was observed |
+| `last_question`, `last_section` | chr | the last question answered and its section, in English; `No question answered` and `NA` if no page was submitted |
 | `last_question_position` | int | its position in `QUESTIONNAIRE`, 0 if no page was submitted |
 | `price_<fuel>_kwh` | dbl | reported price in cent per kWh after the unit rules; `NA` if blank or not usable. `<fuel>`: `gas`, `hpelec`, `dh`, `oil`, `pellet` |
 | `price_<fuel>_treatment` | chr | `blank`, `as reported`, `euro`, `per litre or kg`, `euro and per litre or kg`, `not usable` |
 | `pexp_<fuel>_rise` | dbl | 1 if the expert expects the price to rise, 0 if not, `NA` if blank |
-| `own_heating` | chr | answer of Q20, `Keine Angabe` if missing |
-| `heat_pump_at_home` | dbl | 1 if a heat pump heats the expert's home, else 0 |
+| `own_heating` | chr | answer of Q20, `Keine Angabe` if missing, also for everyone who stopped before Q20 |
+| `heat_pump_at_home` | dbl | 1 if a heat pump heats the expert's home, else 0, also for everyone who stopped before Q20 |
 | `hdd` | dbl | heating degree days of the expert's NUTS3 region in `HDD_YEAR`; `NA` without `nuts3` |
 | `tp_score`, `risk_score` | dbl | staircase score in (0, 1); also `_cell`, `_levels`, `_complete`. z-scores depend on the sample: compute them in the script |
 | `dem_birthyear_clean`, `dem_training_year_clean`, `firm_employees_clean`, `adv_households_clean`, `co2_est_low_clean`, `co2_est_high_clean` | dbl | the answer after the outlier rule (valid range, then the 0.5% tails over everyone who answered) |
@@ -70,6 +70,20 @@ scripts can share one reference expert:
 - `own_heating`: named vector, the share of each answer of Q20, `Keine Angabe` included
 - `hdd`: list: `year`, `n`, `mean`, `q25`, `q75`
 - `n_experts`, `date`
+
+## The sampling frame: `load_frame()` in `R/functions/frame.R`
+
+One row per contacted person: `frame_id`, `type`, `plz`, `expert_group`, `is_tonline`,
+`bundesland`. The e-mail address identifies a contact and does not leave the function. Only
+`run_summary_statistics()` needs the frame, for the response rates of the full sample.
+`load_versand()` gives the dispatch log, one row per wave.
+
+## The cleaning report: `OUTPUT_DIR/cleaning/cleaning_report.xlsx` and `.rds`
+
+One sheet per topic: `overview`, `rules`, `settings`, `waves`, `attempts`, `arms`,
+`expert_groups`, `prices`, `expectations`, `own_heating`, `outliers`, `shares`, `preferences`,
+`geography`, `variables`. The raw stage adds `raw_checks`, `harmonisation`, `recodes` and
+`data_quality`. `section_cleaning()` reads the `.rds` for the tables of the data appendix.
 
 ## Rules for outputs
 

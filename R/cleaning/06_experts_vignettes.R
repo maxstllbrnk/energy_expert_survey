@@ -69,9 +69,9 @@ OWN_HEATING_ANSWERS <- c("Wärmepumpe", "Pelletheizung", "Fernwärme", "Gasheizu
 
 # The outlier rule: impossible years go first (VALID_RANGE, the bounds that the
 # sheet data_quality of the report flags for them), then those below and above
-# TRIM_QUANTILES of what is left, over everyone who answered, so that an answer
-# is kept or removed in every table alike.
-TRIM_QUANTILES <- c(0.005, 0.995)
+# TRIM_QUANTILES (config.R, as the notes of the tables quote them) of what is left,
+# over everyone who answered, so that an answer is kept or removed in every table
+# alike.
 VALID_RANGE <- list(
   dem_birthyear = c(1920, 2010),
   dem_training_year = c(1930, 2026)

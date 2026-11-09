@@ -10,8 +10,6 @@
 #          maps/map_price_state_gas_all.pdf, map_price_state_hpelec_all.pdf
 # Checks : unknown answers (label_of()); the minimum cell
 ################################################################################
-# summary_exhibits(), multiline_header(), stack_answers(), plot_stacked_shares(),
-# plot_binned_histogram(): in section_experts_firms.R
 
 # The p-value of the G-test comes from this many simulated tables, because some
 # expected counts are small (old R/first_policy_brief/02_kl_divergence_prices.R).
@@ -249,7 +247,8 @@ section_prices_beliefs <- function(experts, dirs) {
   carbon_notes <- paste(
     "Q18 asks whether the expert has heard of the carbon price on heating fuels",
     "in Germany; Q18b, only if so, for a rough range of its current level. The",
-    "two ends without the 0.5% lowest and highest answers of all experts."
+    paste0("two ends without the ", 100 * TRIM_QUANTILES[1], "% lowest and highest"),
+    "answers of all experts."
   )
   exhibits <- bind_rows(exhibits, summary_exhibits(
     experts, carbon_rows, "carbon_price", "The carbon price: known and estimated",

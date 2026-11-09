@@ -21,6 +21,55 @@ GROUP_SLUGS <- c(
   "HVAC installers" = "hvac_installers",
   "Chimney sweeps" = "chimney_sweeps"
 )
+# The groups where a table has a column per arm x group
+GROUP_LABELS_SHORT <- c(
+  "Energy advisers" = "Advisers",
+  "HVAC installers" = "HVAC",
+  "Chimney sweeps" = "Sweeps"
+)
+# The registers the lists of the sampling frame were drawn from
+FRAME_TYPE_LABELS <- c(
+  "DENA" = "Energy advisers",
+  "SHK" = "HVAC installers",
+  "Schornsteinfeger" = "Chimney sweeps"
+)
+# The target group of a wave in the dispatch log
+TARGET_GROUP_LABELS <- c(
+  "Personen" = "Persons",
+  "Firmen" = "Firms"
+)
+# The federal states in official key order, as in the data and on the map
+STATE_LABELS <- c(
+  "Schleswig-Holstein" = "Schleswig-Holstein",
+  "Hamburg" = "Hamburg",
+  "Niedersachsen" = "Lower Saxony",
+  "Bremen" = "Bremen",
+  "Nordrhein-Westfalen" = "North Rhine-Westphalia",
+  "Hessen" = "Hesse",
+  "Rheinland-Pfalz" = "Rhineland-Palatinate",
+  "Baden-Württemberg" = "Baden-Württemberg",
+  "Bayern" = "Bavaria",
+  "Saarland" = "Saarland",
+  "Berlin" = "Berlin",
+  "Brandenburg" = "Brandenburg",
+  "Mecklenburg-Vorpommern" = "Mecklenburg-Western Pomerania",
+  "Sachsen" = "Saxony",
+  "Sachsen-Anhalt" = "Saxony-Anhalt",
+  "Thüringen" = "Thuringia"
+)
+# The variables of the outlier rule and the staircases, in the cleaning report
+OUTLIER_LABELS <- c(
+  dem_birthyear = "Year of birth",
+  dem_training_year = "Year training was completed",
+  firm_employees = "Employees",
+  adv_households = "Households advised, last year",
+  co2_est_low = "Carbon price, lower estimate (euro per tonne)",
+  co2_est_high = "Carbon price, upper estimate (euro per tonne)"
+)
+STAIRCASE_LABELS <- c(
+  tp = "Time preference (patience)",
+  risk = "Risk preference (risk tolerance)"
+)
 
 # The two arms of the vignettes, set by the answer to Q6a
 ARM_LABELS <- c(
@@ -171,6 +220,13 @@ BARRIER_QUESTIONS <- tribble(
   "Q19b",    "barr_dh_",   "district_heating",  "Barriers to the demand for district heating",
   "Q19c",    "barr_conv_", "conventional",      "Barriers to the demand for conventional heating"
 )
+# The heads of the columns of the barriers table: the captions of BARRIER_QUESTIONS
+# are too long for them
+BARRIER_HEADERS <- c(
+  Q19a = "Renewable heating",
+  Q19b = "District heating",
+  Q19c = "Conventional heating"
+)
 # Q28
 CRITERION_LABELS <- c(
   "Ausreichende Heizleistung bei sehr kalten Temperaturen" = "Enough heat in very cold weather",
@@ -229,6 +285,13 @@ GROUP_COLOURS <- c(
   "HVAC installers" = "#eb6834",
   "Chimney sweeps" = "#1baf7a",
   "All experts" = "#52514e"
+)
+# With four lines a figure must also work in greyscale
+GROUP_LINETYPES <- c(
+  "All experts" = "solid",
+  "Energy advisers" = "longdash",
+  "HVAC installers" = "dotdash",
+  "Chimney sweeps" = "dotted"
 )
 ARM_COLOURS <- c(
   "Without the district-heating option" = "#2a78d6",

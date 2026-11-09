@@ -74,6 +74,15 @@ N_ATTRIBUTES <- 9            # design attributes per vignette
 SURVEY_YEAR <- 2026          # age is SURVEY_YEAR minus the year of birth
 HDD_YEAR <- 2025             # the year of the heating degree days
 
+# The outlier rule of R/cleaning/06_experts_vignettes.R trims each answer at these
+# quantiles. Here because the notes of the tables quote them.
+TRIM_QUANTILES <- c(0.005, 0.995)
+# How unanimous the surrounding postcodes have to be before the first three digits
+# stand in for a postcode the lookup does not have. Used for the respondents
+# (R/cleaning/03_recode.R) and the contacts (load_frame()), so that one postcode
+# lands in one state on both sides of a response rate.
+PLZ_PREFIX_MIN_PURITY <- 0.9
+
 # The minimum cell of any output (project profile): every statistic rests on at
 # least 10 answers, every response rate on at least 30 contacted persons. Counts
 # of how many answers a cleaning step changed may be smaller.

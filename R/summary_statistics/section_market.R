@@ -5,10 +5,8 @@
 # Outputs: tables/tab_market_<group>.tex, tab_technology_shares_<group>.tex,
 #          tab_technology_shares_groups_all.tex;
 #          figures/fig_technology_shares_<group>.pdf
-# Checks : unknown answers and the minimum cell (section_experts_firms.R)
+# Checks : unknown answers and the minimum cell (R/functions/exhibits.R)
 ################################################################################
-# summary_exhibits(), plot_stacked_shares(): in section_experts_firms.R
-
 # Q11c is free text. At most this many manufacturers are shown by name.
 N_BRANDS_SHOWN <- 10
 # Free text that names no manufacturer, as spelled after the harmonisation below;
@@ -51,8 +49,8 @@ section_market <- function(experts, dirs) {
   market_notes <- paste(
     "Shares among the experts who answered. Q8 and Q10a: firms with energy",
     "advice, engineering or chimney sweeping. Households advised on replacing the",
-    "heating, without the 0.5% lowest and highest answers of all experts. Q7: the",
-    "customer groups for energy services; in one soft-launch wave a ranking of six",
+    paste0("heating, without the ", 100 * TRIM_QUANTILES[1], "% lowest and highest"),
+    "answers of all experts. Q7: the customer groups for energy services; in one soft-launch wave a ranking of six",
     "places with the answer \"don't know\", which counts as not answered, so the",
     "question is not like for like across the waves; all waves are pooled. Q11c:",
     "HVAC firms, which manufacturer they sell most of the technology they",

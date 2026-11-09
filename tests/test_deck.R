@@ -133,17 +133,11 @@ frame <- load_frame()
 stopifnot(nrow(frame) == n_distinct(readRDS(FRAME_FILE)$Email))
 
 # 3. The full sample, with the waves of the dispatch log ----------------------
-# Synthetic waves have invented numbers: here they take the numbers of the dispatch
-# log, so that the cross-check has something to join
-dispatch <- load_versand_waves()
+dispatch <- load_versand()
 stopifnot(nrow(dispatch) == 12, sum(dispatch$invitations) == 45965)
-wave_numbers <- dispatch$wave
-names(wave_numbers) <- sort(unique(experts$wave))
-experts_log <- experts %>%
-  mutate(wave = unname(wave_numbers[wave]))
 
 full_dir <- file.path(test_dir, "full sample", "summary statistics")
-exhibits <- run_summary_statistics(experts_log, vignettes, full_dir, "Full sample",
+exhibits <- run_summary_statistics(experts, vignettes, full_dir, "Full sample",
                                    frame = frame)
 tables_dir <- file.path(full_dir, "tables")
 

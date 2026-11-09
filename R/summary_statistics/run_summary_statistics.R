@@ -55,6 +55,23 @@ run_summary_statistics <- function(experts, vignettes, output_dir, sample_label,
     section_vignettes(experts, vignettes, dirs)
   )
   write_csv(exhibits, file.path(output_dir, "exhibits.csv"))
+
+  # Every table note starts with its sample (tables.md). In one place, as a section
+  # does not know the label of the sample.
+  table_exhibits <- exhibits %>%
+    filter(type == "table")
+  for (k in seq_len(nrow(table_exhibits))) {
+    table_file <- file.path(output_dir, table_exhibits$file[k])
+    sample_note <- paste0("\\item \\textit{Notes:} Sample: ",
+                          latex_text(sample_label), " (",
+                          latex_text(table_exhibits$group[k]), ").")
+    # readLines(), writeLines(): a text file as a vector of lines, and back
+    lines <- readLines(table_file, encoding = "UTF-8")
+    # sub(fixed = TRUE): replaces the text as it stands, backslashes included
+    lines <- sub("\\item \\textit{Notes:}", sample_note, lines, fixed = TRUE)
+    writeLines(lines, table_file)
+  }
+
   build_presentation(exhibits, output_dir, sample_label, experts, vignettes)
   invisible(exhibits)
 }

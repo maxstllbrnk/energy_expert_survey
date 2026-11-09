@@ -19,6 +19,6 @@ frame <- load_frame()
 run_summary_statistics(
   experts, vignettes,
   file.path(OUTPUT_DIR, "full_sample", "summary_statistics"),
-  "Full sample",
+  "everyone who started the questionnaire",
   frame = frame
 )

@@ -40,12 +40,10 @@ position_of <- function(item) {
 TICK_LEVELS <- c("Ja", "Nicht Gewählt")
 
 # 2. Persons: group, region, how far they got ----------------------------------
-WAVES <- tibble(
-  wave = as.character(100001:100012),
-  target_group = c("Firmen", "Energieberater", rep(c("Energieberater", "Schornsteinfeger", "Firmen"), length.out = 10)),
-  versandrunde = c("Soft Launch", "Soft Launch", paste0("Runde ", 1:10)),
-  is_softlaunch = c(TRUE, TRUE, rep(FALSE, 10))
-)
+# The real waves of the dispatch log, a public file, so that the join of the response
+# rates by wave runs as on the real data
+WAVES <- load_versand() %>%
+  select(wave, target_group, versandrunde, is_softlaunch)
 
 plz_lookup <- read_csv(PLZ_LOOKUP_FILE, show_col_types = FALSE,
                        col_types = cols(plz = col_character(), bl_code = col_character()))

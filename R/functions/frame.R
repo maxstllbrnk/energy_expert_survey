@@ -12,55 +12,14 @@
 # numerator the answer to Q2. Every exhibit of a rate by group says so in its note.
 
 # 1. Settings ------------------------------------------------------------------
-# The registers the lists were drawn from, with the names of EXPERT_GROUPS
-FRAME_TYPE_LABELS <- c(
-  "DENA" = "Energy advisers",
-  "SHK" = "HVAC installers",
-  "Schornsteinfeger" = "Chimney sweeps"
-)
-
 # Telekom appears to have blocked part of the mailing: the dispatch log notes "nach
 # dieser umfrage tendenziell geblocked von telekom??", and some reminders went out
 # "nicht t-online". An invitation that never arrived depresses the response rate.
 TONLINE_PATTERN <- "@t-online\\."
 
-# How unanimous the surrounding postcodes have to be before the first three digits
-# stand in for a postcode the lookup does not have: as in R/cleaning/03_recode.R,
-# so that a respondent and a contact with one postcode land in the same state.
-FRAME_PLZ_PREFIX_MIN_PURITY <- 0.9
-
 GROUP_RATE_NOTE <- paste0(
   "By group, the denominator is the mailing list and the numerator the answer to ",
   "Q2: there are no token lists, so a response cannot be matched to its list."
-)
-
-# The federal states in official key order, as in the data and on the map
-STATE_LABELS <- c(
-  "Schleswig-Holstein" = "Schleswig-Holstein",
-  "Hamburg" = "Hamburg",
-  "Niedersachsen" = "Lower Saxony",
-  "Bremen" = "Bremen",
-  "Nordrhein-Westfalen" = "North Rhine-Westphalia",
-  "Hessen" = "Hesse",
-  "Rheinland-Pfalz" = "Rhineland-Palatinate",
-  "Baden-Württemberg" = "Baden-Württemberg",
-  "Bayern" = "Bavaria",
-  "Saarland" = "Saarland",
-  "Berlin" = "Berlin",
-  "Brandenburg" = "Brandenburg",
-  "Mecklenburg-Vorpommern" = "Mecklenburg-Western Pomerania",
-  "Sachsen" = "Saxony",
-  "Sachsen-Anhalt" = "Saxony-Anhalt",
-  "Thüringen" = "Thuringia"
-)
-
-# The target group of a wave: Personen and Firmen in the dispatch log, the other
-# two only in the synthetic data of tests/simulate_data.R
-TARGET_GROUP_LABELS <- c(
-  "Personen" = "Persons",
-  "Firmen" = "Firms",
-  "Energieberater" = "Energy advisers",
-  "Schornsteinfeger" = "Chimney sweeps"
 )
 
 # 2. The frame -----------------------------------------------------------------
@@ -131,14 +90,14 @@ load_frame <- function(path = FRAME_FILE) {
     distinct(bl_code, bundesland) %>%
     arrange(bl_code) %>%
     pull(bundesland)
-  # A share of at least FRAME_PLZ_PREFIX_MIN_PURITY leaves one state per prefix.
+  # A share of at least PLZ_PREFIX_MIN_PURITY leaves one state per prefix.
   # str_sub(): the characters from the first to the third
   plz3_lookup <- plz_lookup %>%
     count(plz3 = str_sub(plz, 1, 3), bundesland) %>%
     group_by(plz3) %>%
     mutate(purity = n / sum(n)) %>%
     ungroup() %>%
-    filter(purity >= FRAME_PLZ_PREFIX_MIN_PURITY)
+    filter(purity >= PLZ_PREFIX_MIN_PURITY)
   # match(): the row of the lookup for each postcode, NA if it has none
   exact <- match(frame$plz, plz_lookup$plz)
   prefix <- match(str_sub(frame$plz, 1, 3), plz3_lookup$plz3)
@@ -160,25 +119,31 @@ load_frame <- function(path = FRAME_FILE) {
 
 # 3. The dispatch log ----------------------------------------------------------
 
-#' The dispatch log per wave, a cross-check on the frame. It counts invitations
-#' sent, a different quantity from the people on the lists (a person invited in two
-#' waves received two), but a large gap would mean that the frame is not what was
-#' mailed.
+#' The dispatch log, one row per wave. Versandrunde tells which waves were the soft
+#' launch, so that is never hardcoded. Its invitations are a cross-check on the
+#' frame: they are a different quantity from the people on the lists (a person
+#' invited in two waves received two), but a large gap would mean that the frame is
+#' not what was mailed.
 #'
 #' @param path the batch overview, one row per batch of a wave
-#' @return tibble, one row per wave: wave, invitations, first_sent, n_partly_sent
-#'   (batches marked as only partly sent)
-load_versand_waves <- function(path = VERSAND_FILE) {
+#' @return tibble, one row per wave: wave, target_group, versandrunde, is_softlaunch,
+#'   first_sent, invitations, n_partly_sent (batches marked as only partly sent)
+load_versand <- function(path = VERSAND_FILE) {
   read_excel(path, sheet = "Versandübersicht", skip = 7, na = c("", "NA"),
              .name_repair = "unique_quiet") %>%
     filter(!is.na(`Umfrage-ID`)) %>%
     transmute(wave = as.character(`Umfrage-ID`),
+              target_group = Zielgruppe,
+              versandrunde = Versandrunde,
               recipients = `Anzahl Empfänger je csv`,
               status = Versandstatus,
               sent = as.Date(Versanddatum)) %>%
     group_by(wave) %>%
-    summarise(invitations = sum(recipients, na.rm = TRUE),
+    summarise(target_group = first(target_group),
+              versandrunde = first(versandrunde),
               first_sent = min(sent, na.rm = TRUE),
+              invitations = sum(recipients, na.rm = TRUE),
               n_partly_sent = sum(status == "Teilweise versendet", na.rm = TRUE)) %>%
-    ungroup()
+    ungroup() %>%
+    mutate(is_softlaunch = str_detect(str_to_lower(versandrunde), "soft"))
 }

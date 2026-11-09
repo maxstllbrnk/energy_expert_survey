@@ -2,7 +2,7 @@
 # section_recruitment.R — Block A. Who was invited and who answered: the sample
 #                         flow, and the response rates by state, group and wave
 # Inputs : experts and vignettes of the full sample; the sampling frame
-#          (load_frame()); the dispatch log (load_versand_waves())
+#          (load_frame()); the dispatch log (load_versand())
 # Outputs: in dirs$tables: tab_sample_flow_<group>, tab_response_group_all,
 #          tab_response_state_table_<group>, tab_response_wave_all
 #          in dirs$maps: map_response_state_<group>,
@@ -380,7 +380,8 @@ section_recruitment <- function(experts, vignettes, frame, dirs) {
   ))
 
   # 5. Response rates by wave, and the cross-check against the dispatch log ----
-  dispatch <- load_versand_waves()
+  dispatch <- load_versand() %>%
+    select(wave, first_sent, invitations, n_partly_sent)
   wave_counts <- experts %>%
     group_by(wave, target_group, is_softlaunch) %>%
     summarise(started = n(), completed = sum(is_complete)) %>%

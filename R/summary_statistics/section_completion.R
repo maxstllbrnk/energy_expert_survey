@@ -23,14 +23,6 @@ GROUP_KNOWN_NOTE <- paste0(
   "a group nobody can stop before it."
 )
 
-# With four lines a figure must also work in greyscale
-GROUP_LINETYPES <- c(
-  "All experts" = "solid",
-  "Energy advisers" = "longdash",
-  "HVAC installers" = "dotdash",
-  "Chimney sweeps" = "dotted"
-)
-
 #' The short name of a question on the axis of a figure: its number in the
 #' questionnaire; V, T and R with the number of a vignette or a decision
 #'

@@ -5,7 +5,6 @@
 #          figures/fig_preference_distribution_<group>.pdf
 # Checks : the minimum cell (summary_table(), plot_binned_histogram())
 ################################################################################
-# summary_exhibits(), plot_binned_histogram(): in section_experts_firms.R
 
 # The width of the bins of the scores. The scores are the midpoints of 32 cells,
 # or of wider ones for those with a shorter path, whose midpoints would fall on the

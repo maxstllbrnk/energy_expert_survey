@@ -22,7 +22,7 @@ source(file.path("R", "cleaning", "00_functions.R"), encoding = "UTF-8")
 source(file.path("R", "cleaning", "00_preferences.R"), encoding = "UTF-8")
 
 if (!USE_SYNTHETIC_DATA) {
-  versand <- load_versand()
+  versand <- load_versand()                                                  # R/functions/frame.R
   source(file.path("R", "cleaning", "01_codebook.R"), encoding = "UTF-8")    # codebook
   source(file.path("R", "cleaning", "02_read_stack.R"), encoding = "UTF-8")  # read and stack the 12 waves
   source(file.path("R", "cleaning", "03_recode.R"), encoding = "UTF-8")      # postcode, "Sonstiges", flags

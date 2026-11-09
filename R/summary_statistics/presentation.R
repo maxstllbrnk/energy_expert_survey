@@ -16,12 +16,12 @@ DECK_BLOCKS <- tribble(
   "B",     "B. Survey metadata",       "The sample does not have the meta data of the survey.",
   "C",     "C. Selection",             paste0("The comparison needs at least ", MIN_N, " completers and ", MIN_N, " break-offs."),
   "D",     "D. Experts and firms",     "None of its variables is in the sample.",
-  "E",     "E. Market",                "None of its variables is in the sample.",
+  "E",     "E. The market",            "None of its variables is in the sample.",
   "F",     "F. Prices and beliefs",    "None of its variables is in the sample.",
   "G",     "G. Barriers and criteria", "None of its variables is in the sample.",
   "H",     "H. Preferences",           "None of its variables is in the sample.",
   "I",     "I. Heating context",       "None of its variables is in the sample.",
-  "J",     "J. Vignettes",             "None of its variables is in the sample."
+  "J",     "J. The vignettes",         "None of its variables is in the sample."
 )
 DECK_FILE <- "summary_statistics"
 

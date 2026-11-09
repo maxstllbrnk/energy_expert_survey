@@ -9,7 +9,6 @@
 #          maps/map_district_heating_state_all.pdf, map_degree_days_all.pdf
 # Checks : unknown answers (label_of(), summary_exhibits()); the join of the map
 ################################################################################
-# summary_exhibits(), plot_share_bars(): in section_experts_firms.R
 
 #' The answer to Q20 of the experts who were asked it. own_heating says "Keine
 #' Angabe" also for an expert who broke off before Q20 and so never saw it: those

@@ -10,25 +10,12 @@
 # A row says what a rule did: how many answers it saw, changed, set to missing.
 # Aggregates only (docs/data_contract.md): a count of what a rule did may be
 # small, every other statistic rests on at least MIN_N answers, and no minimum
-# or maximum of individual values appears. So the limits of the 0.5% tails are
+# or maximum of individual values appears. So the limits of the trimmed tails are
 # not shown: with few answers they are the most extreme answers themselves. And
 # two statistics whose difference rests on fewer than MIN_N answers count as one
 # statistic on those answers: see the mean before of the prices.
 
-# 0. Labels and helpers --------------------------------------------------------
-
-# The variables of the outlier rule; section_cleaning() reads them from the
-# report
-OUTLIER_LABELS <- c(
-  dem_birthyear = "Year of birth",
-  dem_training_year = "Year training was completed",
-  firm_employees = "Employees",
-  adv_households = "Households advised, last year",
-  co2_est_low = "Carbon price, lower estimate (euro per tonne)",
-  co2_est_high = "Carbon price, upper estimate (euro per tonne)"
-)
-STAIRCASE_LABELS <- c(tp = "Time preference (patience)",
-                      risk = "Risk preference (risk tolerance)")
+# 0. Helpers -------------------------------------------------------------------
 
 # The rules apply to everyone; the reference values rest on those who completed
 # with a group
@@ -518,7 +505,8 @@ rules <- bind_rows(
     transmute(rule = "Outlier rule", new_column,
               answers_seen = answered, changed = 0,
               set_to_missing = impossible + trimmed,
-              note = "Missing: impossible, or in the 0.5% tails"),
+              note = paste0("Missing: impossible, or in the ",
+                            100 * TRIM_QUANTILES[1], "% tails")),
   shares_sheet %>%
     group_by(question) %>%
     summarise(answers_seen = sum(answered), changed = sum(blank_set_to_0)) %>%
@@ -615,8 +603,9 @@ for (variable_name in names(OUTLIER_LABELS)) {
   derived_columns <- bind_rows(derived_columns, tibble(
     column = paste0(variable_name, "_clean"),
     definition = paste0(OUTLIER_LABELS[[variable_name]], ": the answer after ",
-                        "the outlier rule (valid range, then the 0.5% tails over ",
-                        "everyone who answered)")
+                        "the outlier rule (valid range, then the ",
+                        100 * TRIM_QUANTILES[1], "% tails over everyone who ",
+                        "answered)")
   ))
 }
 for (question in names(share_questions)) {

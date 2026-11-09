@@ -7,15 +7,9 @@
 #          fig_customer_criteria_<group>.pdf
 # Checks : unknown answers (label_of(), barrier_shares()); the minimum cell
 ################################################################################
-# summary_exhibits(), multiline_header(), plot_share_bars(): in
-# section_experts_firms.R
 
 # Q28 asks for the three criteria that matter most
 CRITERION_RANKS <- c("crit_rank1", "crit_rank2", "crit_rank3")
-# The heads of the columns of the barriers table: the captions of BARRIER_QUESTIONS
-# are too long for them
-BARRIER_HEADERS <- c(Q19a = "Renewable heating", Q19b = "District heating",
-                     Q19c = "Conventional heating")
 
 #' The share ticking each option of one barrier question, among those who answered
 #'

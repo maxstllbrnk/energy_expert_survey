@@ -12,13 +12,7 @@
 # Checks : every level of the design and every answer has a label (label_of());
 #          the minimum cell, in experts: six vignettes can come from one expert
 ################################################################################
-# summary_exhibits(), multiline_header(), stack_answers(), plot_stacked_shares(),
-# plot_share_bars(): in section_experts_firms.R; own_heating_of_asked(): in
-# section_heating_context.R
-
-# The names of the groups where a table has a column per arm x group
-GROUP_LABELS_SHORT <- c("Energy advisers" = "Advisers", "HVAC installers" = "HVAC",
-                        "Chimney sweeps" = "Sweeps")
+# own_heating_of_asked(): in section_heating_context.R
 
 #' The design, the recommendations and the arms
 #'
