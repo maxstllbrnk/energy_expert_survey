@@ -3,9 +3,9 @@
 #                         the mixed logit models of the recommendations
 # Inputs : none; sourced by 02_output.R
 # Outputs: none
-# Checks : inside the functions: every parameter a table needs is in the
-#          results; a model with Berufsgruppe shifts or interactions has one
-#          reference group; the restrictions of an LR test account for its
+# Checks : inside the functions: every parameter a table or test needs is in
+#          the results; a model with Berufsgruppe shifts or interactions has
+#          one reference group; the restrictions of an LR test account for its
 #          degrees of freedom; every value has a label
 ################################################################################
 # Every table and figure shows a quantity the same way, whatever the model:
@@ -108,35 +108,88 @@ write_tex <- function(lines, file) {
 # 2. Quantities from the saved results -----------------------------------------
 
 #' Estimate and standard error of a sum of coefficients, e.g. a constant plus
-#' a Berufsgruppe's shift. The sum is linear in the coefficients, so its
-#' variance is w' V w, with w the 0/1 weights and V the cluster-robust
-#' covariance matrix of the coefficients.
+#' a Berufsgruppe's shift, or of a weighted sum. The sum is linear in the
+#' coefficients, so its variance is w' V w, with w the weights and V the
+#' cluster-robust covariance matrix of the coefficients.
 #'
 #' @param results    saved results of one model
 #' @param parameters names of the coefficients to add up
+#' @param weights    their weights, one per parameter; 1 for a plain sum
 #' @return tibble, one row: estimate, se, z, p
-sum_of_coefficients <- function(results, parameters) {
+sum_of_coefficients <- function(results, parameters,
+                                weights = rep(1, length(parameters))) {
   theta <- results$coefficients
   missing_parameters <- setdiff(parameters, names(theta))
   if (length(missing_parameters) > 0) {
     stop("Not a parameter of ", results$name, ": ",
          paste(missing_parameters, collapse = ", "))
   }
-  weights <- rep(0, length(theta))
-  names(weights) <- names(theta)
-  weights[parameters] <- 1
+  if (length(weights) != length(parameters)) stop("One weight per parameter")
+  w <- rep(0, length(theta))
+  names(w) <- names(theta)
+  w[parameters] <- weights
   V <- results$vcov[names(theta), names(theta)]
-  estimate <- sum(weights * theta)
-  se <- sqrt(as.numeric(t(weights) %*% V %*% weights))
+  estimate <- sum(w * theta)
+  se <- sqrt(as.numeric(t(w) %*% V %*% w))
   tibble(estimate = estimate, se = se, z = estimate / se,
          p = 2 * pnorm(-abs(estimate / se)))
 }
 
+#' Wald test of linear restrictions on the coefficients of one model, R theta
+#' = 0, with the cluster-robust covariance matrix V:
+#'
+#'   W = (R theta)' (R V R')^{-1} (R theta),
+#'
+#' chi-squared with as many degrees of freedom as restrictions. Unlike an LR
+#' test, it needs only the larger model.
+#'
+#' @param results      saved results of one model
+#' @param restrictions matrix, one row per restriction, one column per
+#'                     coefficient it involves, the columns named as the
+#'                     coefficients
+#' @return tibble, one row: statistic, df, p
+wald_test <- function(results, restrictions) {
+  theta <- results$coefficients
+  missing_parameters <- setdiff(colnames(restrictions), names(theta))
+  if (length(missing_parameters) > 0) {
+    stop("Not a parameter of ", results$name, ": ",
+         paste(missing_parameters, collapse = ", "))
+  }
+  # R: the restrictions over all coefficients, 0 for those not involved
+  R <- matrix(0, nrow = nrow(restrictions), ncol = length(theta),
+              dimnames = list(NULL, names(theta)))
+  R[, colnames(restrictions)] <- restrictions
+  V <- results$vcov[names(theta), names(theta)]
+  r <- R %*% theta
+  # solve(): the inverse of a matrix
+  statistic <- as.numeric(t(r) %*% solve(R %*% V %*% t(R)) %*% r)
+  tibble(statistic = statistic, df = nrow(R),
+         p = pchisq(statistic, df = nrow(R), lower.tail = FALSE))
+}
+
+#' The names of the Berufsgruppe x attribute interactions, e.g.
+#' is_shk_x_age_60, for every group dummy and attribute dummy. The exact
+#' names, not a prefix such as "is_shk_x_": another regressor with that
+#' prefix, e.g. is_shk_x_hdd_c, would otherwise count as one.
+#'
+#' @param attribute_dummies results$attribute_dummies
+#' @param group_dummies     named vector: group dummy -> Berufsgruppe
+#' @return character vector
+group_attribute_names <- function(attribute_dummies, group_dummies) {
+  interaction_names <- character(0)
+  for (dummy in names(group_dummies)) {
+    interaction_names <- c(interaction_names,
+                           paste0(dummy, "_x_", attribute_dummies$dummy))
+  }
+  interaction_names
+}
+
 #' How a model treats the Berufsgruppen, read from its specification
 #'
-#' @param specification results$specification
-#' @param group_dummies named vector: group dummy -> Berufsgruppe, e.g.
-#'                      is_shk = "SHK-Handwerk"
+#' @param specification     results$specification
+#' @param attribute_dummies results$attribute_dummies
+#' @param group_dummies     named vector: group dummy -> Berufsgruppe, e.g.
+#'                          is_shk = "SHK-Handwerk"
 #' @return list:
 #'   group_constants  TRUE: one set of constants, and one covariance matrix,
 #'                    per Berufsgruppe
@@ -145,14 +198,16 @@ sum_of_coefficients <- function(results, parameters) {
 #'   prices           TRUE: the model has the energy prices
 #'   reference_dummy  the group dummy without shift and interactions, NA if
 #'                    the model has neither
-model_structure <- function(specification, group_dummies) {
+model_structure <- function(specification, attribute_dummies, group_dummies) {
   regressors <- specification$regressors
   group_constants <- !identical(specification$constants, "(Intercept)")
   group_shifts <- intersect(names(group_dummies), regressors)
   # the group dummies with interactions, e.g. is_shk for is_shk_x_age_60
   dummies_with_interactions <- character(0)
   for (dummy in names(group_dummies)) {
-    if (any(startsWith(regressors, paste0(dummy, "_x_")))) {
+    interactions <- group_attribute_names(attribute_dummies,
+                                          group_dummies[dummy])
+    if (any(regressors %in% interactions)) {
       dummies_with_interactions <- c(dummies_with_interactions, dummy)
     }
   }
@@ -181,22 +236,51 @@ model_structure <- function(specification, group_dummies) {
        reference_dummy = reference_dummy)
 }
 
+#' The regressors of a model besides the Berufsgruppe shifts, the attribute
+#' dummies and the Berufsgruppe x attribute interactions: e.g. the
+#' interactions of two attributes, or the heating degree days
+#'
+#' @param specification     results$specification
+#' @param attribute_dummies results$attribute_dummies
+#' @param group_dummies     named vector: group dummy -> Berufsgruppe
+#' @return character vector, in the order of the specification
+further_regressors <- function(specification, attribute_dummies, group_dummies) {
+  regressors <- specification$regressors
+  known <- c(names(group_dummies), attribute_dummies$dummy,
+             group_attribute_names(attribute_dummies, group_dummies))
+  regressors[!(regressors %in% known)]
+}
+
 #' Mean constants by Berufsgruppe, or for all experts if the model has no
 #' Berufsgruppe (see the top of this file)
 #'
+#' @param shift NULL, or what the terms with one coefficient for all
+#'   technologies, and the regressors that differ from the average expert
+#'   (with their coefficient of that technology), add to each technology's
+#'   utility at another expert than the average (base_constant_shift of
+#'   01_run_term_effects.R): a tibble with technology, term and weight; each
+#'   constant then also adds the weighted coefficients of its technology's rows
 #' @return tibble: group (Berufsgruppe or "All experts"), technology,
 #'   estimate, se, z, p
-mean_constants <- function(results, group_dummies) {
-  setup <- model_structure(results$specification, group_dummies)
+mean_constants <- function(results, group_dummies, shift = NULL) {
+  setup <- model_structure(results$specification, results$attribute_dummies,
+                           group_dummies)
   technologies <- results$outcomes[-1]
   has_groups <- setup$group_constants || length(setup$group_shifts) > 0
   table <- tibble()
   if (!has_groups) {
     for (technology in technologies) {
+      parameters <- paste0("(Intercept):", technology)
+      weights <- rep(1, length(parameters))
+      if (!is.null(shift)) {
+        is_technology <- shift$technology == technology
+        parameters <- c(parameters, shift$term[is_technology])
+        weights <- c(weights, shift$weight[is_technology])
+      }
       table <- bind_rows(table, tibble(
         group = "All experts",
         technology = technology,
-        sum_of_coefficients(results, paste0("(Intercept):", technology))
+        sum_of_coefficients(results, parameters, weights)
       ))
     }
     return(table)
@@ -211,10 +295,16 @@ mean_constants <- function(results, group_dummies) {
           parameters <- c(parameters, paste0(dummy, ":", technology))
         }
       }
+      weights <- rep(1, length(parameters))
+      if (!is.null(shift)) {
+        is_technology <- shift$technology == technology
+        parameters <- c(parameters, shift$term[is_technology])
+        weights <- c(weights, shift$weight[is_technology])
+      }
       table <- bind_rows(table, tibble(
         group = group_dummies[[dummy]],
         technology = technology,
-        sum_of_coefficients(results, parameters)
+        sum_of_coefficients(results, parameters, weights)
       ))
     }
   }
@@ -227,7 +317,8 @@ mean_constants <- function(results, group_dummies) {
 #' @return tibble: group (Berufsgruppe or "All experts"), attribute (the
 #'   dummy), technology, estimate, se, z, p
 attribute_effects <- function(results, group_dummies) {
-  setup <- model_structure(results$specification, group_dummies)
+  setup <- model_structure(results$specification, results$attribute_dummies,
+                           group_dummies)
   technologies <- results$outcomes[-1]
   attributes <- results$attribute_dummies$dummy
   if (setup$interactions) {
@@ -463,6 +554,83 @@ group_differences <- function(results, reference_group) {
     }
   }
   table
+}
+
+#' Labels of the changes of 01_run_term_effects.R, e.g. "Price of
+#' electricity: 24 → 30 ct/kWh", "Expects higher gas prices", "Pellet heating
+#' at home", "Heat pump instead of gas heating at home", "Heat demand 70
+#' kWh/m² | Built in 2000"
+#'
+#' @param table             one row per change (and profile and outcome):
+#'                          type, fuel, technology, attribute, condition,
+#'                          demand, value_before, value_after
+#' @param fuel_labels       named by the fuels, e.g. "Pellets"
+#' @param fuel_compound_labels named by the fuels: the fuel before "prices",
+#'                          e.g. "pellet"
+#' @param technology_labels named by the outcomes
+#' @param attribute_labels  named by the attribute dummies
+#' @param demand_levels     the heat demand of each demand dummy, e.g.
+#'                          c(demand_70 = "70")
+#' @return character vector, one label per row
+term_effect_labels <- function(table, fuel_labels, fuel_compound_labels,
+                               technology_labels, attribute_labels,
+                               demand_levels) {
+  labels <- character(nrow(table))
+  for (k in seq_len(nrow(table))) {
+    type <- table$type[k]
+    if (type %in% c("price", "price_na", "rise_na")) {
+      # tolower(): the fuel inside a sentence, "district heating"
+      fuel_text <- tolower(fuel_labels[[table$fuel[k]]])
+    }
+    if (type == "price") {
+      labels[k] <- paste0("Price of ", fuel_text)
+      if (!is.na(table$demand[k])) {
+        labels[k] <- paste0(labels[k], " at ", demand_levels[[table$demand[k]]],
+                            " kWh/m²")
+      }
+      # the prices of the change, the 25th and 75th percentile, in cent per
+      # kWh with one decimal, as the means in the captions; formatC(): the
+      # number as text
+      labels[k] <- paste0(labels[k], ": ",
+                          formatC(table$value_before[k], format = "f",
+                                  digits = 1),
+                          " → ",
+                          formatC(table$value_after[k], format = "f",
+                                  digits = 1),
+                          " ct/kWh")
+    } else if (type == "price_na") {
+      labels[k] <- paste0("No price reported for ", fuel_text)
+    } else if (type == "expects_rise") {
+      labels[k] <- paste0("Expects higher ",
+                          fuel_compound_labels[[table$fuel[k]]], " prices")
+    } else if (type == "rise_na") {
+      labels[k] <- paste0("No expectation for ", fuel_text)
+    } else if (type == "own_heating") {
+      labels[k] <- technology_labels[[table$technology[k]]]
+      # the heating it replaces (condition), e.g. "Heat pump instead of gas
+      # heating at home"
+      if (!is.na(table$condition[k])) {
+        labels[k] <- paste0(labels[k], " instead of ",
+                            tolower(technology_labels[[table$condition[k]]]))
+      }
+      labels[k] <- paste0(labels[k], " at home")
+    } else if (type == "hdd") {
+      # the degree days of the change, the 25th and 75th percentile, with a
+      # thousands comma (2,576), as the mean in the captions
+      labels[k] <- paste0("Heating degree days: ",
+                          formatC(table$value_before[k], format = "f",
+                                  digits = 0, big.mark = ","),
+                          " → ",
+                          formatC(table$value_after[k], format = "f",
+                                  digits = 0, big.mark = ","))
+    } else if (type == "interaction") {
+      labels[k] <- paste0(attribute_labels[[table$attribute[k]]], " | ",
+                          attribute_labels[[table$condition[k]]])
+    } else {
+      stop("Unknown type of change: ", type)
+    }
+  }
+  labels
 }
 
 # 3. Likelihood-ratio tests ----------------------------------------------------
@@ -783,13 +951,23 @@ theme_rcl <- function(base_size) {
 #' @param x_title   title of the axis of the estimates
 #' @param base_size font size in pt
 #' @param legend_rows rows of the legend
+#' @param line_colour one colour for the intervals and the outlines of the
+#'                  symbols, which are filled in the series' colours; light
+#'                  colours stand out on white this way. NULL: the series'
+#'                  colours throughout.
 #' @return ggplot
 plot_estimates <- function(plot_data, colours, shapes, title, subtitle, caption,
-                           x_title, base_size, legend_rows = 1) {
+                           x_title, base_size, legend_rows = 1,
+                           line_colour = NULL) {
   series_levels <- levels(plot_data$series)
   missing_series <- setdiff(series_levels, names(colours))
   if (length(missing_series) > 0) {
     stop("No colour for: ", paste(missing_series, collapse = ", "))
+  }
+  # The colour of the lines and outlines of each series
+  line_colours <- colours[series_levels]
+  if (!is.null(line_colour)) {
+    line_colours[] <- line_colour
   }
 
   # coord_flip() puts the items on the vertical axis; position_dodge() places
@@ -804,14 +982,15 @@ plot_estimates <- function(plot_data, colours, shapes, title, subtitle, caption,
     geom_pointrange(position = position_dodge(width = 0.7), size = 0.25,
                     linewidth = 0.4, stroke = 0.6, key_glyph = "point") +
     coord_flip() +
-    scale_colour_manual(values = colours[series_levels]) +
+    scale_colour_manual(values = line_colours) +
     scale_shape_manual(values = shapes[series_levels]) +
     scale_fill_manual(values = colours[series_levels]) +
-    # One legend for colour, symbol and fill, its symbols a little larger
-    guides(colour = guide_legend(nrow = legend_rows,
+    # One legend for colour, symbol and fill, its symbols a little larger,
+    # filled row by row in the order of the series
+    guides(colour = guide_legend(nrow = legend_rows, byrow = TRUE,
                                  override.aes = list(size = 1.8)),
-           shape = guide_legend(nrow = legend_rows),
-           fill = guide_legend(nrow = legend_rows)) +
+           shape = guide_legend(nrow = legend_rows, byrow = TRUE),
+           fill = guide_legend(nrow = legend_rows, byrow = TRUE)) +
     labs(title = title, subtitle = subtitle, caption = caption,
          x = NULL, y = x_title) +
     theme_rcl(base_size) +
@@ -864,26 +1043,30 @@ rows_by_panel <- function(table, models, groups) {
 #' @param title,subtitle,caption texts of the figure
 #' @param base_size    font size in pt
 #' @param text_size    size of the numbers in the tiles, in mm (geom_text())
+#' @param colours      named: low (-1), mid (0), high (1), text, diagonal
 #' @return ggplot
 plot_correlations <- function(heatmap_data, title, subtitle, caption, base_size,
-                              text_size) {
-  # From red (-1) over light grey (0) to blue (1), the colours of the heat
-  # maps of the policy brief; the diagonal in grey, outside this scale. White
-  # numbers on the darkest tiles.
+                              text_size, colours) {
+  # From colours low (-1) over mid (0) to high (1); the diagonal outside this
+  # scale. White numbers on the dark tiles of strong positive correlations,
+  # which the high colour of the ZEW palette makes dark; the low colour is
+  # bright, so its numbers stay dark.
   heatmap_data <- heatmap_data %>%
     mutate(
       fill_value = if_else(is_diagonal, NA_real_, estimate),
       label = if_else(is_diagonal, "1",
                       formatC(estimate, format = "f", digits = 2)),
-      text_colour = if_else(!is_diagonal & abs(estimate) > 0.7, "white", "#2F3B4A"),
+      text_colour = if_else(!is_diagonal & estimate > 0.7, "white",
+                            colours[["text"]]),
       fontface = if_else(!is_diagonal & is_significant, "bold", "plain")
     )
   ggplot(heatmap_data, aes(x = column, y = row, fill = fill_value)) +
     geom_tile(colour = "white", linewidth = 0.6) +
     geom_text(aes(label = label, colour = text_colour, fontface = fontface),
               size = text_size) +
-    scale_fill_gradient2(low = "#E15759", mid = "#F2F2F2", high = "#4E79A7",
-                         midpoint = 0, limits = c(-1, 1), na.value = "grey85") +
+    scale_fill_gradient2(low = colours[["low"]], mid = colours[["mid"]],
+                         high = colours[["high"]], midpoint = 0,
+                         limits = c(-1, 1), na.value = colours[["diagonal"]]) +
     scale_colour_identity() +
     scale_x_discrete(position = "top") +
     coord_fixed() +
@@ -891,7 +1074,7 @@ plot_correlations <- function(heatmap_data, title, subtitle, caption, base_size,
     theme_rcl(base_size) +
     theme(panel.grid = element_blank(),
           legend.position = "none",
-          axis.text = element_text(colour = "#2F3B4A"),
+          axis.text = element_text(colour = colours[["text"]]),
           # the column labels at an angle, so that neighbours do not touch
           axis.text.x.top = element_text(angle = 45, hjust = 0, vjust = 0))
 }
