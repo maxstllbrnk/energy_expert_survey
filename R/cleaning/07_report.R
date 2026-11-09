@@ -5,13 +5,15 @@
 # Outputs: REPORT_DIR/cleaning_report.xlsx, one sheet per topic
 #          REPORT_DIR/cleaning_report.rds, the same tables as a named list, read
 #          by section_cleaning()
-# Checks : the arms of the overview and the treatments of a price add up
+# Checks : none; step 06 checks the data, tests/selftest.R the N of the overview
 ################################################################################
 # A row says what a rule did: how many answers it saw, changed, set to missing.
 # Aggregates only (docs/data_contract.md): a count of what a rule did may be
 # small, every other statistic rests on at least MIN_N answers, and no minimum
 # or maximum of individual values appears. So the limits of the 0.5% tails are
-# not shown: with few answers they are the most extreme answers themselves.
+# not shown: with few answers they are the most extreme answers themselves. And
+# two statistics whose difference rests on fewer than MIN_N answers count as one
+# statistic on those answers: see the mean before of the prices.
 
 # 0. Labels and helpers --------------------------------------------------------
 
@@ -98,8 +100,6 @@ overview <- bind_rows(
                vignette_arms[is_recommendation & is_reference_vignette],
                "With a recommendation, of those who completed with a group")
 )
-stopifnot(all(overview$all == overview$arm_fw + overview$arm_nofw +
-                overview$arm_unknown + overview$arm_both))
 
 # How the arm of a questionnaire is known
 arms_sheet <- vignettes_long %>%
@@ -133,6 +133,14 @@ equal_attempts <- attempts %>%
   inner_join(experts %>% select(wave, person, is_complete, meta_lastpage),
              by = c("wave", "person", "is_complete", "meta_lastpage"),
              relationship = "one-to-one")
+# The arm is between persons, and only the attempt that stays counts: how many
+# saw both arms over their attempts?
+persons_in_two_arms <- attempts %>%
+  left_join(questionnaire_arms, by = "resp_uid", relationship = "one-to-one") %>%
+  filter(arm_type %in% c("fw", "nofw")) %>%
+  distinct(wave, person, arm_type) %>%
+  count(wave, person, name = "n_arms") %>%
+  filter(n_arms > 1)
 attempts_sheet <- bind_rows(
   attempts_report,
   tribble(
@@ -142,7 +150,8 @@ attempts_sheet <- bind_rows(
     "Persons with two attempts",                                 sum(experts$n_attempts == 2),
     "Persons with three or more attempts",                       sum(experts$n_attempts >= 3),
     "Persons whose furthest attempt is tied with another",       nrow(equal_attempts),
-    "  of which completed: the first by resp_uid stays",         sum(equal_attempts$is_complete)
+    "  of which completed: the first by resp_uid stays",         sum(equal_attempts$is_complete),
+    "Persons whose attempts fell in different arms",             nrow(persons_in_two_arms)
   )
 )
 
@@ -166,27 +175,36 @@ tick_pattern <- str_remove(tick_pattern, "^ \\+ ")
 assigned_group <- coalesce(as.character(experts$expert_group), "No group")
 
 #' One row of the sheet expert_groups
-count_group_row <- function(part, category, group, is_in) {
+count_group_row <- function(part, category, group, is_in, note = "") {
   tibble(part = part, category = category, assigned_group = group,
-         persons = sum(is_in), completed = sum(is_in & experts$is_complete))
+         persons = sum(is_in), completed = sum(is_in & experts$is_complete),
+         note = note)
 }
 
+group_rules <- c(
+  "HVAC installers" = "Ticked sanitary, heating, air conditioning",
+  "Chimney sweeps" = "Ticked chimney sweep, but not HVAC",
+  "Energy advisers" = "Ticked energy advice or engineering, or wrote in other; neither trade"
+)
 expert_groups <- tibble()
 for (group_name in EXPERT_GROUPS) {
   expert_groups <- bind_rows(expert_groups, count_group_row(
-    "Expert group", group_name, group_name, assigned_group == group_name
+    "Expert group", group_name, group_name, assigned_group == group_name,
+    group_rules[[group_name]]
   ))
 }
 expert_groups <- bind_rows(
   expert_groups,
   count_group_row("No expert group (NA)", "Q2 not answered", "No group",
-                  experts$expert_group_note == "Q2 not answered"),
+                  experts$expert_group_note == "Q2 not answered",
+                  "The answer for HVAC is blank: the person did not submit the page"),
   count_group_row("No expert group (NA)", "Q2 submitted without any category",
                   "No group", experts$expert_group_note == "no category ticked"),
   count_group_row("Categories in Q2", "One category", NA_character_,
                   is_q2_answered & n_ticks == 1),
   count_group_row("Categories in Q2", "Several categories", NA_character_,
-                  is_q2_answered & n_ticks > 1)
+                  is_q2_answered & n_ticks > 1,
+                  "The priority above decides the group")
 )
 for (group_name in EXPERT_GROUPS) {
   expert_groups <- bind_rows(expert_groups, count_group_row(
@@ -194,17 +212,26 @@ for (group_name in EXPERT_GROUPS) {
     is_q2_answered & n_ticks > 1 & assigned_group == group_name
   ))
 }
-# Who ticked what, and where the rule puts them
+# Who ticked what, and where the rule puts them. A rare combination could point
+# to one firm: those below the minimum cell are pooled within their group.
+rare_combination <- paste0("Combinations of fewer than ", MIN_N, " persons")
 category_combinations <- tibble(tick_pattern, assigned_group,
                                 is_complete = experts$is_complete) %>%
   filter(is_q2_answered) %>%
   group_by(tick_pattern, assigned_group) %>%
+  mutate(n_same = n()) %>%
+  ungroup() %>%
+  mutate(category = case_when(
+    n_same < MIN_N ~ rare_combination,
+    tick_pattern == "" ~ "None",
+    TRUE ~ tick_pattern
+  )) %>%
+  group_by(category, assigned_group) %>%
   summarise(persons = n(), completed = sum(is_complete)) %>%
   ungroup() %>%
   arrange(desc(persons)) %>%
-  transmute(part = "Every combination of categories in Q2",
-            category = if_else(tick_pattern == "", "None", tick_pattern),
-            assigned_group, persons, completed)
+  transmute(part = "Every combination of categories in Q2", category,
+            assigned_group, persons, completed, note = "")
 expert_groups <- bind_rows(expert_groups, category_combinations)
 
 # 5. Prices (Q15) --------------------------------------------------------------
@@ -252,11 +279,11 @@ for (fuel_name in PRICE_FUELS) {
       mean_after = mean_min_cell(price[in_sample]),
       rule = price_rule
     )
-    # Each answer has exactly one treatment
-    stopifnot(price_row$answered == price_row$as_reported + price_row$euro +
-                price_row$per_litre_or_kg + price_row$euro_and_per_litre_or_kg +
-                price_row$not_usable,
-              price_row$usable == price_row$answered - price_row$not_usable)
+    # Before and after differ by the answers the rules changed or removed: with
+    # fewer than MIN_N of them, the two means would give those answers away
+    if (price_row$answered - price_row$as_reported < MIN_N) {
+      price_row$mean_before <- NA_real_
+    }
     prices <- bind_rows(prices, price_row)
   }
 }
@@ -391,14 +418,15 @@ is_valid_postcode <- !is.na(experts$plz)
 is_with_nuts3 <- !is.na(experts$nuts3)
 is_with_hdd <- !is.na(experts$hdd)
 # BUNDESLAND_NUTS1 (00_functions.R): the first three characters of the regions
-# of a state; NA for a person without a state. str_sub(): a part of the text.
+# of a state; NA for a person without a state. unname(): the values without
+# their names. str_sub(): a part of the text.
 nuts1_of_state <- unname(BUNDESLAND_NUTS1[as.character(experts$bundesland)])
 is_lookups_disagree <- coalesce(str_sub(experts$nuts3, 1, 3) != nuts1_of_state,
                                 FALSE)
 bundesland_source_notes <- c(
   plz = "In the lookup, and the postcode lies in one state only",
-  plz_border = "In the lookup; on a state line, goes to the state with most of it",
-  plz_prefix = "Not in the lookup; all postcodes with its first 3 digits in one state",
+  plz_border = "In the lookup; on a state line, in the state with most of it",
+  plz_prefix = "Not in the lookup; its first 3 digits lie in one state",
   unmatched = "Five digits, but no such postcode exists: left as NA",
   no_postcode = "Q0 blank or unusable"
 )
@@ -423,7 +451,8 @@ geography <- bind_rows(
   count_geography_row("Valid postcode, not in Eurostat's list",
                       is_valid_postcode & !is_with_nuts3,
                       "Mostly P.O.-box or large-customer postcodes: no nuts3"),
-  count_geography_row(paste0("With degree days (hdd, ", HDD_YEAR, ")"), is_with_hdd,
+  count_geography_row(paste0("With degree days (hdd, ", HDD_YEAR, ")"),
+                      is_with_hdd,
                       paste0("Those who completed with an expert group: mean ",
                              round(reference_values$hdd$mean), ", quartiles ",
                              round(reference_values$hdd$q25), " and ",
@@ -433,7 +462,7 @@ geography <- bind_rows(
                       "Exactly those without nuts3"),
   count_geography_row("Lookups disagree: nuts3 lies outside bundesland",
                       is_lookups_disagree,
-                      "nuts3: Eurostat. bundesland: GeoNames and BKG (docs/data_notes.md)")
+                      "nuts3: Eurostat. bundesland: GeoNames and BKG")
 )
 
 # 12. The rules of the cleaning, side by side ----------------------------------
@@ -627,8 +656,8 @@ variables <- variables %>%
     !is.na(question_text) ~ question_text,
     !is.na(time_label) ~ paste0("Response time in seconds: ", time_label),
     column == "time_interview" ~ "LimeSurvey's total time, in seconds",
-    str_starts(column, "time_") ~ "Response time in seconds of a helper question",
-    str_starts(column, "grouptime_") ~ "LimeSurvey's time on a group of questions, in seconds",
+    str_starts(column, "time_") ~ "Response time in seconds, helper question",
+    str_starts(column, "grouptime_") ~ "Time in seconds on a group of questions",
     TRUE ~ "Not documented"
   )) %>%
   select(data_set, column, type, n_answered, question_id, description)

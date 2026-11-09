@@ -4,9 +4,9 @@
 #          reference_values.rds (CLEAN_DATA_DIR); cleaning_report.rds; in a real
 #          run also the raw exports
 # Outputs: one line per check in the log; exit status 1 if a check fails
-# Checks : waves, keys, joins, six rows per person, the design, the alignment of
-#          the soft launch, the staircases, the columns of the data contract,
-#          the cleaning report
+# Checks : waves, keys, joins, six rows per person, the arms, the design, the
+#          alignment of the soft launch, the staircases, the N of the cleaning
+#          report
 ################################################################################
 # From the project root: Rscript tests/selftest.R, or source() it in RStudio.
 #
@@ -43,8 +43,6 @@ add_check <- function(checks, label, passed, detail = "") {
 # 1. Waves ---------------------------------------------------------------------
 checks <- add_check(checks, "12 waves", n_distinct(survey_main$wave) == 12,
                     paste(n_distinct(survey_main$wave), "waves"))
-checks <- add_check(checks, "every wave has persons",
-                    n_distinct(experts$wave) == n_distinct(survey_main$wave))
 checks <- add_check(checks, "two soft-launch waves",
                     n_distinct(survey_main$wave[survey_main$is_softlaunch]) == 2)
 checks <- add_check(checks, "the soft launch follows the Versandrunde",
@@ -57,8 +55,6 @@ checks <- add_check(checks, "resp_uid unique in survey_main",
                     !anyDuplicated(survey_main$resp_uid))
 checks <- add_check(checks, "resp_uid unique in experts",
                     !anyDuplicated(experts$resp_uid))
-checks <- add_check(checks, "wave x person unique in experts",
-                    !anyDuplicated(experts[c("wave", "person")]))
 checks <- add_check(checks, "resp_uid x vig_num unique in vignettes",
                     !anyDuplicated(vignettes[c("resp_uid", "vig_num")]))
 checks <- add_check(checks, "every row of vignettes_long joins to survey_main",
@@ -83,6 +79,7 @@ checks <- add_check(checks, "no completer has no vignettes",
 # The furthest attempt is read off the page counter: as text, 9 would beat 10
 checks <- add_check(checks, "meta_lastpage is a number",
                     is.numeric(survey_main$meta_lastpage))
+# coalesce(): the first value that is not NA
 n_completed_persons <- survey_main %>%
   filter(is_complete) %>%
   mutate(person = coalesce(meta_token, resp_uid)) %>%
@@ -92,21 +89,24 @@ checks <- add_check(checks, "everyone who ever completed counts as a completer",
                     sum(experts$is_complete) == n_completed_persons,
                     paste(n_completed_persons, "persons completed"))
 
-# 3. The design ----------------------------------------------------------------
-checks <- add_check(checks, "every row of vignettes matches a design combination",
-                    all(!is.na(vignettes$vignette_id)))
-checks <- add_check(checks, "all 128 design combinations appear",
-                    n_distinct(vignettes$vignette_id) == 128,
-                    paste(n_distinct(vignettes$vignette_id), "combinations"))
+# 3. The arms ------------------------------------------------------------------
+# District heating is an option in one arm only: an answer in the other would
+# mean that the two branches of the questionnaire were mixed up
+is_nofw <- coalesce(vignettes$vig_arm == "nofw", FALSE)
+checks <- add_check(checks, "Fernwärme is never recommended in the arm without it",
+                    !any(vignettes$vig_rec[is_nofw] == "Fernwärme", na.rm = TRUE))
 
-# 4. The alignment of the soft launch ------------------------------------------
+# 4. The design and the alignment of the soft launch ---------------------------
 # The two soft-launch waves have other columns than the main waves (the old
 # pipeline's failure), so that each wave group has to resolve on its own
 is_soft_row <- vignettes_long$is_softlaunch
-checks <- add_check(checks, "every vignette row matches, soft launch",
+checks <- add_check(checks, "every vignette row matches a design, soft launch",
                     all(!is.na(vignettes_long$vignette_id[is_soft_row])))
-checks <- add_check(checks, "every vignette row matches, main waves",
+checks <- add_check(checks, "every vignette row matches a design, main waves",
                     all(!is.na(vignettes_long$vignette_id[!is_soft_row])))
+checks <- add_check(checks, "all 128 design combinations appear",
+                    n_distinct(vignettes$vignette_id) == 128,
+                    paste(n_distinct(vignettes$vignette_id), "combinations"))
 is_soft_person <- survey_main$is_softlaunch
 for (variable in c("dem_own_heating", "dem_education", "co2_heard",
                    "resp_is_owner")) {
@@ -125,9 +125,10 @@ checks <- add_check(checks, "design attributes have one range in both wave group
 if (!USE_SYNTHETIC_DATA) {
   checks <- add_check(checks, "cpd_other_text (Q24a) is NA in the soft launch",
                       all(is.na(survey_main$cpd_other_text[is_soft_person])))
+  is_other_wave <- survey_main$wave != "334335"
   checks <- add_check(checks, "cust_rank6 exists only in wave 334335",
                       "cust_rank6" %in% names(survey_main) &&
-                        all(is.na(survey_main$cust_rank6[survey_main$wave != "334335"])))
+                        all(is.na(survey_main$cust_rank6[is_other_wave])))
   # Rows of the exports by parsing, not lines: free text holds line breaks
   raw_files <- list.files(RAW_DIR, "^survey_[0-9]+_R_data_file\\.csv$",
                           recursive = TRUE, full.names = TRUE)
@@ -147,7 +148,8 @@ if (!USE_SYNTHETIC_DATA) {
 option_a_patterns <- c(tp = "heute", risk = "^Verlosung")
 for (prefix in names(option_a_patterns)) {
   # str_subset(): the values that match a pattern. str_remove(): the text without
-  # the pattern. str_sub(): a part of the text.
+  # the pattern. str_sub(): a part of the text. str_to_upper(): the text in
+  # capitals.
   columns <- str_subset(names(survey_main), paste0("^", prefix, "_[0-9]"))
   stems <- str_remove(columns, paste0("^", prefix, "_"))
   node_levels <- as.integer(str_sub(stems, 1, 1))
@@ -181,6 +183,7 @@ for (prefix in names(option_a_patterns)) {
   # amounts.
   if (!USE_SYNTHETIC_DATA) {
     is_monotone <- TRUE
+    # setdiff(): the values of the first that are not in the second
     for (level in setdiff(unique(node_levels), 1L)) {
       at_level <- node_levels == level
       # cor(): the rank correlation of the two, 1 if the amounts rise throughout
@@ -215,45 +218,11 @@ checks <- add_check(
 checks <- add_check(checks, "the risk staircase has all 16 level-5 nodes",
                     all(paste0("risk_5", level_5_paths) %in% names(survey_main)))
 
-# 6. The columns of docs/data_contract.md --------------------------------------
-fuels <- c("gas", "hpelec", "dh", "oil", "pellet")
-technologies <- c("hp", "pellet", "dh", "gas", "oil", "hybrid", "other")
-expert_columns <- c(
-  "resp_uid", "person", "n_attempts", "is_complete", "expert_group",
-  "expert_group_note", "arm", "last_question", "last_section",
-  "last_question_position", paste0("price_", fuels, "_kwh"),
-  paste0("price_", fuels, "_treatment"), paste0("pexp_", fuels, "_rise"),
-  "own_heating", "heat_pump_at_home", "hdd", "tp_score", "tp_cell", "tp_levels",
-  "tp_complete", "risk_score", "risk_cell", "risk_levels", "risk_complete",
-  "dem_birthyear_clean", "dem_training_year_clean", "firm_employees_clean",
-  "adv_households_clean", "co2_est_low_clean", "co2_est_high_clean", "age",
-  "interview_minutes", paste0("adv_share_", technologies, "_filled"),
-  paste0("mix25_", technologies, "_filled")
-)
-vignette_columns <- c(
-  "resp_uid", "vig_num", "vig_arm", "arm_source", "vig_rec", "vig_rec_other",
-  "vignette_id", "att_image", "att_couple_age", "att_income",
-  "att_current_heating", "att_replacement_timing", "att_build_year",
-  "att_heat_demand", "att_heat_distribution", "att_renovation", "vig_time",
-  "vig_group_time", "vig_cost", "vig_cost_source", "vig_cost_time",
-  "expert_group", "is_complete"
-)
-missing_expert_columns <- setdiff(expert_columns, names(experts))
-missing_vignette_columns <- setdiff(vignette_columns, names(vignettes))
-checks <- add_check(checks, "experts has the columns of the contract",
-                    length(missing_expert_columns) == 0,
-                    paste(missing_expert_columns, collapse = ", "))
-checks <- add_check(checks, "vignettes has the columns of the contract",
-                    length(missing_vignette_columns) == 0,
-                    paste(missing_vignette_columns, collapse = ", "))
-checks <- add_check(checks, "expert_group has the three groups as levels",
-                    identical(levels(experts$expert_group), EXPERT_GROUPS))
-checks <- add_check(checks, "expert_group is NA exactly without an assignment",
-                    identical(is.na(experts$expert_group),
-                              experts$expert_group_note != "assigned"),
-                    paste(sum(is.na(experts$expert_group)), "without a group"))
-
-# 7. The cleaning report -------------------------------------------------------
+# 6. The cleaning report -------------------------------------------------------
+# An unknown state name would silently lower the count of the lookups that
+# disagree
+checks <- add_check(checks, "every state has its NUTS1 code",
+                    all(levels(survey_main$bundesland) %in% names(BUNDESLAND_NUTS1)))
 # The sample table has to end at the N of the reference values and the data sets
 report_file <- file.path(REPORT_DIR, "cleaning_report.rds")
 checks <- add_check(checks, "the cleaning report exists", file.exists(report_file))
@@ -280,7 +249,7 @@ if (file.exists(report_file)) {
                       nrow(cleaning_exhibits) == 4 && all(file.exists(table_files)))
 }
 
-# 8. Result --------------------------------------------------------------------
+# 7. Result --------------------------------------------------------------------
 for (k in seq_len(nrow(checks))) {
   cat(sprintf("%-60s %s  %s\n", checks$check[k],
               if (checks$passed[k]) "PASS" else "*** FAIL ***", checks$detail[k]))

@@ -67,8 +67,8 @@ PEXP_RISE <- c("bis zu 10 % höher", "mehr als 10% höher")
 OWN_HEATING_ANSWERS <- c("Wärmepumpe", "Pelletheizung", "Fernwärme", "Gasheizung",
                          "Ölheizung", "Hybridheizung", "Sonstiges")
 
-# The outlier rule: impossible values go first (VALID_RANGE, the bounds that the
-# sheet data_quality of the report flags), then those below and above
+# The outlier rule: impossible years go first (VALID_RANGE, the bounds that the
+# sheet data_quality of the report flags for them), then those below and above
 # TRIM_QUANTILES of what is left, over everyone who answered, so that an answer
 # is kept or removed in every table alike.
 TRIM_QUANTILES <- c(0.005, 0.995)
@@ -95,11 +95,13 @@ survey_main <- readRDS(file.path(CLEAN_DATA_DIR, "survey_main.rds"))
 vignettes_long <- readRDS(file.path(CLEAN_DATA_DIR, "vignettes_long.rds"))
 n_attempts_all <- nrow(survey_main)
 
+# coalesce(): the first value that is not NA
 attempts <- survey_main %>%
   mutate(person = coalesce(meta_token, resp_uid)) %>%
   group_by(wave, person) %>%
   mutate(n_attempts = n()) %>%
   ungroup()
+# desc(): from the largest down
 experts <- attempts %>%
   arrange(desc(is_complete), desc(meta_lastpage)) %>%
   distinct(wave, person, .keep_all = TRUE) %>%
@@ -250,6 +252,7 @@ print(reference_prices)
 reference_expectations <- tibble()
 for (fuel in PRICE_FUELS) {
   answer <- as.character(experts[[paste0("pexp_", fuel)]])
+  # setdiff(): the values of the first that are not in the second
   unknown_answers <- setdiff(unique(answer[!is.na(answer)]), PEXP_ANSWERS)
   if (length(unknown_answers) > 0) {
     stop("pexp_", fuel, " has answers that are not in PEXP_ANSWERS: ",

@@ -255,8 +255,7 @@ readme <- tribble(
 )
 
 # The codebook describes the data but contains none of it - it is built purely
-# from the syntax files. It therefore goes to REPORT_DIR in Dropbox, where the
-# coauthors can read it, rather than travelling with the respondent data.
+# from the syntax files. It goes to REPORT_DIR, next to the cleaning report.
 write_xlsx(list(readme = readme, codebook = codebook_out,
                 softlaunch_diffs = softlaunch_diffs),
            file.path(REPORT_DIR, "codebook.xlsx"))

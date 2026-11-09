@@ -15,14 +15,16 @@
 #   Rscript R/run_cleaning.R
 #   Rscript tests/test_cleaning_equivalence.R
 #
-# Section 1 holds the old code, from the git tag pre-restructure: the same statements,
-# with old_ or OLD_ in front of each name, without most comments and without the log
-# lines. So it is not in Max's vocabulary, and it is not meant to be edited.
+# Section 1 holds the old code, from the git tag pre-restructure: the same
+# statements, with old_ or OLD_ in front of each name, without most comments and
+# without the log lines. What else it leaves out, its parts say. So it is not in
+# Max's vocabulary, and it is not meant to be edited.
 #
 # The comparison runs twice: on the data as simulated, and on a stressed copy with
-# what the simulation does not produce: repeat completions, ties between attempts, an
-# expert in both arms who stays, euro answers per litre, prices at the edges of the
-# bands, odd answers to Q2, skipped and abandoned branches of the staircases.
+# what the simulation does not produce: repeat completions, ties between attempts,
+# an expert in both arms who stays, euro answers per litre, prices at the edges of
+# the bands, odd answers to Q2 and an office of engineers only, skipped and
+# abandoned branches of the staircases.
 #
 # Differences that are intended are printed, and do not fail:
 #   1. The outlier rule runs over everyone who answered, instead of the completers
@@ -442,7 +444,10 @@ old_share_section <- function(experts) {
 
 # 1.6 R/analysis/01_run_specifications.R, section 2.1 ---------------------------
 # As a function, so that it can run on any sample. The script's own copy of the
-# price rule, the expected rises, the heating at home and the degree days.
+# price rule, the expected rises, the heating at home and the degree days. Left
+# out: the treatments of the prices, which clean_reported_prices() has too; the log
+# prices (_lc), a regressor of a model; and the stops on few answers, on prices at
+# or below 0, and on nuts3 and degree days, which this comparison cannot reach.
 OLD_OWN_HEATING_ANSWERS <- c("Wärmepumpe", "Pelletheizung", "Fernwärme",
                              "Gasheizung", "Ölheizung", "Hybridheizung", "Sonstiges")
 OLD_HDD_UNIT <- 1000
@@ -628,22 +633,27 @@ stressed_main$arm_conflict[is_conflict] <- TRUE
 stressed_main$vig_arm[is_conflict] <- NA
 
 # Prices: euro per litre or kg, the edges of the bands, zero, negative, not usable
-answered_oil <- sample(which(!is.na(stressed_main$price_oil)), 10)
+answered_oil <- sample(which(!is.na(stressed_main$price_oil)), 11)
 stressed_main$price_oil[answered_oil] <-
-  c(0.9, 0.4, 1.4, 40, 140, 39.9, 140.1, 0, -5, 1000)
+  c(0.9, 0.4, 1, 1.4, 40, 140, 39.9, 140.1, 0, -5, 1000)
 answered_pellet <- sample(which(!is.na(stressed_main$price_pellet)), 10)
 stressed_main$price_pellet[answered_pellet] <-
   c(0.4, 0.2, 0.7, 20, 70, 19.9, 70.1, 0, -5, 1000)
 answered_gas <- sample(which(!is.na(stressed_main$price_gas)), 4)
 stressed_main$price_gas[answered_gas] <- c(1, 0.999, 0, 1e6)
 
-# Q2: a page with a tick but no answer for HVAC; "Sonstige" next to a trade
-q2_rows <- sample(which(!is.na(stressed_main$firm_cat_hvac)), 12)
+# Q2: a page with a tick but no answer for HVAC; "Sonstige" next to a trade; an
+# office of engineers only: every adviser of the simulation ticks energy advice
+q2_rows <- sample(which(!is.na(stressed_main$firm_cat_hvac)), 18)
 stressed_main$firm_cat_hvac[q2_rows[1:4]] <- NA
 stressed_main$firm_cat_chimney[q2_rows[1:4]] <- "Ja"
 stressed_main$firm_cat_other[q2_rows[5:8]] <- "Sonstige Beratung"
 stressed_main$firm_cat_hvac[q2_rows[5:6]] <- "Ja"
 stressed_main$firm_cat_chimney[q2_rows[9:12]] <- NA
+for (column in c("firm_cat_hvac", "firm_cat_chimney", "firm_cat_energyadvice")) {
+  stressed_main[[column]][q2_rows[13:18]] <- "Nicht Gewählt"
+}
+stressed_main$firm_cat_engineering[q2_rows[13:18]] <- "Ja"
 
 # Staircases: a skipped level, and an answer on a branch never entered
 skipped_rows <- which(!is.na(stressed_main$tp_3aa) | !is.na(stressed_main$tp_3ab))
@@ -670,6 +680,30 @@ results <- tibble()
 outlier_pool_differences <- tibble()
 repeat_completion_differences <- tibble()
 scenario_dirs <- c("as simulated" = synthetic_dir, "stressed" = stressed_dir)
+# The columns that docs/data_contract.md promises to the other scripts
+contract_fuels <- c("gas", "hpelec", "dh", "oil", "pellet")
+contract_technologies <- c("hp", "pellet", "dh", "gas", "oil", "hybrid", "other")
+contract_expert_columns <- c(
+  "resp_uid", "person", "n_attempts", "is_complete", "expert_group",
+  "expert_group_note", "arm", "last_question", "last_section",
+  "last_question_position", paste0("price_", contract_fuels, "_kwh"),
+  paste0("price_", contract_fuels, "_treatment"),
+  paste0("pexp_", contract_fuels, "_rise"), "own_heating", "heat_pump_at_home",
+  "hdd", "tp_score", "tp_cell", "tp_levels", "tp_complete", "risk_score",
+  "risk_cell", "risk_levels", "risk_complete", "dem_birthyear_clean",
+  "dem_training_year_clean", "firm_employees_clean", "adv_households_clean",
+  "co2_est_low_clean", "co2_est_high_clean", "age", "interview_minutes",
+  paste0("adv_share_", contract_technologies, "_filled"),
+  paste0("mix25_", contract_technologies, "_filled")
+)
+contract_vignette_columns <- c(
+  "resp_uid", "vig_num", "vig_arm", "arm_source", "vig_rec", "vig_rec_other",
+  "vignette_id", "att_image", "att_couple_age", "att_income",
+  "att_current_heating", "att_replacement_timing", "att_build_year",
+  "att_heat_demand", "att_heat_distribution", "att_renovation", "vig_time",
+  "vig_group_time", "vig_cost", "vig_cost_source", "vig_cost_time",
+  "expert_group", "is_complete"
+)
 for (scenario in names(scenario_dirs)) {
   CLEAN_DATA_DIR <- scenario_dirs[[scenario]]
   compared <- tibble()
@@ -878,6 +912,7 @@ for (scenario in names(scenario_dirs)) {
   compared <- compare_values(compared, "age",
                              SURVEY_YEAR - old_outliers$data$dem_birthyear_clean,
                              experts$age)
+  # As R/descriptives/07_response_times.R and R/summary_statistics/02_sample.R
   compared <- compare_values(compared, "interview_minutes",
                              experts$time_interview / 60,
                              experts$interview_minutes)
@@ -969,6 +1004,18 @@ for (scenario in names(scenario_dirs)) {
     compared, "vignettes: persons left out are those in both arms",
     experts$arm_conflict, !(experts$resp_uid %in% vignettes$resp_uid)
   )
+
+  # 4.10 The columns of the data contract --------------------------------------
+  compared <- compare_values(compared, "contract: the columns of experts",
+                             rep(TRUE, length(contract_expert_columns)),
+                             contract_expert_columns %in% names(experts))
+  compared <- compare_values(compared, "contract: the columns of vignettes",
+                             rep(TRUE, length(contract_vignette_columns)),
+                             contract_vignette_columns %in% names(vignettes))
+  compared <- compare_values(compared, "contract: the levels of expert_group",
+                             EXPERT_GROUPS, levels(experts$expert_group))
+  compared <- compare_values(compared, "contract: the levels of arm",
+                             c("fw", "nofw"), levels(experts$arm))
 
   results <- bind_rows(results, compared %>%
                          mutate(scenario = scenario, .before = 1))

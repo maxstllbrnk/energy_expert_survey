@@ -100,7 +100,7 @@ sums_to_100 <- function(label, pattern, note) {
 
 data_quality <- bind_rows(
   implausible("dem_birthyear", 1920, 2010,
-              "Two-digit entries (e.g. 65) are probably 1965; others are clear typos."),
+              "Two-digit entries are probably years of the 1900s; others are clear typos."),
   implausible("dem_training_year", 1930, 2026,
               "Same pattern: two-digit years plus a few unusable entries."),
   implausible("firm_employees", 0, 10000,

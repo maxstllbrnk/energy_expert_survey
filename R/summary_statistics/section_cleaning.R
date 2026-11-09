@@ -147,7 +147,10 @@ section_cleaning <- function(dirs) {
       setting_value("price_valid_factor"), " times above or below the median: ",
       "not usable, counts as not reported. The median is that of the persons ",
       "who completed with an expert group, after the conversions, and applies ",
-      "to everyone. Means, median and range in cent per kWh. ", cell_note()
+      "to everyone. The mean of the answers as reported mixes the units they ",
+      "were typed in; it is shown if the rules changed or removed at least ",
+      setting_value("min_n"), " of them. The other statistics are in cent per ",
+      "kWh. ", cell_note()
     )),
     col_names = c("", fuel_headers),
     panels = price_panels
