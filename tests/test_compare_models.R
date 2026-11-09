@@ -7,16 +7,17 @@
 #          LR on fresh draws is close to the LR if the gain is large; a smaller model
 #          above the larger is flagged; two samples stop; the workbook reads well
 ################################################################################
-# About 14 minutes on 4 sessions on a busy machine. Models and folds are saved, so
-# a second run is much faster. compute_ames() is Session D's, so the AMEs are made
-# by hand here, following docs/results_contract.md.
+# 14 minutes on 4 sessions on a busy machine, from nothing; models and folds are
+# saved, so a second run takes 4. 2 sessions here, as the machine is shared.
+# compute_ames() is Session D's, so the AMEs are made by hand here, following
+# docs/results_contract.md.
 
 source(file.path("R", "setup.R"))
 est_dir <- file.path(OUTPUT_DIR, "test_compare_models")
 dir.create(est_dir, recursive = TRUE, showWarnings = FALSE)
 n_experts <- 300
 n_draws_test <- 100
-n_workers_test <- 4
+n_workers_test <- 2
 start_time <- Sys.time()
 
 # 1. Simulated decisions -------------------------------------------------------
@@ -193,9 +194,15 @@ results_below <- post_estimation(m_below, est_dir, label = "Stopped short",
 
 # 3. AMEs by hand, following docs/results_contract.md --------------------------
 # m_base and m_relevant: the largest change in an AME is known. m_irrelevant has no
-# AMEs at all. One row of m_relevant's is not in m_base's.
+# AMEs at all. One effect of m_relevant's is not in m_base's, as a model has the
+# effects of its terms.
 make_ames <- function(values, se_values, baseline_values) {
   effects <- c("income_low", "gas_q25_q75", "heat_pump_home")
+  changes <- list(
+    income_low = list(to = list(att_income = "unter 40.000 € brutto im Jahr")),
+    gas_q25_q75 = list(from = list(price_gas_kwh = 10), to = list(price_gas_kwh = 14)),
+    heat_pump_home = list(to = list(heat_pump_at_home = 1))
+  )
   outcomes <- c("Wärmepumpe", "Gasheizung")
   ame_table <- tibble(
     profile = rep(EXPERT_GROUPS, each = length(effects) * length(outcomes)),
@@ -220,8 +227,9 @@ make_ames <- function(values, se_values, baseline_values) {
   ) %>%
     mutate(ci_low_kr = probability - 1.96 * se,
            ci_high_kr = probability + 1.96 * se)
-  list(at_means = list(table = ame_table, baseline = baseline, draws = NULL, at = list(),
-                       changes = list(), profiles = EXPERT_GROUPS, n_draws = 1000,
+  list(at_means = list(table = ame_table, baseline = baseline, draws = NULL,
+                       at = list(price_gas_kwh = 12), changes = changes,
+                       profiles = EXPERT_GROUPS, n_draws = 1000,
                        fingerprint = "by hand", date = Sys.Date()))
 }
 set_ames <- function(model_name, ames) {
@@ -242,6 +250,7 @@ ame_changed <- ame_values + 0.005
 ame_changed[4] <- ame_values[4] + 0.03
 ames_relevant <- make_ames(ame_changed, se_values, baseline_values + 0.002)
 ames_relevant$at_means$table$effect[18] <- "only_in_this_model"
+ames_relevant$at_means$changes$only_in_this_model <- list(to = list(x_relevant = 1))
 set_ames("m_relevant", ames_relevant)
 
 # 4. The full protocol ---------------------------------------------------------
@@ -530,7 +539,8 @@ comparison_ame <- compare_models(
 )
 stopifnot(comparison_ame$decision$proposal ==
             "keep smaller as main; report larger as robustness")
-# The same AMEs at another reference state: they are not compared
+# The same AMEs at another reference state: they are not compared. An effect that the
+# two models define differently: its rows are not compared.
 ames_other_state <- make_ames(ame_values + 0.005, se_values, baseline_values)
 ames_other_state$at_means$at <- list(price_gas_kwh = 14)
 set_ames("m_relevant", ames_other_state)
@@ -544,6 +554,17 @@ comparison_state <- compare_models(
 stopifnot(comparison_state$decision$verdict_ame == "not available",
           comparison_state$decision$proposal == "accept larger",
           grepl("reference state", comparison_state$ame_changes$note[1], fixed = TRUE))
+ames_other_change <- make_ames(ame_values + 0.005, se_values, baseline_values)
+ames_other_change$at_means$changes$income_low <- list(to = list(att_income = "other"))
+set_ames("m_relevant", ames_other_change)
+comparison_change <- compare_models(
+  est_dir,
+  tests = tests %>% filter(larger == "m_relevant"),
+  ame_name = "at_means",
+  n_fresh_draws = 2,
+  n_workers = 2
+)
+stopifnot(comparison_change$decision$ame_rows_shared == n_ame_rows - 6)
 set_ames("m_relevant", ames_relevant)
 
 # (e) With the classical covariance matrix every weight is 1 and the robust test is

@@ -416,6 +416,23 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
            " have different samples")
     }
   }
+  # The coefficients of each block, now rather than after the cross-validation: a
+  # dummy that is the same for every expert has no coefficient
+  block_parameters <- list()
+  if (!is.null(final_model)) {
+    theta <- results_list[[final_model]]$coefficients
+    technologies <- results_list[[final_model]]$outcomes[-1]
+    for (block_name in names(blocks)) {
+      for (term in blocks[[block_name]]) {
+        found <- intersect(c(term, paste0(term, ":", technologies)), names(theta))
+        if (length(found) == 0) {
+          stop("Block ", block_name, ": ", term, " has no coefficient in ",
+               final_model)
+        }
+        block_parameters[[block_name]] <- c(block_parameters[[block_name]], found)
+      }
+    }
+  }
 
   # 1. Validity ----------------------------------------------------------------
   # A code of 1 or 2 does not prove a maximum: (3pg) and (4pd) ended below the model
@@ -871,6 +888,7 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
       cv_of_models <- bind_rows(cv_of_models, tibble(
         row_type = "model",
         item = model_name,
+        question = NA_character_,
         experts = nrow(per_expert),
         folds_converged = sum(folds_of_model$code %in% c(1, 2)),
         held_out_log_likelihood = sum(per_expert$log_likelihood),
@@ -1060,9 +1078,8 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
 
   # 8. Substance ---------------------------------------------------------------
   # The AMEs and baseline probabilities in the two models, on the rows they share.
-  # Only of one set at one reference state: otherwise a change says nothing about
-  # the models. Relative to the SE in the smaller model, the one kept if the change
-  # is small.
+  # Only at one reference state: otherwise a change says nothing about the models.
+  # Relative to the SE in the smaller model, the one kept if the change is small.
   ame_changes <- tibble(
     question = character(0), smaller = character(0), larger = character(0),
     quantity = character(0), rows_shared = numeric(0),
@@ -1075,13 +1092,23 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
       ames_smaller <- results_list[[tests$smaller[i]]]$ames[[ame_name]]
       ames_larger <- results_list[[tests$larger[i]]]$ames[[ame_name]]
       if (is.null(ames_smaller) || is.null(ames_larger) ||
-          !identical(ames_smaller$at, ames_larger$at) ||
-          !identical(ames_smaller$changes, ames_larger$changes)) {
+          !identical(ames_smaller$at, ames_larger$at)) {
         next
+      }
+      # A model has the effects of its terms, so the sets of effects can differ. An
+      # effect that both have counts only if both define it alike.
+      same_effects <- character(0)
+      for (effect_name in intersect(names(ames_smaller$changes),
+                                    names(ames_larger$changes))) {
+        if (identical(ames_smaller$changes[[effect_name]],
+                      ames_larger$changes[[effect_name]])) {
+          same_effects <- c(same_effects, effect_name)
+        }
       }
       rows_of_quantity <- list(
         "AME" = list(
           smaller = ames_smaller$table %>%
+            filter(effect %in% same_effects) %>%
             transmute(where = paste(profile, effect, outcome, sep = ", "),
                       value_smaller = ame, se_smaller = se),
           larger = ames_larger$table %>%
@@ -1128,33 +1155,21 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
   # over the block's coefficients, with V clustered by expert, chi-squared with as
   # many degrees of freedom as coefficients.
   block_tests <- tibble()
-  if (!is.null(final_model) && !is.null(blocks)) {
+  for (block_name in names(block_parameters)) {
     results <- results_list[[final_model]]
-    theta <- results$coefficients
-    for (block_name in names(blocks)) {
-      parameters <- character(0)
-      for (term in blocks[[block_name]]) {
-        found <- intersect(c(term, paste0(term, ":", results$outcomes[-1])),
-                           names(theta))
-        if (length(found) == 0) {
-          stop("Block ", block_name, ": ", term, " has no coefficient in ",
-               final_model)
-        }
-        parameters <- c(parameters, found)
-      }
-      V_block <- results$vcov[parameters, parameters, drop = FALSE]
-      statistic <- as.numeric(t(theta[parameters]) %*% solve(V_block) %*%
-                                theta[parameters])
-      block_tests <- bind_rows(block_tests, tibble(
-        model = final_model,
-        model_valid = validity$valid[validity$model == final_model],
-        block = block_name,
-        statistic = statistic,
-        df = length(parameters),
-        p = pchisq(statistic, df = length(parameters), lower.tail = FALSE),
-        parameters = paste(parameters, collapse = ", ")
-      ))
-    }
+    parameters <- block_parameters[[block_name]]
+    theta_block <- results$coefficients[parameters]
+    V_block <- results$vcov[parameters, parameters, drop = FALSE]
+    statistic <- as.numeric(t(theta_block) %*% solve(V_block) %*% theta_block)
+    block_tests <- bind_rows(block_tests, tibble(
+      model = final_model,
+      model_valid = validity$valid[validity$model == final_model],
+      block = block_name,
+      statistic = statistic,
+      df = length(parameters),
+      p = pchisq(statistic, df = length(parameters), lower.tail = FALSE),
+      parameters = paste(parameters, collapse = ", ")
+    ))
   }
 
   # 10. The decision -----------------------------------------------------------
@@ -1361,10 +1376,10 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
   if (!is.null(ame_name)) {
     ame_note <- paste0(
       "AME set ", ame_name, ". Absolute change between the two models in ",
-      "percentage points, on the rows they share; in_se: relative to the SE in the ",
-      "smaller model. rows_moved: rows that change by ", 100 * ame_threshold,
-      " pp or more. A test without a row: a model does not have this set, or has it ",
-      "at another reference state (at, changes)."
+      "percentage points, on the rows they share and with effects defined alike ",
+      "(changes); in_se: relative to the SE in the smaller model. rows_moved: rows ",
+      "that change by ", 100 * ame_threshold, " pp or more. A test without a row: a ",
+      "model does not have this set, or has it at another reference state (at)."
     )
   }
   sheets <- list(
