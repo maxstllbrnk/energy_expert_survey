@@ -45,7 +45,8 @@ section_cleaning <- function(dirs) {
     notes = latex_text(paste0(
       "A person is one invitation: a person who started twice keeps the ",
       "furthest attempt, completed before not completed, then the highest ",
-      "page. A token is per survey, so someone invited in two waves counts ",
+      "page, then the one started first. A token is per survey, so someone ",
+      "invited in two waves counts ",
       "twice. The arm is observed from the vignettes answered or, without any, ",
       "routed from Q6a. Unknown: no vignette and no answer to Q6a. Both: an ",
       "expert who answered in both arms, left out of the vignettes."
@@ -114,9 +115,7 @@ section_cleaning <- function(dirs) {
       price_row("\\quad both of the above", euro_and_per_unit),
       price_row("\\quad not usable", fmt_int(in_sample$not_usable)),
       price_row("Usable", fmt_int(in_sample$usable)),
-      price_row("Mean of the answers as reported",
-                fmt_num(in_sample$mean_before, 1)),
-      price_row("Mean of the usable answers", fmt_num(in_sample$mean_after, 1))
+      price_row("Mean of the usable answers", fmt_num(in_sample$mean_usable, 1))
     )
     price_cells <- bind_rows(price_cells, sample_rows)
     panel_sizes <- c(panel_sizes, nrow(sample_rows))
@@ -141,57 +140,65 @@ section_cleaning <- function(dirs) {
       "February 2026, in cent, with the rules of thumb that 1 litre of heating ",
       "oil is about 10 kWh and 1 kg of pellets about 5 kWh. The rules, in this ",
       "order: below ", setting_value("price_euro_below"), " read as euro, times ",
-      "100; oil from ", setting_value("oil_per_litre"), " read as cent per ",
-      "litre, divided by 10; pellets from ", setting_value("pellets_per_kg"),
-      " read as cent per kg, divided by 5; more than ",
-      setting_value("price_valid_factor"), " times above or below the median: ",
-      "not usable, counts as not reported. The median is that of the persons ",
-      "who completed with an expert group, after the conversions, and applies ",
-      "to everyone. The mean of the answers as reported mixes the units they ",
-      "were typed in; it is shown if the rules changed or removed at least ",
-      setting_value("min_n"), " of them. The other statistics are in cent per ",
-      "kWh. ", cell_note()
+      "100, and for heating oil up to ", setting_value("oil_euro_up_to"),
+      " (euro per litre); oil from ", setting_value("oil_per_litre"),
+      " read as cent per litre, divided by 10; pellets from ",
+      setting_value("pellets_per_kg"), " read as cent per kg, divided by 5; ",
+      "more than ", setting_value("price_valid_factor"), " times above or below ",
+      "the median: not usable, counts as not reported. The median is that of the ",
+      "persons who completed with an expert group, after the conversions, and ",
+      "applies to everyone. Statistics in cent per kWh. ", cell_note()
     )),
     col_names = c("", fuel_headers),
     panels = price_panels
   )
 
   # 4. The other continuous answers --------------------------------------------
+  # Trimming and reversed ranges apply to some variables only: an empty cell for
+  # the others
   outliers <- report$outliers
-  # Only a variable with a valid range can have impossible values
-  impossible <- fmt_int(outliers$impossible)
-  impossible[is.na(outliers$valid_range)] <- ""
+  trimmed <- fmt_int(outliers$trimmed)
+  trimmed[!outliers$is_trimmed] <- ""
+  reversed <- fmt_int(outliers$reversed)
+  reversed[!(outliers$variable %in% c("co2_est_low", "co2_est_high"))] <- ""
+  # In the order of the rule: impossible, reversed, trimmed
   outlier_cells <- tibble(
     label = latex_text(outliers$label),
     answered = fmt_int(outliers$answered),
-    impossible = impossible,
-    trimmed = fmt_int(outliers$trimmed),
+    impossible = fmt_int(outliers$impossible),
+    reversed = reversed,
+    trimmed = trimmed,
     used = fmt_int(outliers$used)
   )
-  ranges <- outliers[!is.na(outliers$valid_range), ]
   # tolower(): the label inside a sentence
-  range_text <- paste(paste0(tolower(ranges$label), " outside ",
-                             ranges$valid_range),
-                      collapse = ", ")
+  impossible_text <- paste(paste0(tolower(outliers$label), " ",
+                                  outliers$impossible_if),
+                           collapse = "; ")
   share_sums <- report$shares %>%
-    distinct(question, persons_gave_shares, sum_not_100)
+    distinct(question, persons_gave_shares, persons_outside_0_100, sum_not_100)
   share_text <- paste(paste0(fmt_int(share_sums$sum_not_100), " of the ",
                              fmt_int(share_sums$persons_gave_shares),
                              " persons who gave shares in ", share_sums$question),
                       collapse = ", and for ")
+  outside_text <- paste(paste0(fmt_int(share_sums$persons_outside_0_100), " in ",
+                               share_sums$question),
+                        collapse = " and ")
   table_custom(
     outlier_cells,
     file = file.path(dirs$tables, "tab_clean_outliers.tex"),
     notes = latex_text(paste0(
       "Everyone who answered, also those who did not complete, so that an ",
-      "answer is kept or removed in every table alike. Impossible: ", range_text,
-      ". Trimmed: below the ", setting_value("trim_lower_percent"),
-      "% or above the ", setting_value("trim_upper_percent"), "% quantile of ",
-      "the remaining answers. The shares of the technologies (Q10b, Q11b) ",
-      "should sum to 100 but do not for ", share_text,
-      "; they are used as reported."
+      "answer is kept or removed in every table alike. The rule, in this order. ",
+      "Impossible: ", impossible_text, ". Reversed: a carbon price range whose ",
+      "lower end lies above its upper end loses both ends. Trimmed: below the ",
+      setting_value("trim_lower_percent"), "% or above the ",
+      setting_value("trim_upper_percent"), "% quantile of the remaining ",
+      "answers; the years are not trimmed. The shares of the ",
+      "technologies (Q10b, Q11b) should sum to 100 but do not for ", share_text,
+      "; they are used as reported. A person with a share outside 0 to 100 has ",
+      "none of that question (", outside_text, ")."
     )),
-    col_names = c("", "Answered", "Impossible", "Trimmed", "Used")
+    col_names = c("", "Answered", "Impossible", "Reversed", "Trimmed", "Used")
   )
 
   # 5. The list of exhibits ----------------------------------------------------

@@ -10,19 +10,8 @@
 # Checks : unknown answers (label_of(), summary_exhibits()); the join of the map
 ################################################################################
 
-#' The answer to Q20 of the experts who were asked it. own_heating says "Keine
-#' Angabe" also for an expert who broke off before Q20 and so never saw it: those
-#' are NA here, so that "No answer" means the expert left it blank.
-#'
-#' @param experts one row per expert, with own_heating, last_question_position
-#' @return character vector
-own_heating_of_asked <- function(experts) {
-  is_q20 <- QUESTIONNAIRE$item == "time_dem_own_heating"
-  if_else(experts$last_question_position >= QUESTIONNAIRE$position[is_q20],
-          experts$own_heating, NA_character_)
-}
-
-#' The heating context of the experts
+#' The heating context of the experts. own_heating is NA for an expert who stopped
+#' before Q20, so "No answer" means that the expert left it blank.
 #'
 #' @param experts one row per expert of the sample, as in experts.rds
 #' @param dirs    the folders of the summary statistics: tables, figures, maps
@@ -31,10 +20,6 @@ section_heating_context <- function(experts, dirs) {
   block <- "I. Heating context"
   exhibits <- tibble()
   comma_text <- label_comma()
-  if (has_columns(experts, c("own_heating", "last_question_position"))) {
-    experts <- experts %>%
-      mutate(own_heating_asked = own_heating_of_asked(experts))
-  }
 
   # 1. The table ---------------------------------------------------------------
   rows <- bind_rows(
@@ -43,7 +28,7 @@ section_heating_context <- function(experts, dirs) {
            level = names(DISTRICT_HEATING_LABELS),
            label = unname(DISTRICT_HEATING_LABELS), digits = 1),
     tibble(panel = "Heating of the expert's home (Q20)",
-           variable = "own_heating_asked", kind = "level",
+           variable = "own_heating", kind = "level",
            level = names(OWN_HEATING_LABELS), label = unname(OWN_HEATING_LABELS),
            digits = 1),
     tibble(panel = "Climate", variable = "hdd", kind = "num",
@@ -63,9 +48,9 @@ section_heating_context <- function(experts, dirs) {
   ))
 
   # 2. The heating at home -----------------------------------------------------
-  if ("own_heating_asked" %in% names(experts)) {
+  if ("own_heating" %in% names(experts)) {
     for (group in c(ALL_EXPERTS, EXPERT_GROUPS)) {
-      answers <- subset_group(experts, group)$own_heating_asked
+      answers <- subset_group(experts, group)$own_heating
       answers <- answers[!is.na(answers)]
       if (length(answers) < MIN_N) {
         next

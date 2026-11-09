@@ -14,10 +14,14 @@
 ```
 
 `model.rds` holds the fitted `mlogit` object, with the data in it. `results.rds` holds
-aggregates only. `cross_validation.rds` exists for the models on the shortlist of
+aggregates only. `cross_validation.rds` exists for the models of `cv_models` in
 `compare_models()` and holds one held-out log-likelihood per expert, so that a new run need not
 estimate the folds again. It is not an aggregate either, so it stays next to `model.rds`. It is
-saved also if a fold failed: delete it to run its folds again.
+saved also if a fold failed: delete it to run its folds again. While the folds run, each writes
+`cross_validation_fold_<k>.rds`, so that a run that is cut off resumes with the folds it had;
+they go once `cross_validation.rds` is written.
+
+A quick run (`QUICK_RUN` in `config.R`) writes the same tree to `output_quick/`.
 
 ## `fit_mixed_logit()` and `post_estimation()`
 
@@ -117,7 +121,7 @@ comparison <- compare_models(
   blocks = list(prices = c("price", "gas_price_na")),  # optional, Wald tests in the final model
   final_model = "m4pe",                                # optional
   ame_name = "at_means",                               # optional, the AMEs to compare
-  cv_models = c("m4pe", "m6pe"),                       # optional, the shortlist for cross-validation
+  cv_models = c("m4", "m4p", "m4pl", "m4pe", "m6pe"),  # optional, the models to cross-validate
   ame_threshold = 0.01,   # an AME moving by less than this (1 pp) counts as immaterial
   alpha = 0.05,
   n_fresh_draws = 12,
@@ -133,3 +137,9 @@ nests, whether or not a test names that model. The rule is at the top of
 `absolute_fit`, `ame_changes`, `block_tests`. The column `final_decision` of `decision` is for the
 researchers. A new run overwrites the workbook, and a workbook with `final_decision` filled in is
 first kept as a copy, `model_comparison_<date_time>.xlsx`.
+
+`ame_changes` has three quantities per test: `AME`, the effects both models define alike, as the
+change between them; `AME the larger model adds`, the effects only the larger model has, as the
+change from 0; and `baseline probability`. The rule's 1 pp step counts the rows of the first two
+that move (Max, 2026-11-09). An effect of the same name that the two models define differently
+counts in neither.

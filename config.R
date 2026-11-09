@@ -19,6 +19,11 @@ RAW_DIR <- "I:/Projekte/Stiftungs- und Industrieprojekte/SFB UniMA/Daten/energy_
 CLEAN_DATA_DIR <- "I:/Projekte/Stiftungs- und Industrieprojekte/SFB UniMA/Daten/energy_experts_survey/wave_1_2026/260909_cleaned_energy_expert_survey_data"
 DROPBOX_DIR <- "C:/Users/msk/Dropbox/Heating Transition/analysis_survey"
 
+# A first run on the real data to see that everything runs: few draws, no
+# cross-validation, the output in output_quick/ so that it is never taken for the
+# real one. A run with FALSE estimates every model again.
+QUICK_RUN <- FALSE
+
 # config.local.R holds only the assignments above that differ on this machine
 if (file.exists("config.local.R")) {
   source("config.local.R")
@@ -48,7 +53,7 @@ SYNTAX_DIR <- file.path(RAW_DIR, "limesurvey-syntax")
 
 # All output, one folder per estimation script (R/estimation/), plus the cleaning
 # and the summary statistics of the full sample
-OUTPUT_DIR <- file.path(SECURE_DIR, "output")
+OUTPUT_DIR <- file.path(SECURE_DIR, if (QUICK_RUN) "output_quick" else "output")
 REPORT_DIR <- file.path(OUTPUT_DIR, "cleaning")
 CODEBOOK_FILE <- file.path(REPORT_DIR, "codebook.csv")
 
@@ -94,18 +99,20 @@ MIN_CONTACTS <- 30
 # and AMEs (5,000 Halton draws are at least as accurate as the 100,000
 # pseudo-random draws used before, benchmark of 2026-11-09); Krinsky-Robb draws,
 # so that each 2.5% tail rests on 125 draws. Fewer in a synthetic run, which only
-# tests the code. N_WORKERS: the R sessions for the Hessian and the Krinsky-Robb
-# loop; lower it if something else runs on this computer.
-if (USE_SYNTHETIC_DATA) {
+# tests the code, and in a quick run. N_WORKERS: the R sessions for the Hessian
+# and the Krinsky-Robb loop; lower it if something else runs on this computer.
+if (USE_SYNTHETIC_DATA || QUICK_RUN) {
   N_DRAWS_MODEL <- 100
   N_DRAWS_PREDICTION <- 1000
   N_DRAWS_KR <- 200
-  N_WORKERS <- 2
 } else {
   N_DRAWS_MODEL <- 1000
   N_DRAWS_PREDICTION <- 5000
   N_DRAWS_KR <- 5000
-  N_WORKERS <- parallel::detectCores()
+}
+N_WORKERS <- parallel::detectCores()
+if (USE_SYNTHETIC_DATA) {
+  N_WORKERS <- 2
 }
 # The primes of the Halton draws, one per random constant, in mlogit's order. They
 # start again at 2 for each group of constants.
@@ -121,4 +128,5 @@ if (length(missing_inputs) > 0) {
        "\nFix the roots at the top of config.R, or in config.local.R.")
 }
 message("Data: ", if (USE_SYNTHETIC_DATA) "SYNTHETIC, " else "", CLEAN_DATA_DIR,
-        "\nOutput: ", OUTPUT_DIR)
+        "\nOutput: ", OUTPUT_DIR,
+        if (QUICK_RUN) "\nQUICK RUN: few draws, no cross-validation" else "")

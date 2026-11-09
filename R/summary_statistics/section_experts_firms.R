@@ -46,11 +46,11 @@ section_experts_firms <- function(experts, dirs) {
   )
   notes <- paste0(
     "Age: ", SURVEY_YEAR, " minus the year of birth. Years and employees without ",
-    "impossible answers and without the ", 100 * TRIM_QUANTILES[1], "% lowest and ",
-    "highest answers of all experts. Shares among the experts who answered. Q6: ",
-    "the soft launch had no ",
-    "answer \"nationwide\". Q2 sets the group: HVAC before chimney sweep before ",
-    "energy advice, so the shares of Q2 within a group are in part mechanical."
+    "impossible answers; employees also without the ", 100 * TRIM_QUANTILES[1],
+    "% lowest and highest answers of all experts. Shares among the experts who ",
+    "answered. Q6: the soft launch had no answer \"nationwide\". Q2 sets the ",
+    "group: HVAC before chimney sweep before energy advice, so the shares of Q2 ",
+    "within a group are in part mechanical."
   )
   exhibits <- summary_exhibits(experts, rows, "experts",
                                "The experts and their firms", notes, block,

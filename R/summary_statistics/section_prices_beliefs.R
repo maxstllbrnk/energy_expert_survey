@@ -246,9 +246,10 @@ section_prices_beliefs <- function(experts, dirs) {
   )
   carbon_notes <- paste(
     "Q18 asks whether the expert has heard of the carbon price on heating fuels",
-    "in Germany; Q18b, only if so, for a rough range of its current level. The",
-    paste0("two ends without the ", 100 * TRIM_QUANTILES[1], "% lowest and highest"),
-    "answers of all experts."
+    "in Germany; Q18b, only if so, for a rough range of its current level. Each",
+    "end without negative answers and without the",
+    paste0(100 * TRIM_QUANTILES[1], "% lowest and highest answers of all experts;"),
+    "a range whose lower end lies above its upper end is left out."
   )
   exhibits <- bind_rows(exhibits, summary_exhibits(
     experts, carbon_rows, "carbon_price", "The carbon price: known and estimated",

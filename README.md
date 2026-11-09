@@ -43,6 +43,12 @@ Open `energy_expert_survey.Rproj` first, or run `Rscript <file>` from this folde
 A re-run reloads every model, result and set of summary statistics whose inputs have not changed, so
 changing one model re-estimates that model only.
 
+**A first run to see that everything runs:** set `QUICK_RUN <- TRUE` in `config.R`. The models then use
+100 draws, the AMEs 1,000 and Krinsky-Robb 200, nothing is cross-validated, and everything goes to
+`output_quick/`, so that it is never taken for the real output. Set it back to `FALSE` for the real run,
+which estimates every model again. The full run cross-validates every model, which adds five estimations
+per model; on four sessions that is several hours per script.
+
 ## An estimation script is yours to edit
 
 There is one script per data set in `R/estimation/`. Each goes through the same steps in plain sight:
@@ -92,18 +98,20 @@ row per question:
 | Nested test | Is the extra structure there? | Robust and classical LR, Holm correction across the declared tests |
 | Non-nested test | Which is closer to the data? | Vuong test on per-expert log-likelihoods |
 | Parsimony | Is it worth its parameters? | AIC, BIC with experts as N, robust TIC |
-| Out of sample | Does it predict new experts? | 5-fold cross-validation by expert, for a shortlist |
+| Out of sample | Does it predict new experts? | 5-fold cross-validation by expert, for every model |
 | Absolute fit | Does it reproduce the data? | Predicted and observed shares |
-| Substance | Do the answers change? | Largest change in the AMEs |
+| Substance | Do the answers change? | Largest change in the AMEs both models have, and largest AME only the larger model has |
 | Final model | Is it stable? | Robust Wald test of each block |
 
 **The rule, fixed before results are read.** A larger model is accepted only if it is valid, the robust test rejects
 at 5% after Holm, the gain survives fresh draws, and cross-validation improves by more than one paired standard error (BIC
 falls, if it was not run or a fold failed). If tests and parsimony disagree, the smaller stays. If all agree but no AME moves
-by 1 percentage point, the smaller stays as the main model and the larger is reported as robustness. Of two models that do not
+by 1 percentage point, the smaller stays as the main model and the larger is reported as robustness. An AME that only the
+larger model has, such as a price effect in (4p) against (4), counts as moving from 0. Of two models that do not
 nest each other, one is preferred only if Vuong's test and cross-validation (or BIC) agree on it; otherwise the data cannot
 decide. The rule proposes and the researchers decide: the column `final_decision` of the sheet `decision` is theirs, also for
-terms of direct research interest that stay regardless. Open questions about the rule are in `docs/open_issues.md`.
+terms of direct research interest that stay regardless. A nested test that cannot be computed, because its restrictions are not
+independent at the estimates, is not compared. The reason warns if the robust test rests on few experts.
 
 The gates are not redundant. In one run on synthetic data, with equal covariances by group and 100 draws per expert, the robust
 test wrongly rejected them (LR 61.2, robust p 0.006), and only the fresh draws (mean LR 39.9) and cross-validation caught it.
@@ -132,6 +140,8 @@ PDFs, in the project's original colours. No statistic rests on fewer than 10 ans
 - **Response rates by group mix two sources.** The denominator is the mailing list, the numerator the answer to Q2: without
   the token lists, a response cannot be matched to its list.
 - **`NA` in `expert_group`** means Q2 was not answered or no category was ticked. Eight completers have no group.
+- **`NA` in `own_heating` and `heat_pump_at_home`** means the expert stopped before Q20; `Keine Angabe` means Q20 was left
+  blank. Completers all reached Q20, so the estimation samples hold no `NA` there.
 - **`vig_rec` has seven levels:** the six technologies and `Keine Empfehlung`, the pre-registered seventh option. Free
   text without a coded answer counts as `Keine Empfehlung`. `NA` means the vignette was not answered.
 - **Soft launch.** Q6 had no "bundesweit" option, and Q7 was a different ranking task. Filter on `is_softlaunch` before
@@ -159,7 +169,8 @@ docs/                          the columns of the cleaned data, the results, not
 
 Every data decision is made once, in `R/cleaning/06_experts_vignettes.R`, with its reason and date in the comments. English
 labels and colours are in `R/functions/labels.R`. More on the data, such as how the waves are merged and how the state is derived
-from the postcode, is in `docs/data_notes.md`. What the rebuild left open for the researchers to decide is in `docs/open_issues.md`.
+from the postcode, is in `docs/data_notes.md`. `docs/open_issues.md` holds what the rebuild left for the researchers: the decisions
+taken, what to check on the first real run, and the statistical and identification issues to keep in mind for the paper.
 
 ## Testing without the real data
 

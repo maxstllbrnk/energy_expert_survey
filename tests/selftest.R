@@ -5,8 +5,8 @@
 #          run also the raw exports
 # Outputs: one line per check in the log; exit status 1 if a check fails
 # Checks : waves, keys, joins, six rows per person, the arms, the design, the
-#          alignment of the soft launch, the staircases, the N of the cleaning
-#          report
+#          alignment of the soft launch, the staircases, the rules of the heating
+#          at home, the shares and the outliers, the N of the cleaning report
 ################################################################################
 # From the project root: Rscript tests/selftest.R, or source() it in RStudio.
 #
@@ -218,7 +218,29 @@ checks <- add_check(
 checks <- add_check(checks, "the risk staircase has all 16 level-5 nodes",
                     all(paste0("risk_5", level_5_paths) %in% names(survey_main)))
 
-# 6. The cleaning report -------------------------------------------------------
+# 6. The rules of 2026-11-09 hold in the data -----------------------------------
+q20_position <- QUESTIONNAIRE$position[QUESTIONNAIRE$item == "time_dem_own_heating"]
+has_reached_q20 <- experts$is_complete |
+  experts$last_question_position >= q20_position | !is.na(experts$dem_own_heating)
+checks <- add_check(
+  checks, "own_heating is NA exactly for those who stopped before Q20",
+  identical(is.na(experts$own_heating), !has_reached_q20) &&
+    identical(is.na(experts$heat_pump_at_home), !has_reached_q20),
+  paste(sum(!has_reached_q20), "stopped before Q20")
+)
+# str_subset(): the names that match
+filled_shares <- experts[str_subset(names(experts), "_filled$")]
+checks <- add_check(checks, "no filled share outside 0 to 100",
+                    all(filled_shares >= 0 & filled_shares <= 100, na.rm = TRUE))
+clean_counts <- experts[c("firm_employees_clean", "adv_households_clean",
+                          "co2_est_low_clean", "co2_est_high_clean")]
+checks <- add_check(checks, "no negative count or carbon price after cleaning",
+                    all(clean_counts >= 0, na.rm = TRUE))
+checks <- add_check(checks, "no carbon price range with its ends reversed",
+                    !any(experts$co2_est_low_clean > experts$co2_est_high_clean,
+                         na.rm = TRUE))
+
+# 7. The cleaning report -------------------------------------------------------
 # An unknown state name would silently lower the count of the lookups that
 # disagree
 checks <- add_check(checks, "every state has its NUTS1 code",
@@ -249,7 +271,7 @@ if (file.exists(report_file)) {
                       nrow(cleaning_exhibits) == 4 && all(file.exists(table_files)))
 }
 
-# 7. Result --------------------------------------------------------------------
+# 8. Result --------------------------------------------------------------------
 for (k in seq_len(nrow(checks))) {
   cat(sprintf("%-60s %s  %s\n", checks$check[k],
               if (checks$passed[k]) "PASS" else "*** FAIL ***", checks$detail[k]))

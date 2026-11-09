@@ -434,11 +434,13 @@ section_recruitment <- function(experts, vignettes, frame, dirs) {
               rate_completed = fmt_pct(rate_completed))
   check_cells <- tibble(
     wave = c("Invitations in the dispatch log", "Rows of the sampling frame",
+             "Rows without an e-mail address (left out)",
              "Persons on the lists (one row per e-mail address)",
              "Addresses on more than one list (counted on the first)"),
     target_group = "", first_sent = "",
     invitations = fmt_int(c(sum(dispatch$invitations), attr(frame, "n_raw"),
-                            nrow(frame), attr(frame, "n_type_conflicts"))),
+                            attr(frame, "n_no_address"), nrow(frame),
+                            attr(frame, "n_type_conflicts"))),
     started = "", completed = "", rate_started = "", rate_completed = ""
   )
   n_soft_launch <- sum(wave_counts$is_softlaunch)

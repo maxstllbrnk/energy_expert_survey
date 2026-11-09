@@ -21,13 +21,13 @@
 #      assigned, Max, 2026-11-09)
 #   3. the arm of the vignette experiment
 #   4. the last question answered
-#   5. the energy prices per kWh (Max, 2026-10-19 and 2026-10-20)
+#   5. the energy prices per kWh (Max, 2026-10-19, 2026-10-20 and 2026-11-09)
 #   6. the expected price rises (Max, 2026-10-27)
-#   7. the heating at home (Max, 2026-11-01)
+#   7. the heating at home (Max, 2026-11-01 and 2026-11-09)
 #   8. the heating degree days (Max, 2026-10-27)
 #   9. the time and risk preference scores
 #  10. the outlier rule, age and duration (Max, 2026-10-28 and 2026-11-09)
-#  11. the shares of the technologies (Max, 2026-10-29)
+#  11. the shares of the technologies (Max, 2026-10-29 and 2026-11-09)
 # What depends on a sample or a model stays in the estimation scripts: centring,
 # the dummies for missing answers, the COP, the share of gas in the hybrid
 # heating, z-scores.
@@ -38,22 +38,24 @@
 # of each fuel in January and February 2026, in cent. A blank means none of the
 # clients uses the fuel, or "do not know". Answers in another unit are converted,
 # in this order:
-#   (1) below PRICE_EURO_BELOW: euro instead of cent, times 100
+#   (1) below PRICE_EURO_BELOW: euro instead of cent, times 100. Heating oil up
+#       to OIL_EURO_UP_TO too: it cost about 1 euro per litre in January 2026, so
+#       such an answer is euro per litre (Max, 2026-11-09)
 #   (2) oil within OIL_PER_LITRE (after (1)): cent per litre, divided by 10 (1 l
 #       of heating oil is about 10 kWh, as the question says)
 #   (3) pellets within PELLETS_PER_KG (after (1)): cent per kg, divided by 5 (1 kg
 #       of pellets is about 5 kWh, as the question says)
 #   (4) more than PRICE_VALID_FACTOR times above or below the median answer for
 #       the fuel: cannot be read as a price per kWh, counts as not reported
-# The bounds are wide on purpose: the survey measures beliefs. Band of (3):
-# pellets cost about 400 euro per tonne, 40 cent per kg; it starts at 20, above
-# plausible answers per kWh (median about 8 cent). PRICE_VALID_FACTOR: first
-# choice, to be confirmed.
+# The bounds are wide on purpose: the survey measures beliefs (factor 5, Max,
+# 2026-11-09). Band of (3): pellets cost about 400 euro per tonne, 40 cent per
+# kg; it starts at 20, above plausible answers per kWh (median about 8 cent).
 PRICE_FUELS <- c("gas", "hpelec", "dh", "oil", "pellet")
 PRICE_EURO_BELOW <- 1
+OIL_EURO_UP_TO <- 1.4
 OIL_PER_LITRE <- c(40, 140)
 PELLETS_PER_KG <- c(20, 70)
-PRICE_VALID_FACTOR <- 3
+PRICE_VALID_FACTOR <- 5
 
 # Expected prices (Q17): the price of each fuel in five years against the start
 # of 2026. The answers exactly as in the data (note "10%" against "10 %"). An
@@ -67,17 +69,26 @@ PEXP_RISE <- c("bis zu 10 % höher", "mehr als 10% höher")
 OWN_HEATING_ANSWERS <- c("Wärmepumpe", "Pelletheizung", "Fernwärme", "Gasheizung",
                          "Ölheizung", "Hybridheizung", "Sonstiges")
 
-# The outlier rule: impossible years go first (VALID_RANGE, the bounds that the
-# sheet data_quality of the report flags for them), then those below and above
-# TRIM_QUANTILES (config.R, as the notes of the tables quote them) of what is left,
-# over everyone who answered, so that an answer is kept or removed in every table
-# alike.
+# The outlier rule, over everyone who answered, so that an answer is kept or
+# removed in every table alike (Max, 2026-10-28 and 2026-11-09), in this order:
+# (a) an answer outside VALID_RANGE is impossible and goes: the years as the sheet
+# data_quality of the report flags them, and a negative count or carbon price;
+# (b) a carbon price range whose lower end lies above its upper end loses both
+# ends; (c) the variables of TRIMMED_VARIABLES have no upper bound, so they also
+# lose the answers below and above TRIM_QUANTILES (config.R, as the notes of the
+# tables quote them) of what is left. The years are not trimmed: that would remove
+# the genuinely oldest and youngest experts.
 VALID_RANGE <- list(
   dem_birthyear = c(1920, 2010),
-  dem_training_year = c(1930, 2026)
+  dem_training_year = c(1930, 2026),
+  firm_employees = c(0, Inf),
+  adv_households = c(0, Inf),
+  co2_est_low = c(0, Inf),
+  co2_est_high = c(0, Inf)
 )
-OUTLIER_VARIABLES <- c("dem_birthyear", "dem_training_year", "firm_employees",
-                       "adv_households", "co2_est_low", "co2_est_high")
+OUTLIER_VARIABLES <- names(VALID_RANGE)
+TRIMMED_VARIABLES <- c("firm_employees", "adv_households", "co2_est_low",
+                       "co2_est_high")
 
 # The technologies of Q10b and Q11b (adv_share_<suffix>, mix25_<suffix>)
 SHARE_SUFFIXES <- c("hp", "pellet", "dh", "gas", "oil", "hybrid", "other")
@@ -86,7 +97,8 @@ SHARE_SUFFIXES <- c("hp", "pellet", "dh", "gas", "oil", "hybrid", "other")
 # survey_main has one row per started questionnaire. A person who starts twice
 # has two rows with one token (always inside one wave). The furthest attempt
 # stays: completed before not completed, then the highest page; between attempts
-# equal on both, the first by resp_uid as text (the sheet attempts counts them).
+# equal on both, the one started first (Max, 2026-11-09), and between attempts
+# equal on that too, the first by resp_uid (the sheet attempts counts the ties).
 # So a person who broke off and came back counts as a completer, not also as a
 # break-off. A questionnaire without a token is a person of its own. A token is
 # per survey, so one person invited in two waves stays two people here: only a
@@ -103,7 +115,7 @@ attempts <- survey_main %>%
   ungroup()
 # desc(): from the largest down
 experts <- attempts %>%
-  arrange(desc(is_complete), desc(meta_lastpage)) %>%
+  arrange(desc(is_complete), desc(meta_lastpage), meta_startdate) %>%
   distinct(wave, person, .keep_all = TRUE) %>%
   arrange(resp_uid)
 check_unique(experts, "resp_uid")
@@ -200,8 +212,11 @@ for (fuel in PRICE_FUELS) {
   reported <- experts[[paste0("price_", fuel)]]
   treatment <- if_else(is.na(reported), "blank", "as reported")
 
-  # (1) euro instead of cent
+  # (1) euro instead of cent; for oil, euro per litre up to OIL_EURO_UP_TO
   is_euro <- !is.na(reported) & reported < PRICE_EURO_BELOW
+  if (fuel == "oil") {
+    is_euro <- !is.na(reported) & reported <= OIL_EURO_UP_TO
+  }
   price <- if_else(is_euro, reported * 100, reported)
   treatment[is_euro] <- "euro"
 
@@ -273,9 +288,11 @@ for (fuel in PRICE_FUELS) {
 print(reference_expectations)
 
 # 7. The heating at home (Q20) -------------------------------------------------
-# own_heating: the answer as text, "Keine Angabe" if missing. heat_pump_at_home:
-# 1 if a heat pump heats the expert's home, else 0; "Sonstiges" and no answer
-# count as no heat pump.
+# own_heating: the answer as text, "Keine Angabe" if left blank, NA for an expert
+# who stopped before Q20 and never saw it (Max, 2026-11-09). heat_pump_at_home: 1
+# if a heat pump heats the expert's home, else 0, NA where own_heating is;
+# "Sonstiges" and no answer count as no heat pump. Completers saw Q20, so the
+# reference values and the estimation samples hold no NA.
 own_heating_answer <- as.character(experts$dem_own_heating)
 unknown_answers <- setdiff(unique(own_heating_answer[!is.na(own_heating_answer)]),
                            OWN_HEATING_ANSWERS)
@@ -283,8 +300,15 @@ if (length(unknown_answers) > 0) {
   stop("dem_own_heating has answers that are not in OWN_HEATING_ANSWERS: ",
        paste(unknown_answers, collapse = ", "))
 }
+# Reached Q20: completed, got as far as Q20, or answered it, also if a wave should
+# lack its response time
+q20_position <- QUESTIONNAIRE$position[QUESTIONNAIRE$item == "time_dem_own_heating"]
+reached_q20 <- experts$is_complete |
+  experts$last_question_position >= q20_position | !is.na(own_heating_answer)
 experts <- experts %>%
-  mutate(own_heating = coalesce(own_heating_answer, "Keine Angabe"),
+  mutate(own_heating = if_else(reached_q20,
+                               coalesce(own_heating_answer, "Keine Angabe"),
+                               NA_character_),
          heat_pump_at_home = if_else(own_heating == "Wärmepumpe", 1, 0))
 reference_own_heating <- numeric(0)
 for (answer_level in c(OWN_HEATING_ANSWERS, "Keine Angabe")) {
@@ -327,26 +351,40 @@ print(preference_report)
 
 # 10. The outlier rule, age and duration ---------------------------------------
 # <variable>_clean is the answer, NA if it fails the rule of section 0
+# (a) Impossible answers
 outlier_counts <- tibble()
+possible <- list()
 for (variable in OUTLIER_VARIABLES) {
   values <- experts[[variable]]
-  n_answered <- sum(!is.na(values))
   valid_range <- VALID_RANGE[[variable]]
-  n_impossible <- 0
-  if (!is.null(valid_range)) {
-    is_impossible <- !is.na(values) &
-      (values < valid_range[1] | values > valid_range[2])
-    n_impossible <- sum(is_impossible)
-    values[is_impossible] <- NA
-  }
-  limits <- quantile(values, TRIM_QUANTILES, names = FALSE, na.rm = TRUE)
-  values[!is.na(values) & (values < limits[1] | values > limits[2])] <- NA
-  experts[[paste0(variable, "_clean")]] <- values
+  is_impossible <- !is.na(values) &
+    (values < valid_range[1] | values > valid_range[2])
+  values[is_impossible] <- NA
+  possible[[variable]] <- values
   outlier_counts <- bind_rows(outlier_counts, tibble(
-    variable = variable, answered = n_answered, impossible = n_impossible,
-    trimmed = n_answered - n_impossible - sum(!is.na(values)),
-    used = sum(!is.na(values))
+    variable = variable, answered = sum(!is.na(experts[[variable]])),
+    impossible = sum(is_impossible), reversed = 0L, trimmed = NA_integer_,
+    used = NA_integer_
   ))
+}
+# (b) A carbon price range whose lower end lies above its upper end cannot be
+# read: both ends go, before the tails, so that they play no part in them
+is_reversed <- coalesce(possible$co2_est_low > possible$co2_est_high, FALSE)
+possible$co2_est_low[is_reversed] <- NA
+possible$co2_est_high[is_reversed] <- NA
+is_carbon_price <- outlier_counts$variable %in% c("co2_est_low", "co2_est_high")
+outlier_counts$reversed[is_carbon_price] <- sum(is_reversed)
+# (c) The tails, of the variables without an upper bound
+for (k in seq_along(OUTLIER_VARIABLES)) {
+  variable <- OUTLIER_VARIABLES[k]
+  values <- possible[[variable]]
+  if (variable %in% TRIMMED_VARIABLES) {
+    limits <- quantile(values, TRIM_QUANTILES, names = FALSE, na.rm = TRUE)
+    values[!is.na(values) & (values < limits[1] | values > limits[2])] <- NA
+  }
+  experts[[paste0(variable, "_clean")]] <- values
+  outlier_counts$trimmed[k] <- sum(!is.na(possible[[variable]])) - sum(!is.na(values))
+  outlier_counts$used[k] <- sum(!is.na(values))
 }
 print(outlier_counts)
 
@@ -357,8 +395,9 @@ experts <- experts %>%
 # 11. The shares of the technologies (Q10b, Q11b) -------------------------------
 # <variable>_filled: for an expert who gave shares in the question (a total above
 # 0), the share, 0 where the technology was left blank; NA for the others. Used
-# as reported, also where they do not sum to 100, which is counted. A share
-# outside 0 to 100 stops the script: how should it count?
+# as reported, also where they do not sum to 100, which is counted. An expert with
+# a share outside 0 to 100 misread the question: all their shares of it count as
+# not given, which is counted too (Max, 2026-11-09).
 share_sums <- tibble()
 share_questions <- list(
   "Q10b (recommendations)" = paste0("adv_share_", SHARE_SUFFIXES),
@@ -366,13 +405,11 @@ share_questions <- list(
 )
 for (question in names(share_questions)) {
   share_variables <- share_questions[[question]]
-  n_outside <- sum(experts[share_variables] < 0 | experts[share_variables] > 100,
-                   na.rm = TRUE)
-  if (n_outside > 0) {
-    stop(n_outside, " shares of ", question, " lie outside 0 to 100")
-  }
+  # rowSums(): the sum of each row, here the shares outside 0 to 100
+  is_outside <- rowSums(experts[share_variables] < 0 |
+                          experts[share_variables] > 100, na.rm = TRUE) > 0
   total <- rowSums(experts[share_variables], na.rm = TRUE)
-  gave_shares <- total > 0
+  gave_shares <- total > 0 & !is_outside
   for (variable in share_variables) {
     experts[[paste0(variable, "_filled")]] <- if_else(
       gave_shares, coalesce(as.numeric(experts[[variable]]), 0), NA_real_
@@ -380,6 +417,7 @@ for (question in names(share_questions)) {
   }
   share_sums <- bind_rows(share_sums, tibble(
     question = question, answered = sum(gave_shares),
+    outside_0_100 = sum(is_outside),
     not_100 = sum(gave_shares & abs(total - 100) > 1e-6)
   ))
 }

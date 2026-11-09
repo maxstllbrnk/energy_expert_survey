@@ -5,7 +5,10 @@
 # Checks : an irrelevant block is rejected and a relevant one accepted; a large
 #          model that buys little is caught; levels against logs run and report; the
 #          LR on fresh draws is close to the LR if the gain is large; a smaller model
-#          above the larger is flagged; two samples stop; the workbook reads well
+#          above the larger is flagged; an effect only the larger model has counts;
+#          a rare dummy is flagged; a cut-off cross-validation resumes; a test that
+#          cannot be computed is not compared; two samples stop; the workbook reads
+#          well
 ################################################################################
 # 14 minutes on 4 sessions on a busy machine, from nothing; models and folds are
 # saved, so a second run takes 4. 2 sessions here, as the machine is shared.
@@ -426,15 +429,21 @@ stopifnot(abs(pair_relevant$gain_per_expert -
 # The AMEs: the numbers set by hand, on the rows the two models share
 ame_row <- comparison$ame_changes %>%
   filter(smaller == "m_base", larger == "m_relevant", quantity == "AME")
-stopifnot(ame_row$rows_shared == n_ame_rows - 1,
+stopifnot(ame_row$rows == n_ame_rows - 1,
           abs(ame_row$largest_change_pp - 3) < 1e-8,
           abs(ame_row$median_change_pp - 0.5) < 1e-8,
           abs(ame_row$largest_change_in_se - 1.5) < 1e-8,
           ame_row$where_largest == "Energy advisers, gas_q25_q75, Gasheizung")
 baseline_row <- comparison$ame_changes %>%
   filter(smaller == "m_base", larger == "m_relevant", quantity == "baseline probability")
-stopifnot(baseline_row$rows_shared == n_baseline_rows,
+stopifnot(baseline_row$rows == n_baseline_rows,
           abs(baseline_row$largest_change_pp - 0.2) < 1e-8)
+# The effect only m_relevant has counts as moving from 0: 8.5 pp
+added_row <- comparison$ame_changes %>%
+  filter(smaller == "m_base", larger == "m_relevant",
+         quantity == "AME the larger model adds")
+stopifnot(added_row$rows == 1, abs(added_row$largest_change_pp - 8.5) < 1e-8,
+          added_row$rows_moved == 1)
 # m_irrelevant has no AMEs: no row, and the decision says not available
 stopifnot(!any(comparison$ame_changes$larger == "m_irrelevant"),
           decision$verdict_ame[decision$larger == "m_irrelevant"] == "not available")
@@ -538,6 +547,26 @@ comparison_ame <- compare_models(
 )
 stopifnot(comparison_ame$decision$proposal ==
             "keep smaller as main; report larger as robustness")
+# An effect only the larger model has, of 2 pp, is enough to accept it, although the
+# effects both have move by 0.5 pp only (Max, 2026-11-09)
+ames_added <- make_ames(ame_values + 0.005, se_values, baseline_values)
+ames_added$at_means$table$effect[18] <- "only_in_this_model"
+ames_added$at_means$table$ame[18] <- 0.02
+ames_added$at_means$changes$only_in_this_model <- list(to = list(x_relevant = 1))
+set_ames("m_relevant", ames_added)
+comparison_added <- compare_models(
+  est_dir,
+  tests = tests %>% filter(larger == "m_relevant"),
+  ame_name = "at_means",
+  n_fresh_draws = 2,
+  n_workers = 2
+)
+stopifnot(comparison_added$decision$proposal == "accept larger",
+          comparison_added$decision$verdict_ame == "moved",
+          comparison_added$decision$ame_rows_moved == 0,
+          comparison_added$decision$ame_added_rows_moved == 1,
+          grepl("largest AME that m_relevant adds 2.00 pp",
+                comparison_added$decision$reason, fixed = TRUE))
 # The same AMEs at another reference state: they are not compared. An effect that the
 # two models define differently: its rows are not compared.
 ames_other_state <- make_ames(ame_values + 0.005, se_values, baseline_values)
@@ -563,7 +592,9 @@ comparison_change <- compare_models(
   n_fresh_draws = 2,
   n_workers = 2
 )
-stopifnot(comparison_change$decision$ame_rows_shared == n_ame_rows - 6)
+# ...and as it has a name the smaller model has too, it is no added effect either
+stopifnot(comparison_change$decision$ame_rows_shared == n_ame_rows - 6,
+          !any(comparison_change$ame_changes$quantity == "AME the larger model adds"))
 set_ames("m_relevant", ames_relevant)
 
 # (e) With the classical covariance matrix every weight is 1 and the robust test is
@@ -682,10 +713,96 @@ comparison_rare <- compare_models(
 )
 rare_row <- comparison_rare$cross_validation %>%
   filter(item == "m_rare")
+# The robust test rests on 3 experts here: the reason says so
 stopifnot(rare_row$folds_converged == 5, rare_row$experts == n_experts,
           rare_row$fold_errors == "",
           !grepl("not usable", comparison_rare$decision$verdict_cross_validation,
-                 fixed = TRUE))
+                 fixed = TRUE),
+          comparison_rare$decision$mean_weight < LOW_MEAN_WEIGHT,
+          grepl("a restriction rests on few experts", comparison_rare$decision$reason,
+                fixed = TRUE))
+
+# (g3) A cross-validation that was cut off resumes with the folds it had: the folds of
+# m_base written one by one as a run writes them, without the file of the model.
+# Folds 1 to 3 are loaded; fold 4, from other estimates, and fold 5, missing, are
+# estimated again, with the same result.
+cv_file <- file.path(est_dir, "m_base", "cross_validation.rds")
+cv_whole <- readRDS(cv_file)
+for (fold_number in 1:4) {
+  is_of_fold <- cv_whole$per_expert$fold == fold_number
+  fold_row <- cv_whole$folds[cv_whole$folds$fold == fold_number, ]
+  fold_fingerprint <- cv_whole$fingerprint
+  if (fold_number == 4) {
+    fold_fingerprint <- "other estimates"
+  }
+  saveRDS(list(expert = cv_whole$per_expert$expert[is_of_fold],
+               log_likelihood = cv_whole$per_expert$log_likelihood[is_of_fold],
+               code = fold_row$code, iterations = fold_row$iterations,
+               error = fold_row$error, model_name = "m_base", fold = fold_number,
+               fingerprint = fold_fingerprint, minutes = fold_row$minutes),
+          file.path(est_dir, "m_base",
+                    paste0("cross_validation_fold_", fold_number, ".rds")))
+}
+unlink(cv_file)
+resume_messages <- character(0)
+comparison_resumed <- withCallingHandlers(
+  compare_models(
+    est_dir,
+    tests = tests %>% filter(larger == "m_relevant"),
+    cv_models = c("m_base", "m_relevant"),
+    n_fresh_draws = 2,
+    n_workers = 2
+  ),
+  # withCallingHandlers(): collects the messages, and lets them through
+  message = function(m) {
+    resume_messages <<- c(resume_messages, conditionMessage(m))
+  }
+)
+per_expert_resumed <- readRDS(cv_file)$per_expert
+stopifnot(file.exists(cv_file),
+          any(grepl("m_base: 3 of 5 folds loaded", resume_messages, fixed = TRUE)),
+          identical(per_expert_resumed$expert, cv_whole$per_expert$expert),
+          identical(per_expert_resumed$fold, cv_whole$per_expert$fold),
+          max(abs(per_expert_resumed$log_likelihood -
+                    cv_whole$per_expert$log_likelihood)) < 1e-8,
+          length(list.files(file.path(est_dir, "m_base"),
+                            pattern = "^cross_validation_fold_")) == 0,
+          abs(comparison_resumed$decision$cv_gain_per_expert -
+                decision$cv_gain_per_expert[decision$larger == "m_relevant"]) < 1e-8)
+
+# (g4) Restrictions that are not independent at the estimates, here the first random
+# constant with a standard deviation of exactly 0 in every group (in one group only,
+# the other groups' parameters still span the restrictions): that test is not
+# compared, and the call goes on. A folder of its own.
+est_dir_degenerate <- file.path(est_dir, "degenerate")
+for (model_name in c("m_relevant", "m_by_group")) {
+  folder <- file.path(est_dir_degenerate, model_name)
+  dir.create(folder, recursive = TRUE, showWarnings = FALSE)
+  model <- readRDS(file.path(est_dir, model_name, "model.rds"))
+  results <- readRDS(file.path(est_dir, model_name, "results.rds"))
+  if (model_name == "m_by_group") {
+    for (group_column in unique(results$random$column)) {
+      first_constant <- results$random$name[results$random$column == group_column][1]
+      diagonal <- paste0("chol.", first_constant, ":", first_constant)
+      stopifnot(diagonal %in% names(model$coefficients))
+      model$coefficients[[diagonal]] <- 0
+      results$coefficients[[diagonal]] <- 0
+    }
+  }
+  saveRDS(model, file.path(folder, "model.rds"))
+  saveRDS(results, file.path(folder, "results.rds"))
+}
+comparison_degenerate <- compare_models(
+  est_dir_degenerate,
+  tests = tests %>% filter(larger == "m_by_group"),
+  n_fresh_draws = 2,
+  n_workers = 2
+)
+stopifnot(comparison_degenerate$decision$proposal == "not compared",
+          is.na(comparison_degenerate$decision$p_robust),
+          !is.na(comparison_degenerate$decision$p),
+          grepl("not independent", comparison_degenerate$decision$reason,
+                fixed = TRUE))
 
 # (h) A smaller model above the larger: flagged in validity, and not compared, also if
 # no test names the smaller one. The Holm family keeps its size.

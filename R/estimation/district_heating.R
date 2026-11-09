@@ -422,9 +422,14 @@ results_m4pe <- compute_ames(
 
 # 8. How the models compare ----------------------------------------------------
 # The fixed protocol: compare_models(), the rule at the top of its file. The sheet
-# `decision` of model_comparison.xlsx has one row per question. A model on the
-# shortlist of the cross-validation is estimated five more times, on four sessions:
-# a fold of (6pe) needs an estimated 3 to 4 GB per session.
+# `decision` of model_comparison.xlsx has one row per question. Every model is
+# cross-validated (Max, 2026-11-09): each is estimated five more times, on four
+# sessions, as a fold of (6pe) needs an estimated 3 to 4 GB per session. A quick
+# run (config.R) leaves the cross-validation out, and BIC decides instead.
+cv_models <- c("m4", "m4p", "m4pe", "m6pe")
+if (QUICK_RUN) {
+  cv_models <- NULL
+}
 comparison <- compare_models(
   est_dir,
   tests = tribble(
@@ -442,6 +447,6 @@ comparison <- compare_models(
   ),
   final_model = "m4pe",
   ame_name = "neutral",
-  cv_models = c("m4pe", "m6pe"),
+  cv_models = cv_models,
   n_workers = min(4, N_WORKERS)
 )

@@ -109,16 +109,18 @@ tiny_frame <- data.frame(
 tiny_file <- file.path(test_dir, "tiny_frame.rds")
 saveRDS(tiny_frame, tiny_file)
 tiny <- load_frame(tiny_file)
+# The row without an address is not invited
 stopifnot(
-  nrow(tiny) == 5,
+  nrow(tiny) == 4,
   attr(tiny, "n_raw") == 6,
+  attr(tiny, "n_no_address") == 1,
   attr(tiny, "n_duplicate_contacts") == 1,
   attr(tiny, "n_type_conflicts") == 1,
   identical(as.character(tiny$expert_group),
             c("Energy advisers", "HVAC installers", "Chimney sweeps",
-              "Energy advisers", "Energy advisers")),
-  identical(tiny$is_tonline, c(FALSE, TRUE, FALSE, FALSE, FALSE)),
-  identical(is.na(tiny$bundesland), c(FALSE, TRUE, TRUE, FALSE, FALSE)),
+              "Energy advisers")),
+  identical(tiny$is_tonline, c(FALSE, TRUE, FALSE, FALSE)),
+  identical(is.na(tiny$bundesland), c(FALSE, TRUE, TRUE, FALSE)),
   as.character(tiny$bundesland[4]) == prefix_state,
   !("email" %in% names(tiny)),
   setequal(names(STATE_LABELS), levels(tiny$bundesland))

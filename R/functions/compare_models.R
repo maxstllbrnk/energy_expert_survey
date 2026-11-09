@@ -7,7 +7,9 @@
 #          sheets) and model_comparison.xlsx, aggregates only;
 #          <est_dir>/<model>/cross_validation.rds, the held-out log-likelihood
 #          per expert, so that a new run need not estimate again: not an
-#          aggregate, so it stays next to model.rds
+#          aggregate, so it stays next to model.rds. While the folds run, each
+#          writes cross_validation_fold_<k>.rds, so that a run that is cut off
+#          resumes with the folds it had.
 # Checks : the models of a test share sample, reference and draws; the df equal
 #          the difference in parameters; results.rds belongs to model.rds
 ################################################################################
@@ -29,10 +31,17 @@
 #   no AME moves by ame_threshold or more   keep smaller as main; report larger
 #                                           as robustness
 #   otherwise                               accept larger
+# The AMEs are those both models compute, and those only the larger model has,
+# which count as moving from 0, their value in the smaller model (Max,
+# 2026-11-09): a larger model passes if its new terms or its other effects move
+# by ame_threshold.
 # For models that do not nest each other: prefer a model if Vuong's test and
 # cross-validation (or BIC, as above) agree on it, otherwise data cannot decide.
 # A model that did not converge, or whose Hessian is not positive definite, never
-# reaches this function: fit_mixed_logit() and post_estimation() stop on it.
+# reaches this function: fit_mixed_logit() and post_estimation() stop on it. A
+# nested test whose restrictions are not independent at the estimates, as when one
+# random constant has a standard deviation near 0 in several groups, is not
+# compared.
 
 # The limits of the protocol, set before any result is read.
 # A Newton step would still add half of g' H^{-1} g to the log-likelihood: at 0.1,
@@ -45,6 +54,11 @@ MAX_CONDITION_NUMBER <- 1e8
 LOG_LIKELIHOOD_TOLERANCE <- 1e-6
 # Draws for a robust p-value: its standard error is at most 0.0005
 ROBUST_DRAWS <- 1e6
+# A mean weight of the robust test below this is flagged in the reason: a
+# clustered variance that rests on few experts, as for a rare dummy, pushes the
+# weights below 1, and the robust test then rejects too easily (0.06 with a dummy
+# held by 3 of 300 experts, tests/test_compare_models.R)
+LOW_MEAN_WEIGHT <- 0.5
 CV_FOLDS <- 5
 # The columns that tell an expert's group, if no model has constants by group
 CV_GROUP_COLUMNS <- c("is_adviser", "is_hvac", "is_sweep")
@@ -204,7 +218,8 @@ fresh_log_likelihood <- function(set, theta, prepared, halton_sequences, primes,
 #' @param job list: model_name, fold, fingerprint; arguments of mlogit();
 #'   training_data, held_out_data
 #' @return list: model_name, fold, fingerprint, expert, log_likelihood (one per
-#'   held-out expert), code, iterations, minutes, error
+#'   held-out expert), code, iterations, minutes, error; also saved to
+#'   job$fold_file, so that a run that is cut off resumes with the folds it had
 cross_validate_fold <- function(job) {
   start_time <- Sys.time()
   # A term without variation in these data has no estimate, and makes mlogit's
@@ -264,6 +279,7 @@ cross_validate_fold <- function(job) {
   fold_result$fold <- job$fold
   fold_result$fingerprint <- job$fingerprint
   fold_result$minutes <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))
+  saveRDS(fold_result, job$fold_file)
   fold_result
 }
 
@@ -378,7 +394,7 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
   # linearly independent ones (qr()$rank: the number of independent rows).
   tests <- tests %>%
     select(question, smaller, larger) %>%
-    mutate(comparison = NA_character_, added = NA_character_)
+    mutate(comparison = NA_character_, added = NA_character_, degenerate = FALSE)
   restriction_matrices <- list()
   for (i in seq_len(nrow(tests))) {
     smaller_name <- tests$smaller[i]
@@ -421,10 +437,17 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
                             relationship = relationship,
                             random = results_larger$random)
     df <- length(results_larger$coefficients) - length(results_smaller$coefficients)
-    if (nrow(R) != df || qr(R)$rank != df) {
-      stop("Test ", test_name, ": the restrictions give ", qr(R)$rank,
-           " distinct rows in ", nrow(R), ", but the models differ by ", df,
-           " parameters")
+    if (nrow(R) != df) {
+      stop("Test ", test_name, ": the restrictions give ", nrow(R), " rows, but ",
+           "the models differ by ", df, " parameters")
+    }
+    # Rows that are not independent at the estimates, as when one random constant
+    # has a standard deviation near 0 in several groups: the robust test cannot be
+    # computed, and the decision sheet says why
+    tests$degenerate[i] <- qr(R)$rank < df
+    if (tests$degenerate[i]) {
+      message("Test ", test_name, ": the restrictions give ", qr(R)$rank,
+              " independent rows of ", df, " at the estimates; not compared")
     }
     restriction_matrices[[test_name]] <- R
   }
@@ -624,25 +647,42 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
     # The eigenvalues of (R H^{-1} R')^{-1} (R V R') are those of the symmetric
     # matrix C'^{-1} (R V R') C^{-1}, with C the Cholesky factor of R H^{-1} R'
     # (chol(): C'C = R H^{-1} R'), so that eigen() returns real values.
+    # Restrictions that are not independent (step 0) have no robust test, and nor
+    # have those that are nearly so: a standard deviation near 0 but not 0 can leave
+    # R H^{-1} R' without a Cholesky factor. tryCatch(): NULL instead of a stop.
+    weights <- NA_real_
+    critical_value <- NA_real_
     parameters <- names(results_larger$coefficients)
     inverse_hessian <- results_larger$inverse_hessian[parameters, parameters]
-    V <- results_larger$vcov[parameters, parameters]
-    C_inverse <- solve(chol(R %*% inverse_hessian %*% t(R)))
-    weights_matrix <- t(C_inverse) %*% (R %*% V %*% t(R)) %*% C_inverse
-    weights <- eigen(weights_matrix, symmetric = TRUE, only.values = TRUE)$values
-    # The seed before each test, so that its p-value does not depend on the others.
-    # rchisq(df = 1): draws of Z^2.
-    set.seed(20261004)
-    weighted_sum <- numeric(ROBUST_DRAWS)
-    for (weight in weights) {
-      weighted_sum <- weighted_sum + weight * rchisq(ROBUST_DRAWS, df = 1)
+    cholesky <- NULL
+    if (!tests$degenerate[i]) {
+      cholesky <- tryCatch(chol(R %*% inverse_hessian %*% t(R)),
+                           error = function(error_message) NULL)
+      tests$degenerate[i] <- is.null(cholesky)
+    }
+    if (!tests$degenerate[i]) {
+      V <- results_larger$vcov[parameters, parameters]
+      C_inverse <- solve(cholesky)
+      weights_matrix <- t(C_inverse) %*% (R %*% V %*% t(R)) %*% C_inverse
+      weights <- eigen(weights_matrix, symmetric = TRUE, only.values = TRUE)$values
+      # The seed before each test, so that its p-value does not depend on the
+      # others. rchisq(df = 1): draws of Z^2.
+      set.seed(20261004)
+      weighted_sum <- numeric(ROBUST_DRAWS)
+      for (weight in weights) {
+        weighted_sum <- weighted_sum + weight * rchisq(ROBUST_DRAWS, df = 1)
+      }
+      # quantile(): the value that the share 1 - alpha of the draws lies below
+      critical_value <- quantile(weighted_sum, 1 - alpha, names = FALSE)
     }
     # A negative LR is no test: the larger model has not reached its maximum
     p_classical <- NA_real_
     p_robust <- NA_real_
     if (lr >= 0) {
       p_classical <- pchisq(lr, df = df, lower.tail = FALSE)
-      p_robust <- mean(weighted_sum >= lr)
+      if (!tests$degenerate[i]) {
+        p_robust <- mean(weighted_sum >= lr)
+      }
     }
     fresh_lr <- 2 * (fresh_values[, larger_name] - fresh_values[, smaller_name])
     # Added elements of L put a variance on the boundary of its space. Every model
@@ -667,8 +707,7 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
       p = p_classical,
       p_robust = p_robust,
       mean_weight = mean(weights),
-      # quantile(): the value that the share 1 - alpha of the draws lies below
-      critical_value = quantile(weighted_sum, 1 - alpha, names = FALSE),
+      critical_value = critical_value,
       lr_fresh_mean = mean(fresh_lr),
       lr_fresh_sd = sd(fresh_lr),
       boundary_note = boundary_note
@@ -816,10 +855,12 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
 
     # (b) The jobs. Starting values for every parameter, also those fixed by
     # constPar. The call of a model evaluated again at code 2 holds iterlim = 0,
-    # which goes. A model whose folds ran on the same estimates and folds is loaded.
+    # which goes. A model whose folds ran on the same estimates and folds is loaded,
+    # and so is each fold of a run that was cut off.
     # hash(): a short code that changes whenever its object does.
     jobs <- list()
     cv_saved <- list()
+    fold_results <- list()
     for (model_name in cv_models) {
       model <- models[[model_name]]
       fingerprint <- rlang::hash(list(results_list[[model_name]]$coefficients,
@@ -844,15 +885,31 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
       arguments$start <- setNames(as.numeric(model$coefficients),
                                   names(model$coefficients))
       expert_of_row <- as.character(idx(model)$resp_uid)
+      n_resumed <- 0
       for (fold_number in seq_len(CV_FOLDS)) {
+        fold_file <- file.path(est_dir, model_name,
+                               paste0("cross_validation_fold_", fold_number, ".rds"))
+        if (file.exists(fold_file)) {
+          saved_fold <- readRDS(fold_file)
+          if (identical(saved_fold$fingerprint, fingerprint)) {
+            fold_results[[length(fold_results) + 1]] <- saved_fold
+            n_resumed <- n_resumed + 1
+            next
+          }
+        }
         experts_held_out <- expert_folds$expert[expert_folds$fold == fold_number]
         is_held_out <- expert_of_row %in% experts_held_out
         jobs[[length(jobs) + 1]] <- list(
           model_name = model_name, fold = fold_number, fingerprint = fingerprint,
           arguments = arguments,
           training_data = model$model[!is_held_out, ],
-          held_out_data = model$model[is_held_out, ]
+          held_out_data = model$model[is_held_out, ],
+          fold_file = fold_file
         )
+      }
+      if (n_resumed > 0) {
+        message("Cross-validation of ", model_name, ": ", n_resumed, " of ",
+                CV_FOLDS, " folds loaded from a run that was cut off")
       }
     }
 
@@ -860,20 +917,21 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
     # call on every session; clusterEvalQ(): the same expression. parLapplyLB(): a
     # new job for whichever session is free, as folds of different models take
     # different times.
-    fold_results <- list()
     if (length(jobs) > 0) {
       message("Cross-validation: ", length(jobs), " folds on ", n_workers,
               " R sessions")
       parallel::clusterCall(cluster, ".libPaths", .libPaths())
       parallel::clusterEvalQ(cluster,
                              suppressPackageStartupMessages(library(mlogit)))
-      fold_results <- parallel::parLapplyLB(cluster, jobs, cross_validate_fold,
-                                            chunk.size = 1)
+      fold_results <- c(fold_results,
+                        parallel::parLapplyLB(cluster, jobs, cross_validate_fold,
+                                              chunk.size = 1))
     }
 
-    # (d) By model: the held-out experts, and how each fold went. Saved also with a
-    # failed fold: such an error lies in the data, it would come back on every run
-    # after hours of estimation, and the sheet reports it.
+    # (d) By model: the held-out experts, and how each fold went, in the order of
+    # the folds also where some were loaded. Saved also with a failed fold: such an
+    # error lies in the data, it would come back on every run after hours of
+    # estimation, and the sheet reports it. The files of the single folds go then.
     for (model_name in setdiff(cv_models, names(cv_saved))) {
       per_expert <- tibble()
       folds_of_model <- tibble()
@@ -894,10 +952,13 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
         ))
       }
       cv_saved[[model_name]] <- list(fingerprint = fingerprint,
-                                     per_expert = per_expert,
-                                     folds = folds_of_model)
+                                     per_expert = arrange(per_expert, fold),
+                                     folds = arrange(folds_of_model, fold))
       saveRDS(cv_saved[[model_name]],
               file.path(est_dir, model_name, "cross_validation.rds"))
+      # unlink(): deletes files
+      unlink(file.path(est_dir, model_name,
+                       paste0("cross_validation_fold_", seq_len(CV_FOLDS), ".rds")))
     }
 
     # (e) Per model, and per pair: the mean gain per expert, with its standard error
@@ -1100,12 +1161,14 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
   }
 
   # 8. Substance ---------------------------------------------------------------
-  # The AMEs and baseline probabilities in the two models, on the rows they share.
-  # Only at one reference state: otherwise a change says nothing about the models.
-  # Relative to the SE in the smaller model, the one kept if the change is small.
+  # The AMEs and baseline probabilities in the two models, on the rows they share,
+  # relative to the SE in the smaller model, the one kept if the change is small.
+  # And the AMEs only the larger model has, as a change from 0, their value in the
+  # smaller model, relative to their own SE (Max, 2026-11-09). Only at one
+  # reference state: otherwise a change says nothing about the models.
   ame_changes <- tibble(
     question = character(0), smaller = character(0), larger = character(0),
-    quantity = character(0), rows_shared = numeric(0),
+    quantity = character(0), rows = numeric(0),
     largest_change_pp = numeric(0), median_change_pp = numeric(0),
     largest_change_in_se = numeric(0), median_change_in_se = numeric(0),
     rows_moved = numeric(0), where_largest = character(0)
@@ -1119,7 +1182,8 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
         next
       }
       # A model has the effects of its terms, so the sets of effects can differ. An
-      # effect that both have counts only if both define it alike.
+      # effect that both have counts only if both define it alike; an effect of the
+      # same name that the two define differently does not count at all.
       same_effects <- character(0)
       for (effect_name in intersect(names(ames_smaller$changes),
                                     names(ames_larger$changes))) {
@@ -1128,46 +1192,56 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
           same_effects <- c(same_effects, effect_name)
         }
       }
+      added_effects <- setdiff(names(ames_larger$changes),
+                               names(ames_smaller$changes))
+      shared_ames <- inner_join(
+        ames_smaller$table %>%
+          filter(effect %in% same_effects) %>%
+          transmute(where = paste(profile, effect, outcome, sep = ", "),
+                    value_smaller = ame, se_smaller = se),
+        ames_larger$table %>%
+          transmute(where = paste(profile, effect, outcome, sep = ", "),
+                    value_larger = ame),
+        by = "where", relationship = "one-to-one"
+      )
+      shared_baselines <- inner_join(
+        ames_smaller$baseline %>%
+          transmute(where = paste(profile, outcome, sep = ", "),
+                    value_smaller = probability, se_smaller = se),
+        ames_larger$baseline %>%
+          transmute(where = paste(profile, outcome, sep = ", "),
+                    value_larger = probability),
+        by = "where", relationship = "one-to-one"
+      )
       rows_of_quantity <- list(
-        "AME" = list(
-          smaller = ames_smaller$table %>%
-            filter(effect %in% same_effects) %>%
-            transmute(where = paste(profile, effect, outcome, sep = ", "),
-                      value_smaller = ame, se_smaller = se),
-          larger = ames_larger$table %>%
-            transmute(where = paste(profile, effect, outcome, sep = ", "),
-                      value_larger = ame)
-        ),
-        "baseline probability" = list(
-          smaller = ames_smaller$baseline %>%
-            transmute(where = paste(profile, outcome, sep = ", "),
-                      value_smaller = probability, se_smaller = se),
-          larger = ames_larger$baseline %>%
-            transmute(where = paste(profile, outcome, sep = ", "),
-                      value_larger = probability)
-        )
+        "AME" = shared_ames %>%
+          transmute(where, change = abs(value_larger - value_smaller),
+                    se = se_smaller),
+        "baseline probability" = shared_baselines %>%
+          transmute(where, change = abs(value_larger - value_smaller),
+                    se = se_smaller),
+        "AME the larger model adds" = ames_larger$table %>%
+          filter(effect %in% added_effects) %>%
+          transmute(where = paste(profile, effect, outcome, sep = ", "),
+                    change = abs(ame), se = se)
       )
       for (quantity_name in names(rows_of_quantity)) {
-        shared <- inner_join(rows_of_quantity[[quantity_name]]$smaller,
-                             rows_of_quantity[[quantity_name]]$larger,
-                             by = "where", relationship = "one-to-one") %>%
-          mutate(change = abs(value_larger - value_smaller),
-                 change_in_se = if_else(se_smaller > 0, change / se_smaller,
-                                        NA_real_))
-        if (nrow(shared) == 0) next
+        compared <- rows_of_quantity[[quantity_name]] %>%
+          mutate(change_in_se = if_else(se > 0, change / se, NA_real_))
+        if (nrow(compared) == 0) next
         ame_changes <- bind_rows(ame_changes, tibble(
           question = tests$question[i],
           smaller = tests$smaller[i],
           larger = tests$larger[i],
           quantity = quantity_name,
-          rows_shared = nrow(shared),
-          largest_change_pp = 100 * max(shared$change, na.rm = TRUE),
-          median_change_pp = 100 * median(shared$change, na.rm = TRUE),
-          largest_change_in_se = max(shared$change_in_se, na.rm = TRUE),
-          median_change_in_se = median(shared$change_in_se, na.rm = TRUE),
-          rows_moved = sum(shared$change >= ame_threshold, na.rm = TRUE),
+          rows = nrow(compared),
+          largest_change_pp = 100 * max(compared$change, na.rm = TRUE),
+          median_change_pp = 100 * median(compared$change, na.rm = TRUE),
+          largest_change_in_se = max(compared$change_in_se, na.rm = TRUE),
+          median_change_in_se = median(compared$change_in_se, na.rm = TRUE),
+          rows_moved = sum(compared$change >= ame_threshold, na.rm = TRUE),
           # which.max(): the position of the largest value
-          where_largest = shared$where[which.max(shared$change)]
+          where_largest = compared$where[which.max(compared$change)]
         ))
       }
     }
@@ -1200,7 +1274,7 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
   by_test <- c("smaller", "larger")
   decision <- tests %>%
     select(question, smaller, larger, comparison, both_valid, smaller_valid,
-           larger_valid) %>%
+           larger_valid, degenerate) %>%
     left_join(nested_tests %>%
                 select(smaller, larger, lr, df, p, p_robust, p_robust_holm,
                        mean_weight, critical_value, lr_fresh_mean, lr_fresh_sd),
@@ -1222,12 +1296,19 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
               by = by_test, relationship = "one-to-one") %>%
     left_join(ame_changes %>%
                 filter(quantity == "AME") %>%
-                select(smaller, larger, ame_rows_shared = rows_shared,
+                select(smaller, larger, ame_rows_shared = rows,
                        ame_rows_moved = rows_moved,
                        ame_largest_change_pp = largest_change_pp,
                        ame_median_change_pp = median_change_pp,
                        ame_largest_change_in_se = largest_change_in_se,
                        ame_where_largest = where_largest),
+              by = by_test, relationship = "one-to-one") %>%
+    left_join(ame_changes %>%
+                filter(quantity == "AME the larger model adds") %>%
+                select(smaller, larger, ame_rows_added = rows,
+                       ame_added_rows_moved = rows_moved,
+                       ame_added_largest_pp = largest_change_pp,
+                       ame_added_where_largest = where_largest),
               by = by_test, relationship = "one-to-one") %>%
     left_join(ame_changes %>%
                 filter(quantity == "baseline probability") %>%
@@ -1278,10 +1359,13 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
         rmse_larger_pp < rmse_smaller_pp ~ larger,
         TRUE ~ smaller
       ),
-      ame_available = !is.na(ame_rows_moved),
+      # The rows that move: of the effects both models share, and of those only the
+      # larger one has
+      ame_available = !is.na(ame_rows_moved) | !is.na(ame_added_rows_moved),
+      ame_moved = coalesce(ame_rows_moved, 0) + coalesce(ame_added_rows_moved, 0),
       verdict_ame = case_when(
         !ame_available ~ "not available",
-        ame_rows_moved > 0 ~ "moved",
+        ame_moved > 0 ~ "moved",
         TRUE ~ "did not move"
       ),
       alpha = alpha,
@@ -1316,6 +1400,13 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
       }
       reason <- paste0("Not valid, so no part in a decision. ",
                        paste(reasons, collapse = ". "), ".")
+    } else if (row$degenerate) {
+      proposal <- "not compared"
+      reason <- sprintf(paste0(
+        "The robust test cannot be computed: its restrictions are not independent ",
+        "at the estimates of %s, as when one random constant has a standard ",
+        "deviation near 0 in several groups. LR %.1f, df %.0f, classical p %s."
+      ), row$larger, row$lr, row$df, p_text(row$p))
     } else if (row$comparison == "non-nested") {
       vuong_text <- sprintf("Vuong's z with BIC correction %.2f (p %s) favours %s",
                             row$vuong_z_bic, p_text(row$vuong_p), row$vuong_favours)
@@ -1341,10 +1432,20 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
       )
       ame_text <- "AMEs not compared"
       if (row$ame_available) {
-        ame_text <- sprintf(
-          "largest change in an AME %.2f pp, at %s, of %.0f rows shared",
-          row$ame_largest_change_pp, row$ame_where_largest, row$ame_rows_shared
-        )
+        ame_parts <- character(0)
+        if (!is.na(row$ame_rows_shared)) {
+          ame_parts <- c(ame_parts, sprintf(
+            "largest change in a shared AME %.2f pp, at %s, of %.0f rows",
+            row$ame_largest_change_pp, row$ame_where_largest, row$ame_rows_shared
+          ))
+        }
+        if (!is.na(row$ame_rows_added)) {
+          ame_parts <- c(ame_parts, sprintf(
+            "largest AME that %s adds %.2f pp, at %s, of %.0f rows", row$larger,
+            row$ame_added_largest_pp, row$ame_added_where_largest, row$ame_rows_added
+          ))
+        }
+        ame_text <- paste(ame_parts, collapse = "; ")
       }
       if (!row$test_rejects) {
         proposal <- "keep smaller"
@@ -1361,7 +1462,7 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
                                  "(%s), but the larger model does not pay for its ",
                                  "parameters: %s."),
                           test_text, fresh_text, parsimony_text)
-      } else if (row$ame_available && row$ame_rows_moved == 0) {
+      } else if (row$ame_available && row$ame_moved == 0) {
         proposal <- "keep smaller as main; report larger as robustness"
         reason <- sprintf(paste0("All favour the larger model (%s; %s; %s), but no ",
                                  "AME moves by %.1f pp or more: %s."),
@@ -1376,12 +1477,17 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
       if (row$cv_usable && row$verdict_bic != row$larger) {
         reason <- paste0(reason, sprintf(" BIC rises by %.1f.", row$delta_bic))
       }
+      if (!is.na(row$mean_weight) && row$mean_weight < LOW_MEAN_WEIGHT) {
+        reason <- paste0(reason, sprintf(paste0(
+          " Mean weight %.2f: a restriction rests on few experts, so the robust ",
+          "p-value is too small; compare the classical one."
+        ), row$mean_weight))
+      }
     }
     decision$proposal[i] <- proposal
     decision$reason[i] <- reason
   }
-  # What a reader wants first comes first. writexl sets no column widths, so a
-  # reason needs its column widened in Excel.
+  # What a reader wants first comes first
   decision <- decision %>%
     select(question, smaller, larger, proposal, final_decision, reason, comparison,
            verdict_validity, verdict_test, verdict_fresh_draws,
@@ -1392,7 +1498,8 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
            delta_log_likelihood, delta_aic, delta_bic, delta_tic, cv_gain_per_expert,
            cv_paired_se, rmse_smaller_pp, rmse_larger_pp, ame_rows_shared,
            ame_rows_moved, ame_largest_change_pp, ame_median_change_pp,
-           ame_largest_change_in_se, baseline_largest_change_pp, alpha, ame_threshold)
+           ame_largest_change_in_se, ame_rows_added, ame_added_rows_moved,
+           ame_added_largest_pp, baseline_largest_change_pp, alpha, ame_threshold)
 
   # 11. Save and print ---------------------------------------------------------
   ame_note <- "Not run: no ame_name given."
@@ -1400,9 +1507,13 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
     ame_note <- paste0(
       "AME set ", ame_name, ". Absolute change between the two models in ",
       "percentage points, on the rows they share and with effects defined alike ",
-      "(changes); in_se: relative to the SE in the smaller model. rows_moved: rows ",
-      "that change by ", 100 * ame_threshold, " pp or more. A test without a row: a ",
-      "model does not have this set, or has it at another reference state (at)."
+      "(changes); in_se: relative to the SE in the smaller model. AME the larger ",
+      "model adds: an effect the smaller model does not have, whose value there is ",
+      "0, so its change is the AME itself; in_se: relative to its own SE. ",
+      "rows_moved: rows that change by ", 100 * ame_threshold, " pp or more; the ",
+      "rule counts the rows of both kinds of AME, not the baselines. A test without ",
+      "a row: a model does not have this set, or has it at another reference state ",
+      "(at)."
     )
   }
   sheets <- list(
@@ -1423,10 +1534,11 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
       "LR on the estimation's draws. Classical p: chi-squared with df. Robust p: a ",
       "weighted sum of chi-squared(1) (Kent 1982; White 1982), simulated with %d ",
       "draws, so 0 means below %g. Holm over all %d nested tests declared; a test ",
-      "with an invalid model counts as not rejected. critical_value: the %g quantile ",
-      "of the robust test's distribution, not adjusted for Holm; a gain survives ",
-      "fresh draws if the mean LR on them is above it. The parameters stay at the ",
-      "estimates on the fresh draws, so the mean LR tends to lie below the LR."
+      "with an invalid model, or with restrictions that are not independent at the ",
+      "estimates (no robust p), counts as not rejected. critical_value: the %g ",
+      "quantile of the robust test's distribution, not adjusted for Holm; a gain ",
+      "survives fresh draws if the mean LR on them is above it. The parameters stay ",
+      "at the estimates on the fresh draws, so the mean LR tends to lie below the LR."
     ), ROBUST_DRAWS, 1 / ROBUST_DRAWS, nrow(nested_tests), 1 - alpha)),
     non_nested_tests = add_note(non_nested_tests, paste0(
       "Vuong (1989) with the BIC correction, from the log-likelihood of each expert: ",
@@ -1483,6 +1595,18 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
       }
     }
   }
+  # The decision sheet is read first: the question and the models stay in view, and
+  # the reason wraps in a wide column. xl_sheet(): a table with the layout of its
+  # sheet; xl_col_spec(): the width and format of columns.
+  wrapped_text <- xl_format(xl_align(wrap = TRUE, vertical = "top"))
+  sheets_to_read$decision <- xl_sheet(
+    sheets_to_read$decision,
+    cols = list(xl_col_spec(c("question", "proposal"), width = 40,
+                            format = wrapped_text),
+                xl_col_spec("final_decision", width = 30, format = wrapped_text),
+                xl_col_spec("reason", width = 110, format = wrapped_text)),
+    freeze = list(row = 1, col = 3)
+  )
   write_xlsx(sheets_to_read, xlsx_file)
 
   minutes <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))

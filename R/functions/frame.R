@@ -31,8 +31,9 @@ GROUP_RATE_NOTE <- paste0(
 #'
 #' @param path the frame file, one row per entry of the lists: id, Email, type, PLZ
 #' @return tibble: frame_id, type, plz, expert_group (factor), is_tonline, bundesland
-#'   (factor). Attributes: n_raw (rows of the file), n_duplicate_contacts (rows
-#'   collapsed), n_type_conflicts (addresses on more than one list)
+#'   (factor). Attributes: n_raw (rows of the file), n_no_address (rows without an
+#'   e-mail address, left out), n_duplicate_contacts (rows collapsed into another
+#'   with the same address), n_type_conflicts (addresses on more than one list)
 load_frame <- function(path = FRAME_FILE) {
   # as_tibble(): the data frame of the file as a tibble
   raw <- as_tibble(readRDS(path))
@@ -56,9 +57,11 @@ load_frame <- function(path = FRAME_FILE) {
               plz = if_else(str_detect(coalesce(PLZ, ""), "^[0-9]{5}$"),
                             PLZ, NA_character_))
   n_raw <- nrow(contacts)
-  # Rows without an address cannot be told apart, so they collapse into one person
-  # below. Whether they were invited at all is not known: they are counted.
-  n_no_address <- sum(coalesce(contacts$email, "") == "")
+  # A row without an e-mail address could not be invited by e-mail: it leaves the
+  # frame, and is counted (Max, 2026-11-09)
+  has_address <- coalesce(contacts$email, "") != ""
+  n_no_address <- sum(!has_address)
+  contacts <- contacts[has_address, ]
 
   # (2) One row per person. Rows that share an e-mail address are one mailbox and
   # count once. An address on two lists stays on the first; these are counted, as
@@ -108,12 +111,13 @@ load_frame <- function(path = FRAME_FILE) {
 
   # attr(): counts attached to the object, for the table of the waves
   attr(frame, "n_raw") <- n_raw
-  attr(frame, "n_duplicate_contacts") <- n_raw - nrow(frame)
+  attr(frame, "n_no_address") <- n_no_address
+  attr(frame, "n_duplicate_contacts") <- n_raw - n_no_address - nrow(frame)
   attr(frame, "n_type_conflicts") <- n_type_conflicts
   message("Frame: ", nrow(frame), " contacted persons from ", n_raw, " rows (",
-          n_type_conflicts, " addresses on more than one list, ", n_no_address,
-          " rows without an address), ", sum(frame$is_tonline), " at t-online, ",
-          sum(is.na(frame$bundesland)), " without a usable postcode")
+          n_no_address, " rows without an address, left out; ", n_type_conflicts,
+          " addresses on more than one list), ", sum(frame$is_tonline),
+          " at t-online, ", sum(is.na(frame$bundesland)), " without a usable postcode")
   frame
 }
 

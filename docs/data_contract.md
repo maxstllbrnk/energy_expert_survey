@@ -6,7 +6,8 @@ starts from them.
 ## `experts.rds`: one row per person, key `resp_uid`
 
 All columns of `survey_main` (the answers as the respondents gave them, German levels),
-plus the columns below. A person who started twice keeps the furthest attempt.
+plus the columns below. A person who started twice keeps the furthest attempt: completed
+before not completed, then the highest page, then the one started first.
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -17,17 +18,17 @@ plus the columns below. A person who started twice keeps the furthest attempt.
 | `arm` | factor | `fw` (with the district-heating option), `nofw`; `NA` if unknown or answered in both. Use this, not `vig_arm` in `experts`, which holds only the arm that was observed |
 | `last_question`, `last_section` | chr | the last question answered and its section, in English; `No question answered` and `NA` if no page was submitted |
 | `last_question_position` | int | its position in `QUESTIONNAIRE`, 0 if no page was submitted |
-| `price_<fuel>_kwh` | dbl | reported price in cent per kWh after the unit rules; `NA` if blank or not usable. `<fuel>`: `gas`, `hpelec`, `dh`, `oil`, `pellet` |
+| `price_<fuel>_kwh` | dbl | reported price in cent per kWh after the unit rules (below 1 euro, for oil up to 1.40 euro per litre; oil per litre, pellets per kg; not usable if more than 5 times above or below the median); `NA` if blank or not usable. `<fuel>`: `gas`, `hpelec`, `dh`, `oil`, `pellet` |
 | `price_<fuel>_treatment` | chr | `blank`, `as reported`, `euro`, `per litre or kg`, `euro and per litre or kg`, `not usable` |
 | `pexp_<fuel>_rise` | dbl | 1 if the expert expects the price to rise, 0 if not, `NA` if blank |
-| `own_heating` | chr | answer of Q20, `Keine Angabe` if missing, also for everyone who stopped before Q20 |
-| `heat_pump_at_home` | dbl | 1 if a heat pump heats the expert's home, else 0, also for everyone who stopped before Q20 |
+| `own_heating` | chr | answer of Q20, `Keine Angabe` if left blank; `NA` for everyone who stopped before Q20 and did not answer it |
+| `heat_pump_at_home` | dbl | 1 if a heat pump heats the expert's home, else 0; `NA` for everyone who stopped before Q20 |
 | `hdd` | dbl | heating degree days of the expert's NUTS3 region in `HDD_YEAR`; `NA` without `nuts3` |
 | `tp_score`, `risk_score` | dbl | staircase score in (0, 1); also `_cell`, `_levels`, `_complete`. z-scores depend on the sample: compute them in the script |
-| `dem_birthyear_clean`, `dem_training_year_clean`, `firm_employees_clean`, `adv_households_clean`, `co2_est_low_clean`, `co2_est_high_clean` | dbl | the answer after the outlier rule (valid range, then the 0.5% tails over everyone who answered) |
+| `dem_birthyear_clean`, `dem_training_year_clean`, `firm_employees_clean`, `adv_households_clean`, `co2_est_low_clean`, `co2_est_high_clean` | dbl | the answer after the outlier rule, over everyone who answered, in this order: an answer outside the valid range is impossible (years 1920 to 2010 and 1930 to 2026; the others below 0); a carbon range whose lower end lies above its upper end loses both ends; the counts and carbon prices lose the 0.5% tails, the years do not |
 | `age` | dbl | `SURVEY_YEAR` minus `dem_birthyear_clean` |
 | `interview_minutes` | dbl | LimeSurvey's total time; for a break-off, the time until the break-off. Not trimmed: use medians and quartiles |
-| `adv_share_<tech>_filled`, `mix25_<tech>_filled` | dbl | share of Q10b and Q11b for an expert who gave shares, 0 where left blank; `NA` for the others. `<tech>`: `hp`, `pellet`, `dh`, `gas`, `oil`, `hybrid`, `other` |
+| `adv_share_<tech>_filled`, `mix25_<tech>_filled` | dbl | share of Q10b and Q11b for an expert who gave shares, 0 where left blank; `NA` for the others, and for an expert with a share of the question outside 0 to 100. `<tech>`: `hp`, `pellet`, `dh`, `gas`, `oil`, `hybrid`, `other` |
 
 The answers of `survey_main` by block: `firm_*` (Q0 to Q6a, with `plz`, `bundesland`,
 `nuts3`, `firm_radius_recoded`), `resp_*`, `price_<fuel>`, `pexp_<fuel>`, `co2_*`, `mix25_*`,
@@ -74,8 +75,9 @@ scripts can share one reference expert:
 ## The sampling frame: `load_frame()` in `R/functions/frame.R`
 
 One row per contacted person: `frame_id`, `type`, `plz`, `expert_group`, `is_tonline`,
-`bundesland`. The e-mail address identifies a contact and does not leave the function. Only
-`run_summary_statistics()` needs the frame, for the response rates of the full sample.
+`bundesland`. The e-mail address identifies a contact and does not leave the function. A row
+without an e-mail address could not be invited and is left out, and counted (Max, 2026-11-09).
+Only `run_summary_statistics()` needs the frame, for the response rates of the full sample.
 `load_versand()` gives the dispatch log, one row per wave.
 
 ## The cleaning report: `OUTPUT_DIR/cleaning/cleaning_report.xlsx` and `.rds`
@@ -89,4 +91,7 @@ One sheet per topic: `overview`, `rules`, `settings`, `waves`, `attempts`, `arms
 
 Aggregates only. Every statistic rests on at least `MIN_N` = 10 answers, every response rate
 also on at least `MIN_CONTACTS` = 30 contacted persons; no minimum or maximum of individual
-values. Counts of what a cleaning step changed may be smaller.
+values. Counts of what a cleaning step changed may be smaller. A share needs 10 answers in its
+denominator, a count printed on its own needs 10, and cells of vignettes count distinct experts.
+That a share's numerator follows from N and the share, or a hidden cell from a total minus the
+cells shown, is accepted (Max, 2026-11-09).

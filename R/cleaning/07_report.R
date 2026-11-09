@@ -11,9 +11,7 @@
 # Aggregates only (docs/data_contract.md): a count of what a rule did may be
 # small, every other statistic rests on at least MIN_N answers, and no minimum
 # or maximum of individual values appears. So the limits of the trimmed tails are
-# not shown: with few answers they are the most extreme answers themselves. And
-# two statistics whose difference rests on fewer than MIN_N answers count as one
-# statistic on those answers: see the mean before of the prices.
+# not shown: with few answers they are the most extreme answers themselves.
 
 # 0. Helpers -------------------------------------------------------------------
 
@@ -138,7 +136,7 @@ attempts_sheet <- bind_rows(
     "Persons with two attempts",                                 sum(experts$n_attempts == 2),
     "Persons with three or more attempts",                       sum(experts$n_attempts >= 3),
     "Persons whose furthest attempt is tied with another",       nrow(equal_attempts),
-    "  of which completed: the first by resp_uid stays",         sum(equal_attempts$is_complete),
+    "  of which completed: the one started first stays",         sum(equal_attempts$is_complete),
     "Persons whose attempts fell in different arms",             nrow(persons_in_two_arms)
   )
 )
@@ -231,8 +229,10 @@ for (fuel_name in PRICE_FUELS) {
   is_this_fuel <- reference_values$prices$fuel == fuel_name
   reference <- reference_values$prices[is_this_fuel, ]
 
+  euro_rule <- paste0("(1) Below ", PRICE_EURO_BELOW, ": euro, times 100. ")
   unit_rule <- ""
   if (fuel_name == "oil") {
+    euro_rule <- paste0("(1) Up to ", OIL_EURO_UP_TO, ": euro, times 100. ")
     unit_rule <- paste0("(2) From ", OIL_PER_LITRE[1], " to ", OIL_PER_LITRE[2],
                         ": cent per litre, divided by 10. ")
   }
@@ -241,15 +241,17 @@ for (fuel_name in PRICE_FUELS) {
                         ": cent per kg, divided by 5. ")
   }
   price_rule <- paste0(
-    "(1) Below ", PRICE_EURO_BELOW, ": euro, times 100. ", unit_rule,
+    euro_rule, unit_rule,
     "(4) More than ", PRICE_VALID_FACTOR, " times above or below the median of ",
     "those who completed with an expert group: not usable."
   )
 
+  # No mean of the answers as reported: it mixes the units they were typed in,
+  # and one typo can dominate it (Max, 2026-11-09)
   for (sample_name in names(report_samples)) {
     in_sample <- report_samples[[sample_name]]
     treated <- treatment[in_sample]
-    price_row <- tibble(
+    prices <- bind_rows(prices, tibble(
       fuel = fuel_name, label = FUEL_LABELS[[fuel_name]], sample = sample_name,
       persons = sum(in_sample),
       blank = sum(treated == "blank"),
@@ -263,16 +265,9 @@ for (fuel_name in PRICE_FUELS) {
       median = reference$median,
       lower = reference$lower,
       upper = reference$upper,
-      mean_before = mean_min_cell(reported[in_sample]),
-      mean_after = mean_min_cell(price[in_sample]),
+      mean_usable = mean_min_cell(price[in_sample]),
       rule = price_rule
-    )
-    # Before and after differ by the answers the rules changed or removed: with
-    # fewer than MIN_N of them, the two means would give those answers away
-    if (price_row$answered - price_row$as_reported < MIN_N) {
-      price_row$mean_before <- NA_real_
-    }
-    prices <- bind_rows(prices, price_row)
+    ))
   }
 }
 
@@ -304,43 +299,60 @@ for (fuel_name in PRICE_FUELS) {
 }
 
 # 7. The heating at home (Q20) -------------------------------------------------
-# reference_values$own_heating holds the shares of the second sample
+# reference_values$own_heating holds the shares of the second sample. Shares of
+# the persons who reached Q20; those who stopped before it are NA.
 own_heating_sheet <- tibble()
+has_reached_q20 <- !is.na(experts$own_heating)
 for (answer_level in names(reference_values$own_heating)) {
-  is_answer <- experts$own_heating == answer_level
+  is_answer <- coalesce(experts$own_heating == answer_level, FALSE)
   own_heating_sheet <- bind_rows(own_heating_sheet, tibble(
     answer = answer_level, label = OWN_HEATING_LABELS[[answer_level]],
-    persons = sum(is_answer), share_persons = mean(is_answer),
+    persons = sum(is_answer), share_reached = mean(is_answer[has_reached_q20]),
     completed_with_group = sum(is_answer & in_reference),
     share_completed_with_group = reference_values$own_heating[[answer_level]],
     heat_pump_at_home = if_else(answer_level == "Wärmepumpe", 1, 0),
-    note = if_else(answer_level == "Keine Angabe",
-                   "Where Q20 is blank, also for those who stopped before it",
-                   "")
+    note = if_else(answer_level == "Keine Angabe", "Q20 left blank", "")
   ))
 }
+own_heating_sheet <- bind_rows(own_heating_sheet, tibble(
+  answer = NA_character_, label = "Stopped before Q20",
+  persons = sum(!has_reached_q20), share_reached = NA_real_, completed_with_group = 0,
+  share_completed_with_group = NA_real_, heat_pump_at_home = NA_real_,
+  note = "own_heating and heat_pump_at_home are NA"
+))
 
 # 8. The outlier rule ----------------------------------------------------------
 outlier_sheet <- tibble()
 for (k in seq_len(nrow(outlier_counts))) {
   variable_name <- outlier_counts$variable[k]
   valid_range <- VALID_RANGE[[variable_name]]
-  range_text <- NA_character_
-  range_rule <- ""
-  if (!is.null(valid_range)) {
-    range_text <- paste0(valid_range[1], " to ", valid_range[2])
-    range_rule <- paste0("Outside ", range_text, ": impossible. ")
+  # is.infinite(): no upper bound
+  impossible_text <- paste0("outside ", valid_range[1], " to ", valid_range[2])
+  if (is.infinite(valid_range[2])) {
+    impossible_text <- paste0("below ", valid_range[1])
+  }
+  is_trimmed <- variable_name %in% TRIMMED_VARIABLES
+  trim_rule <- "Not trimmed."
+  if (is_trimmed) {
+    trim_rule <- paste0("Then below the ", 100 * TRIM_QUANTILES[1], "% or above ",
+                        "the ", 100 * TRIM_QUANTILES[2], "% quantile of the ",
+                        "remaining answers of everyone who answered: trimmed.")
+  }
+  reversed_rule <- ""
+  if (variable_name %in% c("co2_est_low", "co2_est_high")) {
+    reversed_rule <- paste0(" Then a range whose lower end lies above its upper ",
+                            "end: both missing.")
   }
   outlier_sheet <- bind_rows(outlier_sheet, tibble(
     variable = variable_name, label = OUTLIER_LABELS[[variable_name]],
-    new_column = paste0(variable_name, "_clean"), valid_range = range_text,
+    new_column = paste0(variable_name, "_clean"), impossible_if = impossible_text,
+    is_trimmed = is_trimmed,
     answered = outlier_counts$answered[k],
     impossible = outlier_counts$impossible[k],
-    trimmed = outlier_counts$trimmed[k], used = outlier_counts$used[k],
-    rule = paste0(range_rule, "Below the ", 100 * TRIM_QUANTILES[1],
-                  "% or above the ", 100 * TRIM_QUANTILES[2],
-                  "% quantile of the remaining answers of everyone who ",
-                  "answered: trimmed.")
+    trimmed = outlier_counts$trimmed[k], reversed = outlier_counts$reversed[k],
+    used = outlier_counts$used[k],
+    rule = paste0("Answers ", impossible_text, ": impossible.", reversed_rule,
+                  " ", trim_rule)
   ))
 }
 
@@ -352,19 +364,26 @@ for (question in names(share_questions)) {
   for (k in seq_along(SHARE_SUFFIXES)) {
     variable_name <- share_questions[[question]][k]
     filled <- experts[[paste0(variable_name, "_filled")]]
-    n_answered <- sum(!is.na(experts[[variable_name]]) & !is.na(filled))
+    # Answers given, those used, and those of persons whose shares are all 0 or
+    # include one outside 0 to 100, which are not used
+    n_answered <- sum(!is.na(experts[[variable_name]]))
+    n_used <- sum(!is.na(experts[[variable_name]]) & !is.na(filled))
     shares_sheet <- bind_rows(shares_sheet, tibble(
       question = question,
       technology = SHARE_TECHNOLOGY_LABELS[[SHARE_SUFFIXES[k]]],
       new_column = paste0(variable_name, "_filled"),
       persons_gave_shares = question_sums$answered,
+      persons_outside_0_100 = question_sums$outside_0_100,
       sum_not_100 = question_sums$not_100,
       answered = n_answered,
-      blank_set_to_0 = sum(!is.na(filled)) - n_answered,
+      used = n_used,
+      set_to_missing = n_answered - n_used,
+      blank_set_to_0 = sum(!is.na(filled)) - n_used,
       mean_share = mean_min_cell(filled),
       rule = paste0("For a person who gave shares in the question (a total ",
-                    "above 0): the share, 0 where blank; NA for the others. ",
-                    "Used as reported, also if the shares do not sum to 100.")
+                    "above 0) and none outside 0 to 100: the share, 0 where ",
+                    "blank; NA for the others. Used as reported, also if the ",
+                    "shares do not sum to 100.")
     ))
   }
 }
@@ -490,8 +509,10 @@ rules <- bind_rows(
               note = "Recoded to 0 or 1; a blank stays NA"),
   tibble(rule = "Heating at home (Q20)", new_column = "own_heating",
          answers_seen = sum(!is.na(experts$dem_own_heating)),
-         changed = sum(is.na(experts$dem_own_heating)), set_to_missing = 0,
-         note = "Changed: a blank becomes \"Keine Angabe\""),
+         changed = sum(is.na(experts$dem_own_heating) & has_reached_q20),
+         set_to_missing = sum(!has_reached_q20),
+         note = paste0("Changed: a blank becomes \"Keine Angabe\". Missing: ",
+                       "stopped before Q20")),
   tibble(rule = "Degree days", new_column = "hdd",
          answers_seen = nrow(experts), changed = 0,
          set_to_missing = sum(!is_with_hdd),
@@ -504,19 +525,23 @@ rules <- bind_rows(
   outlier_sheet %>%
     transmute(rule = "Outlier rule", new_column,
               answers_seen = answered, changed = 0,
-              set_to_missing = impossible + trimmed,
-              note = paste0("Missing: impossible, or in the ",
-                            100 * TRIM_QUANTILES[1], "% tails")),
+              set_to_missing = impossible + trimmed + reversed,
+              note = paste0("Missing: impossible, in the ", 100 * TRIM_QUANTILES[1],
+                            "% tails, or a reversed range")),
   shares_sheet %>%
     group_by(question) %>%
-    summarise(answers_seen = sum(answered), changed = sum(blank_set_to_0)) %>%
+    summarise(answers_seen = sum(answered), changed = sum(blank_set_to_0),
+              set_to_missing = sum(set_to_missing)) %>%
     ungroup() %>%
     transmute(rule = paste0("Shares of the technologies, ", question),
               new_column = if_else(question == names(share_questions)[1],
                                    "adv_share_<technology>_filled",
                                    "mix25_<technology>_filled"),
-              answers_seen, changed, set_to_missing = 0,
-              note = "Answers, not persons. Changed: a blank becomes 0")
+              answers_seen, changed, set_to_missing,
+              note = paste0("Answers, not persons. Changed: a blank becomes 0, ",
+                            "not among the answers seen. Missing: the answers of ",
+                            "a person whose shares are all 0 or include one ",
+                            "outside 0 to 100"))
 )
 
 # 13. The settings of this run, for section_cleaning() and the reader ----------
@@ -525,11 +550,12 @@ settings <- tribble(
   "date",               as.character(Sys.Date()),                             "The day of this run",
   "data",               if_else(USE_SYNTHETIC_DATA, "synthetic", "real"),     "What this run ran on",
   "price_euro_below",   as.character(PRICE_EURO_BELOW),                       "A price below this is read as euro",
+  "oil_euro_up_to",     as.character(OIL_EURO_UP_TO),                         "An oil price up to this is read as euro per litre",
   "oil_per_litre",      paste0(OIL_PER_LITRE[1], " to ", OIL_PER_LITRE[2]),   "An oil price in this band is read as cent per litre",
   "pellets_per_kg",     paste0(PELLETS_PER_KG[1], " to ", PELLETS_PER_KG[2]), "A pellet price in this band is read as cent per kg",
   "price_valid_factor", as.character(PRICE_VALID_FACTOR),                     "A price this many times above or below the median is not usable",
-  "trim_lower_percent", as.character(100 * TRIM_QUANTILES[1]),                "Answers below this quantile of the valid ones are trimmed",
-  "trim_upper_percent", as.character(100 * TRIM_QUANTILES[2]),                "Answers above this quantile of the valid ones are trimmed",
+  "trim_lower_percent", as.character(100 * TRIM_QUANTILES[1]),                "Answers below this quantile of the valid ones are trimmed, for the variables trimmed",
+  "trim_upper_percent", as.character(100 * TRIM_QUANTILES[2]),                "Answers above this quantile of the valid ones are trimmed, for the variables trimmed",
   "survey_year",        as.character(SURVEY_YEAR),                            "Age is this year minus the year of birth",
   "hdd_year",           as.character(HDD_YEAR),                               "The year of the heating degree days",
   "min_n",              as.character(MIN_N),                                  "The fewest answers behind a statistic"
@@ -573,8 +599,8 @@ derived_columns <- tribble(
   "last_question",          "The last question answered, in English; \"No question answered\" if no page was submitted",
   "last_section",           "The section of the last question answered, in English; NA if no page was submitted",
   "last_question_position", "Position of the last question answered in QUESTIONNAIRE; 0 if no page was submitted",
-  "own_heating",            "Answer of Q20, \"Keine Angabe\" if missing, also for those who stopped before Q20",
-  "heat_pump_at_home",      "1 if a heat pump heats the expert's home, else 0; \"Sonstiges\" and no answer count as no heat pump, also for those who stopped before Q20",
+  "own_heating",            "Answer of Q20, \"Keine Angabe\" if left blank; NA for those who stopped before Q20",
+  "heat_pump_at_home",      "1 if a heat pump heats the expert's home, else 0; \"Sonstiges\" and no answer count as no heat pump; NA for those who stopped before Q20",
   "hdd",                    paste0("Heating degree days of the expert's NUTS3 region in ", HDD_YEAR, " (Eurostat); NA without nuts3"),
   "age",                    paste0(SURVEY_YEAR, " minus dem_birthyear_clean"),
   "interview_minutes",      "LimeSurvey's total time in minutes; for a break-off, the time until the break-off. Not trimmed: use medians and quartiles",
@@ -599,20 +625,19 @@ for (staircase_name in names(STAIRCASE_LABELS)) {
     paste0(staircase_name, "_complete"),    paste0(staircase_label, ": TRUE if the expert went as deep as the branch allows")
   ))
 }
-for (variable_name in names(OUTLIER_LABELS)) {
+for (k in seq_len(nrow(outlier_sheet))) {
   derived_columns <- bind_rows(derived_columns, tibble(
-    column = paste0(variable_name, "_clean"),
-    definition = paste0(OUTLIER_LABELS[[variable_name]], ": the answer after ",
-                        "the outlier rule (valid range, then the ",
-                        100 * TRIM_QUANTILES[1], "% tails over everyone who ",
-                        "answered)")
+    column = outlier_sheet$new_column[k],
+    definition = paste0(outlier_sheet$label[k], ": the answer after the outlier ",
+                        "rule. ", outlier_sheet$rule[k])
   ))
 }
 for (question in names(share_questions)) {
   derived_columns <- bind_rows(derived_columns, tibble(
     column = paste0(share_questions[[question]], "_filled"),
     definition = paste0(question, ": the share for an expert who gave shares, ",
-                        "0 where left blank; NA for the others")
+                        "0 where left blank; NA for the others, and for an ",
+                        "expert with a share outside 0 to 100")
   ))
 }
 

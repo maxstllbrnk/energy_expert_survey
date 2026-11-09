@@ -12,7 +12,6 @@
 # Checks : every level of the design and every answer has a label (label_of());
 #          the minimum cell, in experts: six vignettes can come from one expert
 ################################################################################
-# own_heating_of_asked(): in section_heating_context.R
 
 #' The design, the recommendations and the arms
 #'
@@ -388,10 +387,6 @@ section_vignettes <- function(experts, vignettes, dirs) {
     arm_experts <- arm_experts %>%
       mutate(arm_label = factor(label_of(arm, arm_headers, "arm"),
                                 levels = arm_headers))
-    if (has_columns(arm_experts, c("own_heating", "last_question_position"))) {
-      arm_experts <- arm_experts %>%
-        mutate(own_heating_asked = own_heating_of_asked(arm_experts))
-    }
     arm_rows <- bind_rows(
       tibble(panel = "Expert group", variable = "expert_group", kind = "level",
              level = EXPERT_GROUPS, label = EXPERT_GROUPS, digits = 1),
@@ -402,7 +397,7 @@ section_vignettes <- function(experts, vignettes, dirs) {
              level = NA_character_,
              label = paste0("Heating degree days, ", HDD_YEAR), digits = 0),
       tibble(panel = "Heating of the expert's home (Q20)",
-             variable = "own_heating_asked", kind = "level",
+             variable = "own_heating", kind = "level",
              level = names(OWN_HEATING_LABELS), label = unname(OWN_HEATING_LABELS),
              digits = 1)
     )

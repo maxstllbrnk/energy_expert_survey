@@ -31,6 +31,16 @@
 #      of the three groups (Max, 2026-11-09).
 #   2. One row per person (Max, 2026-11-09): the old models counted a repeat
 #      completion twice, so their reference values can differ.
+#   3. The rules Max changed later that day, so that some comparisons differ from
+#      the old code by design (changed_by_decision, in section 6, by exact name):
+#      the factor of the price rule (5, was 3) and heating oil up to 1.40 read as
+#      euro per litre, which move the prices and the reference prices; years no
+#      longer trimmed, a lower bound of 0 for the counts and the carbon prices, and
+#      a reversed carbon range missing, which move the outlier rule and age. Ties
+#      between attempts broken by the start of the questionnaire can keep another
+#      row for a person whose furthest attempts tie: the persons are compared
+#      without them. Everything else must still equal the old code. The new rules
+#      themselves are tested in section 5b, on data that sets them off.
 
 source(file.path("R", "setup.R"))
 source(file.path("R", "cleaning", "00_preferences.R"), encoding = "UTF-8")
@@ -715,12 +725,31 @@ for (scenario in names(scenario_dirs)) {
   ))
 
   # 4.1 The persons ------------------------------------------------------------
-  old_persons <- old_load_respondents() %>%
-    arrange(resp_uid)
-  compared <- compare_values(compared, "persons: the same rows stay",
-                             old_persons$resp_uid, experts$resp_uid)
+  # By person, not by row. A person whose furthest attempts tie, equal in
+  # is_complete and meta_lastpage, may now keep another of them (point 3 of the
+  # header); every other person keeps the same row. Tied attempts are equal in
+  # is_complete by definition.
+  old_persons <- old_load_respondents()
+  old_person_keys <- paste(old_persons$wave,
+                           coalesce(old_persons$meta_token, old_persons$resp_uid))
+  of_person <- match(paste(experts$wave, experts$person), old_person_keys)
+  furthest <- survey_main %>%
+    mutate(person = coalesce(meta_token, resp_uid),
+           page = coalesce(meta_lastpage, -1)) %>%
+    group_by(wave, person) %>%
+    filter(is_complete == max(is_complete)) %>%
+    filter(page == max(page)) %>%
+    summarise(n_furthest = n()) %>%
+    ungroup()
+  tied_keys <- paste(furthest$wave, furthest$person)[furthest$n_furthest > 1]
+  is_tied <- paste(experts$wave, experts$person) %in% tied_keys
+  compared <- compare_values(compared, "persons: the same number",
+                             nrow(old_persons), nrow(experts))
+  compared <- compare_values(compared, "persons: the same row, unless attempts tie",
+                             old_persons$resp_uid[of_person][!is_tied],
+                             experts$resp_uid[!is_tied])
   compared <- compare_values(compared, "persons: is_complete",
-                             old_persons$is_complete, experts$is_complete)
+                             old_persons$is_complete[of_person], experts$is_complete)
   person_counts <- survey_main %>%
     mutate(person = coalesce(meta_token, resp_uid)) %>%
     count(wave, person, name = "attempts")
@@ -1021,7 +1050,8 @@ for (scenario in names(scenario_dirs)) {
                          mutate(scenario = scenario, .before = 1))
   message(scenario, ": ", nrow(survey_main), " questionnaires, ", nrow(experts),
           " persons, ", sum(experts$arm_conflict), " in both arms, ",
-          n_repeat_completions, " repeat completions")
+          n_repeat_completions, " repeat completions, ", sum(is_tied),
+          " persons with tied attempts")
 }
 CLEAN_DATA_DIR <- synthetic_dir
 
@@ -1065,6 +1095,58 @@ compared <- compare_values(compared, "report: a description for every column",
 results <- bind_rows(results, compared %>%
                        mutate(scenario = "stressed, the report", .before = 1))
 
+# 5b. The rules of 2026-11-09, on data that sets them off ----------------------
+# Neither the simulation nor the stressed copy has a share outside 0 to 100 (the
+# old code stops on it) or a reversed carbon range, and only the stressed copy has
+# oil in euro per litre. So a copy of the stressed data with such answers, at
+# persons that stay, run through the new step only. The expected values are known.
+new_rules_dir <- file.path(SECURE_DIR, "new_rules")
+dir.create(new_rules_dir, recursive = TRUE, showWarnings = FALSE)
+rules_main <- stressed_main
+is_kept <- rules_main$resp_uid %in% experts$resp_uid
+share_rows <- sample(which(is_kept & !is.na(rules_main$adv_share_hp)), 3)
+rules_main$adv_share_hp[share_rows] <- 150
+carbon_rows <- sample(which(is_kept & !is.na(rules_main$co2_est_low) &
+                              !is.na(rules_main$co2_est_high)), 2)
+rules_main$co2_est_low[carbon_rows] <- 90
+rules_main$co2_est_high[carbon_rows] <- 40
+oil_rows <- sample(which(is_kept & !is.na(rules_main$price_oil)), 2)
+rules_main$price_oil[oil_rows] <- c(1.1, 1.25)
+saveRDS(rules_main, file.path(new_rules_dir, "survey_main.rds"))
+saveRDS(stressed_long, file.path(new_rules_dir, "vignettes_long.rds"))
+CLEAN_DATA_DIR <- new_rules_dir
+invisible(capture.output(
+  source(file.path("R", "cleaning", "06_experts_vignettes.R"), encoding = "UTF-8")
+))
+CLEAN_DATA_DIR <- synthetic_dir
+
+is_share_person <- experts$resp_uid %in% rules_main$resp_uid[share_rows]
+shares_of_q10b <- experts[is_share_person,
+                          paste0("adv_share_", SHARE_SUFFIXES, "_filled")]
+is_carbon_person <- experts$resp_uid %in% rules_main$resp_uid[carbon_rows]
+of_oil_person <- match(rules_main$resp_uid[oil_rows], experts$resp_uid)
+is_q20_reached <- !is.na(experts$dem_own_heating) | experts$is_complete |
+  experts$last_question_position >=
+  QUESTIONNAIRE$position[QUESTIONNAIRE$item == "time_dem_own_heating"]
+compared <- tibble()
+compared <- compare_values(compared, "new rules: persons with a share outside 0 to 100",
+                           3, share_sums$outside_0_100[1])
+compared <- compare_values(compared, "new rules: their shares of Q10b are missing",
+                           rep(0, 3), rowSums(!is.na(shares_of_q10b)))
+compared <- compare_values(compared, "new rules: reversed carbon ranges", c(2, 2),
+                           outlier_counts$reversed[outlier_counts$variable %in%
+                                                     c("co2_est_low", "co2_est_high")])
+compared <- compare_values(compared, "new rules: both ends of a reversed range missing",
+                           rep(TRUE, 4),
+                           c(is.na(experts$co2_est_low_clean[is_carbon_person]),
+                             is.na(experts$co2_est_high_clean[is_carbon_person])))
+compared <- compare_values(compared, "new rules: oil up to 1.40 is euro per litre",
+                           c(11, 12.5), experts$price_oil_kwh[of_oil_person])
+compared <- compare_values(compared, "new rules: own_heating NA where Q20 not reached",
+                           !is_q20_reached, is.na(experts$own_heating))
+results <- bind_rows(results, compared %>%
+                       mutate(scenario = "new rules", .before = 1))
+
 # 6. Result --------------------------------------------------------------------
 results_by_scenario <- results %>%
   group_by(scenario) %>%
@@ -1080,8 +1162,31 @@ cat("\nIntended: one row per person. The mean reference price in cent: over all"
     "completed questionnaires, as in the old models, and over the persons\n")
 print(repeat_completion_differences, n = Inf)
 
+# The comparisons that point 3 of the header changes by design, by exact name
+changed_by_decision <- c(
+  paste0("price_", OLD_PRICE_FUELS, "_kwh"),
+  paste0("price_", OLD_PRICE_FUELS, "_treatment"),
+  paste0("reference prices: ", c("median", "lower", "upper", "mean"),
+         " of clean_reported_prices()"),
+  paste0("reference prices: ", c("median", "lower", "upper", "mean", "q25", "q75"),
+         " of section 2.1"),
+  paste0("price_", OLD_PRICE_FUELS, "_na of section 2.1"),
+  paste0("price_", OLD_PRICE_FUELS, "_c of section 2.1"),
+  "without repeat completions: reference of all questionnaires",
+  paste0(OLD_OUTLIER_VARIABLES, "_clean"),
+  paste0("outlier_counts: ", c("impossible", "trimmed", "used")),
+  "age"
+)
+results <- results %>%
+  mutate(is_changed = check %in% changed_by_decision)
+cat("\nIntended: the rules changed by decision later on 2026-11-09 (point 3 of",
+    "the header). Their comparisons, and how many values differ\n")
+print(results %>%
+        filter(is_changed) %>%
+        select(scenario, check, compared, differ), n = Inf)
+
 differing_comparisons <- results %>%
-  filter(differ > 0)
+  filter(differ > 0, !is_changed)
 if (nrow(differing_comparisons) > 0) {
   cat("\nThese comparisons differ:\n")
   print(differing_comparisons, n = Inf)
@@ -1090,6 +1195,6 @@ if (nrow(differing_comparisons) > 0) {
     quit(status = 1)
   }
 } else {
-  message("All ", nrow(results),
-          " comparisons equal: the port reproduces the old functions.")
+  message("All ", sum(!results$is_changed), " comparisons that no decision changed ",
+          "are equal: the port reproduces the old functions.")
 }
