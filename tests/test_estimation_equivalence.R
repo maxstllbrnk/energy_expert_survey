@@ -23,7 +23,7 @@ unlink(file.path(est_dir, "*", "results.*"))
 N_DRAWS_TEST <- 100       # Halton draws per expert in the estimation
 N_PREDICTION_TEST <- 1000
 N_KR_TEST <- 200
-N_WORKERS_TEST <- 4
+N_WORKERS_TEST <- 2
 TOLERANCE <- 1e-10
 
 check <- function(label, value, limit) {

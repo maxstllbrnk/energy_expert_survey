@@ -10,7 +10,8 @@
 #          and recommendations
 ################################################################################
 # To add a variable: one line in make_regressors() and one term in a formula.
-# For its effects, also its source variable in `at`, and a change.
+# make_regressors() then needs its source variable in every state, so `at` needs
+# its reference value too; compute_ames() stops and names it. Its effect: a change.
 
 source(file.path("R", "setup.R"))
 

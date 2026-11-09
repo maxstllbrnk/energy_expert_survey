@@ -17,7 +17,7 @@ unlink(file.path(est_dir, "*", "results.*"))
 N_DRAWS_TEST <- 100       # Halton draws per expert in the estimation
 N_PREDICTION_TEST <- 500
 N_KR_TEST <- 100
-N_WORKERS_TEST <- 4
+N_WORKERS_TEST <- 2
 
 check <- function(label, condition) {
   cat(sprintf("%-68s %s\n", label, if (isTRUE(condition)) "PASS" else "FAIL"))
