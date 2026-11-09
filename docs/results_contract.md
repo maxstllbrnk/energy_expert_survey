@@ -8,13 +8,15 @@
   full_sample/summary_statistics/   everything, including response rates and the deck
   district_heating/                 one folder per estimation script
     summary_statistics/             tables/ figures/ maps/ exhibits.csv summary_statistics.pdf
-    m4pe/                           model.rds  results.rds  results.xlsx
+    m4pe/                           model.rds  results.rds  results.xlsx  cross_validation.rds
     model_comparison/               model_comparison.rds  model_comparison.xlsx
   no_district_heating/              the same
 ```
 
 `model.rds` holds the fitted `mlogit` object, with the data in it. `results.rds` holds
-aggregates only.
+aggregates only. `cross_validation.rds` exists for the models on the shortlist of
+`compare_models()` and holds one held-out log-likelihood per expert, so that a new run need not
+estimate the folds again. It is not an aggregate either, so it stays next to `model.rds`.
 
 ## `fit_mixed_logit()` and `post_estimation()`
 
@@ -107,11 +109,16 @@ comparison <- compare_models(
   cv_models = c("m4pe", "m6pe"),                       # optional, the shortlist for cross-validation
   ame_threshold = 0.01,   # an AME moving by less than this (1 pp) counts as immaterial
   alpha = 0.05,
-  n_fresh_draws = 12
+  n_fresh_draws = 12,
+  n_workers = N_WORKERS
 )
 ```
 
-See `docs/sessions/E_model_comparison.md` for the protocol. Writes
+It reads every model folder in `est_dir`, as a larger model must not lie below any model it
+nests, whether or not a test names that model. The rule is at the top of
+`R/functions/compare_models.R` and in the README. Writes
 `<est_dir>/model_comparison/model_comparison.rds` and `.xlsx`, one sheet each: `decision`,
 `validity`, `fit`, `nested_tests`, `non_nested_tests`, `fresh_draws`, `cross_validation`,
-`absolute_fit`, `ame_changes`, `block_tests`.
+`absolute_fit`, `ame_changes`, `block_tests`. The column `final_decision` of `decision` is for the
+researchers. A new run overwrites the workbook, and a workbook with `final_decision` filled in is
+first kept as a copy, `model_comparison_<date_time>.xlsx`.
