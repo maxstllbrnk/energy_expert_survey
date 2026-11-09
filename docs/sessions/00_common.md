@@ -39,6 +39,7 @@ coauthors read and check every line, so the code has to be easy to audit.
 
 ```powershell
 $env:RENV_CONFIG_SANDBOX_ENABLED = 'FALSE'
+$env:RENV_CONFIG_SYNCHRONIZED_CHECK = 'FALSE'
 $env:RENV_PATHS_LIBRARY = 'C:/Users/msk/AppData/Local/renv/library/energy_expert_survey-692a0e44'
 $env:CLAUDECODE = '1'
 $env:EES_SYNTHETIC_DIR = 'C:/Users/msk/AppData/Local/Temp/ees/<letter>'
@@ -51,7 +52,8 @@ New-Item -ItemType Directory -Force -Path $env:EES_SYNTHETIC_DIR | Out-Null
 Rscript from Git Bash does not work on this machine. Every script starts with
 `source(file.path("R", "setup.R"))` and runs from the project root. Output goes to
 `EES_SYNTHETIC_DIR/output`, never into the project or OneDrive. Do not install packages. The
-machine has 8 cores and 31 GB; other sessions run at the same time, so keep test runs small.
+machine has 8 cores and 31 GB; other sessions run at the same time, so keep test runs small and
+pass `n_workers = 4` in tests of anything parallel.
 LaTeX: `pdflatex` and `pdftoppm` are on PATH (MiKTeX, packages install on demand).
 
 **The old code,** read-only, for reuse: `C:/Users/msk/AppData/Local/Temp/ees/old_code/` (git tag
@@ -70,3 +72,8 @@ edit it: define it in your own file, and name it in your final report so that it
 3. Report back: what you wrote; what you ran and the key results; anything outside your ownership
    you need changed; and, as four separate lists, programming problems, statistical issues,
    identification issues, alternative specifications. Flag research decisions, do not make them.
+
+**Your branch.** You work in a git worktree of its own. Before anything else, run `git log -1
+--oneline` and make sure your branch starts at the local branch `restructure`: `git reset --hard
+restructure` if it does not (your worktree is fresh, so nothing is lost). Five sessions share the
+repository's history but not their files. Do not merge other sessions' branches.
