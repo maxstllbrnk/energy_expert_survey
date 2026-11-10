@@ -432,14 +432,18 @@ section_recruitment <- function(experts, vignettes, frame, dirs) {
               completed = fmt_int(completed),
               rate_started = fmt_pct(rate_started),
               rate_completed = fmt_pct(rate_completed))
+  # The rows of the frame, minus those without an address, minus those that repeat
+  # an address, are the persons on the lists, so the panel adds up
   check_cells <- tibble(
     wave = c("Invitations in the dispatch log", "Rows of the sampling frame",
              "Rows without an e-mail address (left out)",
+             "Rows that repeat the address of another row (counted once)",
              "Persons on the lists (one row per e-mail address)",
              "Addresses on more than one list (counted on the first)"),
     target_group = "", first_sent = "",
     invitations = fmt_int(c(sum(dispatch$invitations), attr(frame, "n_raw"),
-                            attr(frame, "n_no_address"), nrow(frame),
+                            attr(frame, "n_no_address"),
+                            attr(frame, "n_duplicate_contacts"), nrow(frame),
                             attr(frame, "n_type_conflicts"))),
     started = "", completed = "", rate_started = "", rate_completed = ""
   )

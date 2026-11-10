@@ -304,6 +304,10 @@ stopifnot(wave_row[3] == fmt_int(dispatch$invitations[1]),
           table_row(wave_file, "Invitations in the dispatch log")[3] == "45,965",
           table_row(wave_file, "Rows of the sampling frame")[3] ==
             fmt_int(attr(frame, "n_raw")),
+          # the row that makes the panel add up to the persons on the lists
+          table_row(wave_file,
+                    "Rows that repeat the address of another row \\(counted once\\)")[3] ==
+            fmt_int(attr(frame, "n_duplicate_contacts")),
           table_row(wave_file,
                     "Persons on the lists \\(one row per e-mail address\\)")[3] ==
             fmt_int(nrow(frame)),
