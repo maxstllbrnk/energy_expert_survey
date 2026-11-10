@@ -33,19 +33,21 @@ Each is implemented where the last column says, with Max's name and the date in 
 
 ## 3. To check on the first real run
 
-Best with `QUICK_RUN <- TRUE` in `config.R` first (README, "How to run").
+Best with `QUICK_RUN <- TRUE` in `config.R` first (README, "How to run"). The quick run of 2026-11-09 found no repeat completions, no stop and no mean weight below 0.5; what else it found is added below.
 
 - **The cleaning report:** the sheet `attempts` should show no repeat completions, as the seminar's sample flow did; if it shows any, the old log-likelihoods no longer apply. The sheets `outliers`, `shares` and `prices` count what the new rules do.
-- **Q11c:** read the panel of manufacturers. `NOT_A_BRAND` in `section_market.R` cannot be complete: another word with at least 10 mentions would reach the table. `str_to_title()` also rewrites brand names, BWT to Bwt.
+- **Q11c:** read the panel of manufacturers. `NOT_A_BRAND` in `section_market.R` cannot be complete: another word with at least 10 mentions would reach the table. `str_to_title()` also rewrites brand names, BWT to Bwt. The quick run: no word that names no manufacturer reached the panel, but one brand is shown in the wrong case. To decide: a list of spellings in the code (free text from the data, which the profile keeps out of the code), or the spelling most of a brand's answers use.
 - **Stops that may fire, each naming what to do:** `fit_mixed_logit()` stops on a term with no finite estimate, for any two-valued term in one alternative. This is broader than the old code and may fire for (4pe) or (6pe) in the small arm, e.g. `oil_rise_na` if
   no expert with a blank recommends oil. `post_estimation()` stops on a Hessian that is not positive definite.
 - **(6pe) in the small arm.** In the synthetic run the estimates for chimney sweeps and oil were not credible: constant -10.5 (SE 4.7), SD 6.3, on 32 experts. It passed every check, with a condition number of 1.1e5.
+- **Oil in the small arm, in the quick run.** Oil is recommended in 48 of 3,684 decisions of the arm without district heating. From (4) on, the mean and the standard deviation of its random constant are large, with large standard errors, and grow with (4pe) and (6pe); every check passes. A research decision, not taken: e.g. a fixed constant for oil, or oil merged with gas. Look again at 1,000 draws.
 - **Rare dummies in the tests:** a mean weight far below 1 in the sheet `nested_tests`, which the reason of the decision now flags below 0.5, means that the robust test rests on few experts and rejects too easily; compare the classical p-value.
 
 ## 4. Statistical issues
 
 **Model comparison**
 
+- "Do the prices matter?" can be answered by the dummies for a blank price or a blank expectation rather than by the prices. In the quick run of 2026-11-09, a price from its 25th to its 75th percentile moved no probability by much more than 1 pp, while those dummies moved some by up to about 20 pp, and they carry the 1 pp step. They are associations with who answers, reported after the vignettes.
 - The robust test can over-reject in the group-covariance test. On the synthetic data with equal covariances, the mean weight is 0.83 and the robust p below the classical p. The seminar's (4pe) against (6pe) shows the same pattern (p 0.005, robust p below 0.001), so that gap may be small-sample bias in the clustered variance rather than misspecification. This rests on one draw.
 - The robust test can reject almost anything if a coefficient rests on few experts: with a dummy held by 3 of 300 experts, the mean weight was 0.06 and the robust critical value 0.2, against 3.84 for chi-squared. A clustered variance is known to collapse with few
   treated clusters. The fresh-draw gate does not help here, as it uses the same weights; cross-validation does. The flag at a mean weight below 0.5 rests on that one case and only warns; in the small arm of the synthetic run, (4pe) against (6pe) had 0.69, not flagged.

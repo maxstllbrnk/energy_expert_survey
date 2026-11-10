@@ -37,7 +37,7 @@ source("R/estimation/district_heating.R")        # sample, summary statistics, m
 source("R/estimation/no_district_heating.R")     # the same for the other arm
 ```
 
-Open `energy_expert_survey.Rproj` first, or run `Rscript <file>` from this folder. Requires R 4.6.2. A re-run reloads every model, result and set of summary statistics whose inputs have not changed, so changing one model re-estimates that model only.
+Open `energy_expert_survey.Rproj` first, or run `Rscript <file>` from this folder. Requires R 4.6.2. The decks need `pdflatex` (MiKTeX) on R's PATH: if `Sys.which("pdflatex")` is empty, the run skips them with a message, and the rest runs. A re-run reloads every model, result and set of summary statistics whose inputs have not changed, so changing one model re-estimates that model only.
 
 **A first run to see that everything runs:** set `QUICK_RUN <- TRUE` in `config.R`. The models then use 100 draws, the AMEs 1,000 and Krinsky-Robb 200, nothing is cross-validated, and everything goes to `output_quick/`, so that it is never taken for the real output. Set it back to `FALSE` for the real run, which estimates every model again. The full run cross-validates every model, which adds five estimations per model; on four sessions that is several hours per script.
 
