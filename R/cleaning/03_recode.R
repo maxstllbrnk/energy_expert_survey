@@ -89,13 +89,9 @@ if (!file.exists(PLZ_NUTS3_FILE)) {
 #   plz_border   in the lookup, but the postcode straddles a state line; it is
 #                assigned to the state holding most of its places
 #   plz_prefix   not in the lookup, but every postcode sharing its first three
-#                digits is in the same state (see PLZ_PREFIX_MIN_PURITY)
+#                digits is in the same state (PLZ_PREFIX_MIN_PURITY in config.R)
 #   unmatched    a valid-looking postcode in a range that does not exist
 #   no_postcode  Q0 was blank or unusable
-
-# How unanimous the surrounding postcodes have to be before the first three
-# digits are allowed to stand in for a postcode the lookup does not have.
-PLZ_PREFIX_MIN_PURITY <- 0.9
 
 if (!file.exists(PLZ_LOOKUP_FILE)) {
 

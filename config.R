@@ -1,172 +1,132 @@
-# =============================================================================
-# config.R  -  the only file you need to edit
-# =============================================================================
-# The project lives in three places, with three different levels of access:
-#
-#   1. SECURE   Raw LimeSurvey exports, the matching syntax files, and the
-#               cleaned respondent-level data. Personal data, so it cannot be
-#               shared freely. Currently a local folder; it moves to an
-#               external server later - when it does, only RAW_DIR and
-#               CLEAN_DATA_DIR below change.
-#
-#   2. DROPBOX  Shared with the coauthors. Holds the non-sensitive inputs
-#               (public_data_dropbox/) and every output the pipeline produces
-#               (output_dropbox/): codebook, diagnostics, and later tables and
-#               figures. None of it contains respondent-level data.
-#
-#   3. PROJECT  This folder - code only, shared via GitHub. The pipeline never
-#               writes here, and no raw or cleaned data is ever stored here.
-#
-# On a new machine, edit the three roots below and nothing else. Coauthors who
-# would rather not touch a tracked file can put their own roots in
-# config.local.R instead; it is git-ignored and overrides what is set here.
-# =============================================================================
+################################################################################
+# config.R — the roots, every path derived from them, and the constants of the
+#            survey. The only file to edit on a new machine.
+# Inputs : config.local.R, if it exists (per-machine roots, git-ignored)
+# Outputs: creates the output folder if it is missing
+# Checks : the inputs exist
+################################################################################
+# The project lives in three places:
+#   SECURE   raw exports, cleaned data, sampling frame and all output. Personal
+#            data, and the fitted models contain them. Claude Code has no access.
+#   DROPBOX  non-sensitive inputs only (public_data_dropbox/): design matrix,
+#            batch overview, geodata, degree days.
+#   PROJECT  this folder: code only, shared through GitHub. Nothing is written
+#            here.
 
-library(tidyverse)
-library(readxl)
-library(writexl)
-library(mlogit)
-
-# =============================================================================
-# the three roots  <- EDIT THESE
-# =============================================================================
-# Use forward slashes. R reads "\" in a string as an escape character, so a
-# pasted Windows path ("C:\Users\...") is a syntax error.
-
-# --- 1. SECURE ---------------------------------------------------------------
-# INPUT: the twelve raw exports (survey_<id>_R_data_file.csv, soft-launch waves
-# included) plus a limesurvey-syntax/ sub-folder with the twelve syntax files.
-RAW_DIR        <- "I:/Projekte/Stiftungs- und Industrieprojekte/SFB UniMA/Daten/energy_experts_survey/wave_1_2026/260909_raw_energy_expert_survey_data"
-
-# OUTPUT: the cleaned analysis data sets. One row per respondent and one per
-# respondent x vignette, so this is respondent-level data and stays out of
-# Dropbox. Created automatically if it does not exist.
+# 1. The roots -----------------------------------------------------------------
+# Forward slashes: R reads "\" in a string as an escape character.
+RAW_DIR <- "I:/Projekte/Stiftungs- und Industrieprojekte/SFB UniMA/Daten/energy_experts_survey/wave_1_2026/260909_raw_energy_expert_survey_data"
 CLEAN_DATA_DIR <- "I:/Projekte/Stiftungs- und Industrieprojekte/SFB UniMA/Daten/energy_experts_survey/wave_1_2026/260909_cleaned_energy_expert_survey_data"
-
-# --- 2. DROPBOX --------------------------------------------------------------
-# Everything the coauthors need. The path differs per machine - this is the one
-# line most likely to need changing.
 DROPBOX_DIR <- "C:/Users/msk/Dropbox/Heating Transition/analysis_survey"
 
-# --- local override (git-ignored) --------------------------------------------
-# config.local.R holds ONLY root assignments - the lines above that differ on
-# this machine. Everything below is then derived from whatever it sets.
-#
-# It must not be a copy of this file: the copy would reach this same line and
-# source itself forever, which R reports as "evaluation nested too deeply:
-# infinite recursion". Catch that here, where it can be explained.
+# A first run on the real data to see that everything runs: few draws, no
+# cross-validation, the output in output_quick/ so that it is never taken for the
+# real one. A run with FALSE estimates every model again.
+QUICK_RUN <- FALSE
+
+# config.local.R holds only the assignments above that differ on this machine
 if (file.exists("config.local.R")) {
-  if (any(grepl('source("config.local.R")', readLines("config.local.R"), fixed = TRUE)))
-    stop("config.local.R sources itself, so it looks like a copy of config.R.\n",
-         "It should contain only the roots that differ on this machine, e.g.\n",
-         '  DROPBOX_DIR <- "C:/Users/you/Dropbox/Heating Transition/analysis_survey"\n',
-         "Delete it if this machine does not need an override at all.",
-         call. = FALSE)
   source("config.local.R")
 }
 
-# =============================================================================
-# derived paths  -  no need to edit below here
-# =============================================================================
+# 2. Secure paths --------------------------------------------------------------
+# A session of Claude Code (CLAUDECODE=1) may not touch the real data (project
+# profile). It reads and writes synthetic data in a temporary folder instead, set
+# by EES_SYNTHETIC_DIR, which tests/simulate_data.R fills. A run on the real data
+# never takes this branch.
+USE_SYNTHETIC_DATA <- Sys.getenv("CLAUDECODE") == "1"
+if (USE_SYNTHETIC_DATA) {
+  SECURE_DIR <- Sys.getenv("EES_SYNTHETIC_DIR",
+                           unset = file.path(Sys.getenv("TEMP"), "ees", "synthetic"))
+  RAW_DIR <- file.path(SECURE_DIR, "raw")
+  CLEAN_DATA_DIR <- file.path(SECURE_DIR, "clean")
+  FRAME_FILE <- file.path(SECURE_DIR, "frame", "frame.rds")
+} else {
+  SECURE_DIR <- dirname(CLEAN_DATA_DIR)
+  # The sampling frame: every expert and firm that was contacted, with e-mail,
+  # postcode and the list they were drawn from. The denominator of the response
+  # rates.
+  FRAME_FILE <- file.path(dirname(RAW_DIR), "260915_scraped_data",
+                          "260513_allexperts_unique_PLZ.rds")
+}
+SYNTAX_DIR <- file.path(RAW_DIR, "limesurvey-syntax")
 
-# --- secure ------------------------------------------------------------------
-SYNTAX_DIR <- file.path(RAW_DIR, "limesurvey-syntax")  # 12 LimeSurvey R syntax exports
-
-# The fitted models of R/analysis/01_run_specifications.R. An mlogit model
-# contains its estimation data, one row per expert x vignette, so the models
-# stay on the secure drive; their aggregate results go to RC_LOGIT_DIR below.
-RC_LOGIT_MODEL_DIR <- file.path(CLEAN_DATA_DIR, "rc_logit_models")
-
-# The sampling frame: every expert and firm that was contacted, with e-mail,
-# postcode and the sample they were drawn from (DENA / Schornsteinfeger / SHK).
-# It is the denominator of the response rate - see R/run_ruecklauf.R. Personal
-# data (e-mail addresses), so it stays in the secure location. Deliberately NOT
-# in the required list below, for the same reason as the geodata: the cleaning
-# pipeline does not need it, and only the response-rate analysis fails without it.
-FRAME_FILE <- file.path(dirname(RAW_DIR), "260915_scraped_data",
-                        "260513_allexperts_unique_PLZ.rds")
-
-# --- Dropbox -----------------------------------------------------------------
-PUBLIC_DATA_DIR <- file.path(DROPBOX_DIR, "public_data_dropbox")  # non-sensitive inputs
-OUTPUT_DIR      <- file.path(DROPBOX_DIR, "output_dropbox")       # everything we produce
-
-VERSAND_FILE  <- file.path(PUBLIC_DATA_DIR, "LimeSurvey_Versanduebersicht_010726.xlsx")  # batch overview
-VIGNETTE_FILE <- file.path(PUBLIC_DATA_DIR, "vignetten_kombinationen.xlsx")              # vignette design matrix
-
-# Eurostat's postcode -> NUTS3 correspondence (GISCO; postcodes 2025, NUTS 2024),
-# read by 03_recode.R to add `nuts3`. Like the geodata below, deliberately NOT
-# in the required list: without it, `nuts3` is NA with a message.
-PLZ_NUTS3_FILE <- file.path(PUBLIC_DATA_DIR, "pc2025_DE_NUTS-2024_v1.0.csv")       # postcode -> NUTS3
-
-# --- geodata (Dropbox, downloaded once) --------------------------------------
-# Built by R/geodata/build_plz_bundesland.R, which downloads the two open data
-# sets once and leaves them here. Nothing in the pipeline ever downloads: the
-# cleaning run only reads PLZ_LOOKUP_FILE, a plain CSV.
-#
-# These paths are deliberately NOT in the required list below. Before the build
-# script has been run they simply do not exist, and 03_recode.R then sets
-# `bundesland` to NA with a message rather than failing the whole run.
-GEODATA_DIR     <- file.path(PUBLIC_DATA_DIR, "geodata")
-PLZ_LOOKUP_FILE <- file.path(GEODATA_DIR, "plz_bundesland.csv")   # postcode -> federal state
-BKG_DIR         <- file.path(GEODATA_DIR, "bkg_vg2500")           # official boundaries, for maps
-BUNDESLAND_SHP  <- file.path(BKG_DIR, "vg2500", "VG2500_LAN.shp") # the 16 state polygons
-GEONAMES_FILE   <- file.path(GEODATA_DIR, "geonames", "DE.txt")    # postcode coordinates, for maps
-
-# Codebook and build diagnostics, written by R/run_cleaning.R.
-REPORT_DIR    <- file.path(OUTPUT_DIR, "reports_cleaning")
+# All output, one folder per estimation script (R/estimation/), plus the cleaning
+# and the summary statistics of the full sample
+OUTPUT_DIR <- file.path(SECURE_DIR, if (QUICK_RUN) "output_quick" else "output")
+REPORT_DIR <- file.path(OUTPUT_DIR, "cleaning")
 CODEBOOK_FILE <- file.path(REPORT_DIR, "codebook.csv")
 
-# Figures and tables describing the data, written by R/run_summary_statistics.R.
-# Aggregates only - no respondent-level data - so they can live in Dropbox.
-SUMMARY_DIR <- file.path(OUTPUT_DIR, "summary_statistics")
+# 3. Public inputs (read only) -------------------------------------------------
+PUBLIC_DATA_DIR <- file.path(DROPBOX_DIR, "public_data_dropbox")
+VERSAND_FILE <- file.path(PUBLIC_DATA_DIR, "LimeSurvey_Versanduebersicht_010726.xlsx")
+VIGNETTE_FILE <- file.path(PUBLIC_DATA_DIR, "vignetten_kombinationen.xlsx")
+# Eurostat: postcode to NUTS3 (GISCO; postcodes 2025, NUTS 2024), and heating
+# and cooling degree days by NUTS3 region (nrg_chddr2_a)
+PLZ_NUTS3_FILE <- file.path(PUBLIC_DATA_DIR, "pc2025_DE_NUTS-2024_v1.0.csv")
+HDD_FILE <- file.path(PUBLIC_DATA_DIR, "hdd_cdd_nuts3.csv")
+# Built once by R/geodata/build_plz_bundesland.R
+GEODATA_DIR <- file.path(PUBLIC_DATA_DIR, "geodata")
+PLZ_LOOKUP_FILE <- file.path(GEODATA_DIR, "plz_bundesland.csv")
+BKG_DIR <- file.path(GEODATA_DIR, "bkg_vg2500")
+BUNDESLAND_SHP <- file.path(BKG_DIR, "vg2500", "VG2500_LAN.shp")
+KREIS_SHP <- file.path(BKG_DIR, "vg2500", "VG2500_KRS.shp")
 
-# Everything for the first policy brief, written by the scripts in
-# R/first_policy_brief/: the figure report (its figures are copied from
-# SUMMARY_DIR, except the few the brief draws itself in 00_figures.R), the tests
-# of the price expectations (preiserwartungen_tests.xlsx), and the logit models
-# of the recommendations (one rc_logit_<arm>_ref_<outcome>/ folder per run).
-FIRST_POLICY_BRIEF_DIR <- file.path(OUTPUT_DIR, "first_policy_brief")
+# 4. Constants of the survey ---------------------------------------------------
+REFERENCE_WAVE <- "161853"   # supplies the question wording for the codebook
+N_VIGNETTES <- 6             # vignettes shown per expert
+N_ATTRIBUTES <- 9            # design attributes per vignette
+SURVEY_YEAR <- 2026          # age is SURVEY_YEAR minus the year of birth
+HDD_YEAR <- 2025             # the year of the heating degree days
 
-# The mixed logit models of the recommendations beyond the policy brief,
-# written by the scripts in R/analysis/: aggregate results (coefficients,
-# covariance matrices, marginal effects, fit), tables and figures, one
-# rc_logit_<arm>_ref_<outcome>/ folder per run.
-RC_LOGIT_DIR <- file.path(OUTPUT_DIR, "rc_logit_heterogeneity")
+# The outlier rule of R/cleaning/06_experts_vignettes.R trims each answer at these
+# quantiles. Here because the notes of the tables quote them.
+TRIM_QUANTILES <- c(0.005, 0.995)
+# How unanimous the surrounding postcodes have to be before the first three digits
+# stand in for a postcode the lookup does not have. Used for the respondents
+# (R/cleaning/03_recode.R) and the contacts (load_frame()), so that one postcode
+# lands in one state on both sides of a response rate.
+PLZ_PREFIX_MIN_PURITY <- 0.9
 
-# =============================================================================
-# survey design constants
-# =============================================================================
+# The minimum cell of any output (project profile): every statistic rests on at
+# least 10 answers, every response rate on at least 30 contacted persons. Counts
+# of how many answers a cleaning step changed may be smaller.
+MIN_N <- 10
+MIN_CONTACTS <- 30
 
-# --- reference wave ----------------------------------------------------------
-# All ten main waves are structurally identical; this one supplies the question
-# wording and answer options used for the codebook and for value labels.
-REFERENCE_WAVE <- "161853"
+# 5. Draws and workers ---------------------------------------------------------
+# Halton draws per expert in the estimation; prediction draws for probabilities
+# and AMEs (5,000 Halton draws are at least as accurate as the 100,000
+# pseudo-random draws used before, benchmark of 2026-11-09); Krinsky-Robb draws,
+# so that each 2.5% tail rests on 125 draws. Fewer in a synthetic run, which only
+# tests the code, and in a quick run. N_WORKERS: the R sessions for the Hessian
+# and the Krinsky-Robb loop; lower it if something else runs on this computer.
+if (USE_SYNTHETIC_DATA || QUICK_RUN) {
+  N_DRAWS_MODEL <- 100
+  N_DRAWS_PREDICTION <- 1000
+  N_DRAWS_KR <- 200
+} else {
+  N_DRAWS_MODEL <- 1000
+  N_DRAWS_PREDICTION <- 5000
+  N_DRAWS_KR <- 5000
+}
+N_WORKERS <- parallel::detectCores()
+if (USE_SYNTHETIC_DATA) {
+  N_WORKERS <- 2
+}
+# The primes of the Halton draws, one per random constant, in mlogit's order. They
+# start again at 2 for each group of constants.
+HALTON_PRIMES <- c(2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37)
 
-N_VIGNETTES  <- 6   # vignettes shown per respondent
-N_ATTRIBUTES <- 9   # design attributes per vignette (attribute_1..54)
-
-# =============================================================================
-# check the paths before anything tries to use them
-# =============================================================================
+# 6. Create and check ----------------------------------------------------------
+dir.create(REPORT_DIR, showWarnings = FALSE, recursive = TRUE)
 dir.create(CLEAN_DATA_DIR, showWarnings = FALSE, recursive = TRUE)
-dir.create(REPORT_DIR,     showWarnings = FALSE, recursive = TRUE)
-
-.required <- c(
-  "RAW_DIR (secure)"        = RAW_DIR,
-  "SYNTAX_DIR (secure)"     = SYNTAX_DIR,
-  "CLEAN_DATA_DIR (secure)" = CLEAN_DATA_DIR,
-  "VERSAND_FILE (Dropbox)"  = VERSAND_FILE,
-  "VIGNETTE_FILE (Dropbox)" = VIGNETTE_FILE,
-  "REPORT_DIR (Dropbox)"    = REPORT_DIR
-)
-.missing <- .required[!file.exists(.required)]
-if (length(.missing))
-  stop("These paths from config.R do not exist:\n",
-       str_c("  ", names(.missing), ": ", .missing, collapse = "\n"),
-       "\n\nFix the roots at the top of config.R (or in config.local.R).",
-       call. = FALSE)
-rm(.required, .missing)
-
-message("secure : ", RAW_DIR, "\n",
-        "         ", CLEAN_DATA_DIR, "\n",
-        "dropbox: ", DROPBOX_DIR)
+required_inputs <- c(VERSAND_FILE, VIGNETTE_FILE, HDD_FILE)
+missing_inputs <- required_inputs[!file.exists(required_inputs)]
+if (length(missing_inputs) > 0) {
+  stop("These inputs do not exist: ", paste(missing_inputs, collapse = ", "),
+       "\nFix the roots at the top of config.R, or in config.local.R.")
+}
+message("Data: ", if (USE_SYNTHETIC_DATA) "SYNTHETIC, " else "", CLEAN_DATA_DIR,
+        "\nOutput: ", OUTPUT_DIR,
+        if (QUICK_RUN) "\nQUICK RUN: few draws, no cross-validation" else "")

@@ -61,7 +61,7 @@
 if (!file.exists("config.R"))
   stop("Run this from the project root (the folder containing config.R).", call. = FALSE)
 
-source("config.R")
+source(file.path("R", "setup.R"))
 
 refresh <- "refresh" %in% commandArgs(trailingOnly = TRUE)
 
