@@ -102,10 +102,7 @@ the same arguments on the same coefficients loads instead of computing.
 ## `results.xlsx`
 
 The sheets to read come first, rounded, with frozen headers: `overview`,
-`coefficients_by_technology`, `constants_sd`, `constants_correlations`, `pp_<name>` (the effects
-in percentage points, one per call of `compute_ames()`), `effect_definitions`, `choice_counts`. The
-long sheets with every digit follow, with grey tabs: `fit`, `coefficients`, `ame_<name>`,
-`baseline_<name>`.
+`coefficients_by_technology`, `constants_sd`, `constants_correlations`, `pp_<name>` (the effects in percentage points, one per call of `compute_ames()`), `effect_definitions`, `choice_counts`. The long sheets with every digit follow, with grey tabs: `fit`, `coefficients`, `ame_<name>`, `baseline_<name>`.
 
 ## `compare_models()`
 
@@ -131,12 +128,9 @@ comparison <- compare_models(
 
 It reads every model folder in `est_dir`, as a larger model must not lie below any model it
 nests, whether or not a test names that model. The rule is at the top of
-`R/functions/compare_models.R` and in the README. Writes
-`<est_dir>/model_comparison/model_comparison.rds` and `.xlsx`, one sheet each: `decision`,
+`R/functions/compare_models.R` and in the README. Writes `<est_dir>/model_comparison/model_comparison.rds` and `.xlsx`, one sheet each: `decision`,
 `validity`, `fit`, `nested_tests`, `non_nested_tests`, `fresh_draws`, `cross_validation`,
-`absolute_fit`, `ame_changes`, `block_tests`. The column `final_decision` of `decision` is for the
-researchers. A new run overwrites the workbook, and a workbook with `final_decision` filled in is
-first kept as a copy, `model_comparison_<date_time>.xlsx`.
+`absolute_fit`, `ame_changes`, `block_tests`. The column `final_decision` of `decision` is for the researchers. A new run overwrites the workbook, and a workbook with `final_decision` filled in is first kept as a copy, `model_comparison_<date_time>.xlsx`.
 
 `ame_changes` has three quantities per test: `AME`, the effects both models define alike, as the
 change between them; `AME the larger model adds`, the effects only the larger model has, as the
