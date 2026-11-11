@@ -5,8 +5,14 @@ mailing waves. Each expert sees six vignettes of a household and its heating sys
 
 ## Where everything lives
 
-All paths are set in `config.R`; a machine with other paths puts its three roots in a git-ignored
-`config.local.R`.
+All paths are built in `config.R` from two roots, which each machine sets in a git-ignored `config.local.R` in the project root: `SECURE_DIR`, the survey's folder on the secure drive (`.../wave_1_2026`), and `DROPBOX_DIR`, the Dropbox folder that holds `public_data_dropbox/`. Nothing else differs between machines.
+
+```r
+SECURE_DIR <- "I:/.../energy_experts_survey/wave_1_2026"
+DROPBOX_DIR <- "C:/Users/<you>/Dropbox/Heating Transition/analysis_survey"
+```
+
+`SECURE_DIR` holds `260909_raw_energy_expert_survey_data/` (the raw exports, with `limesurvey-syntax/`), `260909_cleaned_energy_expert_survey_data/`, `260915_scraped_data/` (the sampling frame) and `output/`.
 
 | | Holds | Shared with |
 |---|---|---|

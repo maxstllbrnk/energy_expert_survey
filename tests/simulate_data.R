@@ -2,12 +2,13 @@
 # simulate_data.R — synthetic data, so that code can be tested without the real
 #                   data (project profile: Claude Code may not touch them)
 # Inputs : design matrix and postcode lookups (PUBLIC_DATA_DIR, non-sensitive)
-# Outputs: in SECURE_DIR of a synthetic run (config.R):
-#            clean/survey_main.rds, clean/vignettes_long.rds   as written by
+# Outputs: in SECURE_DIR of a synthetic run (config.R), in the folders of the
+#          secure drive:
+#            CLEAN_DATA_DIR/survey_main.rds, vignettes_long.rds   as written by
 #              R/cleaning/05_main.R: the real column names and answer levels,
 #              with invented values
-#            frame/frame.rds    a sampling frame with invented e-mail addresses
-#            truth.rds          the parameters behind the recommendations
+#            FRAME_FILE   a sampling frame with invented e-mail addresses
+#            truth.rds    the parameters behind the recommendations
 # Checks : none; this is test code
 ################################################################################
 # From the project root, in a session with CLAUDECODE=1:
@@ -24,7 +25,7 @@ if (!USE_SYNTHETIC_DATA) {
 }
 set.seed(20261109)
 N_EXPERTS <- as.integer(Sys.getenv("EES_N_EXPERTS", unset = "1500"))
-dir.create(file.path(SECURE_DIR, "frame"), recursive = TRUE, showWarnings = FALSE)
+dir.create(dirname(FRAME_FILE), recursive = TRUE, showWarnings = FALSE)
 
 # 1. Helpers -------------------------------------------------------------------
 draw_factor <- function(n, levels, probabilities = NULL) {
