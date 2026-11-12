@@ -30,6 +30,7 @@ wave_1_2026/output/                  on the secure drive
     m6pe/                            one folder per model
     model_comparison/                model_comparison.xlsx  model_comparison.rds
   no_district_heating/               the same
+  *_hybrid_only_elec/                the same, with the hybrid heating priced by electricity alone
 ```
 
 ## How to run
@@ -41,6 +42,9 @@ source("tests/selftest.R")                       # checks on the result
 source("R/run_summary_statistics.R")             # the full sample, with response rates
 source("R/estimation/district_heating.R")        # sample, summary statistics, models, comparison
 source("R/estimation/no_district_heating.R")     # the same for the other arm
+# Variants with the hybrid heating priced by electricity alone
+source("R/estimation/district_heating_hybrid_only_elec.R")
+source("R/estimation/no_district_heating_hybrid_only_elec.R")
 ```
 
 Open `energy_expert_survey.Rproj` first, or run `Rscript <file>` from this folder. Requires R 4.6.2. The decks need `pdflatex` (MiKTeX) on R's PATH: if `Sys.which("pdflatex")` is empty, the run skips them with a message, and the rest runs. A re-run reloads every model, result and set of summary statistics whose inputs have not changed, so changing one model re-estimates that model only.

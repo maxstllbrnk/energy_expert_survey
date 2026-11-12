@@ -11,6 +11,7 @@
     m4pe/                           model.rds  results.rds  results.xlsx  cross_validation.rds
     model_comparison/               model_comparison.rds  model_comparison.xlsx
   no_district_heating/              the same
+  *_hybrid_only_elec/               the same, with the hybrid heating priced by electricity alone
 ```
 
 `model.rds` holds the fitted `mlogit` object, with the data in it. `results.rds` holds
