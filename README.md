@@ -30,7 +30,6 @@ wave_1_2026/output/                  on the secure drive
     m6pe/                            one folder per model
     model_comparison/                model_comparison.xlsx  model_comparison.rds
   no_district_heating/               the same
-  *_hybrid_only_elec/                the same, with the hybrid heating priced by electricity alone
 ```
 
 ## How to run
@@ -42,9 +41,6 @@ source("tests/selftest.R")                       # checks on the result
 source("R/run_summary_statistics.R")             # the full sample, with response rates
 source("R/estimation/district_heating.R")        # sample, summary statistics, models, comparison
 source("R/estimation/no_district_heating.R")     # the same for the other arm
-# Variants with the hybrid heating priced by electricity alone
-source("R/estimation/district_heating_hybrid_only_elec.R")
-source("R/estimation/no_district_heating_hybrid_only_elec.R")
 ```
 
 Open `energy_expert_survey.Rproj` first, or run `Rscript <file>` from this folder. Requires R 4.6.2. The decks need `pdflatex` (MiKTeX) on R's PATH: if `Sys.which("pdflatex")` is empty, the run skips them with a message, and the rest runs. A re-run reloads every model, result and set of summary statistics whose inputs have not changed, so changing one model re-estimates that model only.
@@ -70,14 +66,14 @@ To add a variable: one line in `make_regressors()`, one term in a formula, and i
 |---|---|
 | `fit_mixed_logit()` | Estimates your formula with `mlogit`. Keeps the fixes that a direct call would miss: the order of the random constants, starting values from a nested model, Halton primes by group, the restart after code 3, the re-evaluation at code 2. Stops before estimating, and names the term, if a term has missing values or no finite estimate |
 | `post_estimation()` | Standard errors clustered by expert, Krinsky-Robb draws, standard deviations and correlations of the constants, fit and diagnostics. Writes `results.rds` and `results.xlsx` |
-| `compute_ames()` | The change in every probability for any change, of attributes or covariates, at any reference state and for any profile, with Krinsky-Robb standard errors and percentile intervals |
+| `compute_ames()` | The change in every probability for any change, of attributes or covariates, for any profile, with Krinsky-Robb standard errors and percentile intervals: at one reference expert, or averaged over the observed experts or their answers (`population`), at any reference vignette (`at`). Four kinds of effect, one function: `docs/results_contract.md` |
 | `compare_models()` | The protocol below. Writes `model_comparison.xlsx` |
 | `run_summary_statistics()` | All tables, figures and maps of a sample, and the deck |
 
 `results.xlsx` starts with the sheets to read: overview and fit, coefficients by technology, standard
 deviations and correlations of the constants, and the AMEs in percentage points. The long sheets with every digit follow, with grey tabs. The fields of `results.rds` are in `docs/results_contract.md`, so that later scripts can build any table or figure from them.
 
-On a model with 113 parameters and 1,500 simulated experts, on an 8-core laptop, a Hessian takes at most about 11 minutes, against about 2 hours before, and all AMEs of a model about a minute; `mlogit()` itself takes as long as it takes. Lower `N_WORKERS` in `config.R` if something else runs on the computer. The cross-validation runs on four sessions, as a fold of (6pe) needs an estimated 3 to 4 GB per session.
+On a model with 113 parameters and 1,500 simulated experts, on an 8-core laptop, a Hessian takes at most about 11 minutes, against about 2 hours before, and all AMEs of a model at a reference expert about a minute; the effects over the observed experts take about 125 times as long as in a quick run, some hours per call (per 1,000 experts about 1.5 to 3 hours on eight sessions, and each estimation script makes five such calls, `docs/results_contract.md`); `mlogit()` itself takes as long as it takes. Lower `N_WORKERS` in `config.R` if something else runs on the computer. The cross-validation runs on four sessions, as a fold of (6pe) needs an estimated 3 to 4 GB per session.
 
 ## How models are compared
 
@@ -119,7 +115,7 @@ Tables are LaTeX fragments: numbers with N, mean, SD and quartiles, answers with
 - **Soft launch.** Q6 had no "bundesweit" option, and Q7 was a different ranking task. Filter on `is_softlaunch` before pooling those.
 - **Design.** No house built in 2000 is unrenovated (200 kWh/m²) or has oil heating, so a reference state or an effect that combines these extrapolates. `att_heat_demand` is the same split as `att_renovation`.
 - **Vignettes are nested in experts.** All standard errors are clustered by expert.
-- **"AME"** here means the change at a reference expert and vignette, averaged over the random constants only, not over the sample of experts.
+- **"AME"** has two meanings here, always averaged over the random constants. Over observed experts (`population` of `compute_ames()`): each expert keeps their own characteristics, the change is made to each of them at the reference vignette, and the changes in probability are averaged over the experts (a profile is a group of them). At a reference expert (no `population`): one fictitious expert, e.g. with mean prices, which is an effect at representative values. In a nonlinear model the two differ; the first is what Stata's `margins` computes for the observed experts (`margins, at()` for the reference vignette). Prices, expected rises, a heat pump at home and degree days are not randomised, so their effects are associations either way.
 
 ## The code
 

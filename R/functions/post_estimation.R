@@ -383,12 +383,17 @@ write_results_excel <- function(results) {
   definition_rows <- list()
   for (ame_name in names(results$ames)) {
     ames <- results$ames[[ame_name]]
+    # Effects saved before n_experts existed have none
+    if (!"n_experts" %in% names(ames$table)) {
+      ames$table$n_experts <- NA_integer_
+      ames$baseline$n_experts <- NA_integer_
+    }
     per_effect <- bind_rows(
       ames$baseline %>%
         transmute(profile, effect = "Probability at the reference state",
-                  outcome, value = probability, se),
+                  outcome, value = probability, se, n_experts),
       ames$table %>%
-        select(profile, effect, outcome, value = ame, se)
+        select(profile, effect, outcome, value = ame, se, n_experts)
     )
     effect_names <- unique(per_effect$effect)
     profile_names <- unique(per_effect$profile)
@@ -403,10 +408,22 @@ write_results_excel <- function(results) {
       pp[[label]] <- 100 * one_outcome$value[positions]
       pp[[paste(label, "se")]] <- 100 * one_outcome$se[positions]
     }
+    # With observed experts: how many each row averages over, after the effect
+    if (any(!is.na(per_effect$n_experts))) {
+      experts_of_row <- per_effect %>%
+        distinct(profile, effect, n_experts)
+      row_positions <- match(paste(pp$profile, pp$effect),
+                             paste(experts_of_row$profile, experts_of_row$effect))
+      pp <- pp %>%
+        mutate(experts = experts_of_row$n_experts[row_positions], .after = effect)
+    }
     sheets[[paste0("pp_", ame_name)]] <- readable_sheet(pp, 2, n_frozen = 2)
 
     settings <- list()
     settings[["reference state|at"]] <- ames$at
+    if (!is.null(ames$population)) {
+      settings[["population|observed"]] <- ames$population
+    }
     if (is.list(ames$profiles)) {
       for (profile_name in names(ames$profiles)) {
         settings[[paste0(profile_name, "|profile")]] <-

@@ -5,7 +5,10 @@
 # Checks : probabilities sum to 1; from equal to to gives 0; a change in `at` moves
 #          the reference; a model by group uses the group's constants; a covariate
 #          shows up without other changes; L near 0 gives the closed form; extreme
-#          draws stay finite; loading; what fit_mixed_logit() refuses; the workbook
+#          draws stay finite; loading; what fit_mixed_logit() refuses; the workbook;
+#          effects over observed experts or answers against a brute-force
+#          computation, and the same effects as a reference expert's when the
+#          population is that expert
 ################################################################################
 
 source(file.path("R", "setup.R"))
@@ -139,12 +142,15 @@ ames <- results_common$ames$base
 check("the table has one row per profile x effect x outcome",
       nrow(ames$table) == 3 * length(changes_base) * length(outcomes))
 check("the fields of the contract are there",
-      all(c("table", "baseline", "draws", "at", "changes", "profiles", "n_draws",
-            "fingerprint", "date") %in% names(ames)) &&
+      all(c("table", "baseline", "draws", "at", "changes", "profiles", "population", "n_draws",
+            "n_draws_kr", "fingerprint", "date") %in% names(ames)) &&
         identical(names(ames$table), c("profile", "effect", "outcome", "p_from", "p_to", "ame",
-                                       "se", "z", "p", "ci_low", "ci_high", "ci_low_kr", "ci_high_kr")) &&
+                                       "se", "z", "p", "ci_low", "ci_high", "ci_low_kr", "ci_high_kr",
+                                       "n_units", "n_experts")) &&
         identical(names(ames$baseline), c("profile", "outcome", "probability", "se", "ci_low_kr",
-                                          "ci_high_kr")))
+                                          "ci_high_kr", "n_units", "n_experts")))
+check("without a population: one fictitious expert per profile, so no experts to count",
+      is.null(ames$population) && all(ames$table$n_units == 1) && all(is.na(ames$table$n_experts)))
 sum_baseline <- ames$baseline %>%
   group_by(profile) %>%
   summarise(total = sum(probability))
@@ -540,5 +546,471 @@ Sys.sleep(1.1)
 reloaded_ames <- call_ames(reloaded_post, "base")
 check("a current workbook is left alone, so that it may stay open in Excel",
       file.mtime(workbook_common) == time_written)
+
+# 14. Effects over observed experts: a brute-force computation ------------------
+# Options B to D. Every number is also computed here expert by expert, from the
+# formula, with the draws of the function: so blocks, cells, averages and the group
+# of each state are checked against code that shares none of them.
+make_regressors_na <- function(states) {
+  states %>%
+    mutate(income_low = if_else(income == "low", 1, 0),
+           is_adviser = if_else(expert_group == "Energy advisers", 1, 0),
+           is_hvac = if_else(expert_group == "HVAC installers", 1, 0),
+           is_sweep = if_else(expert_group == "Chimney sweeps", 1, 0),
+           age_c = (age - 50) / 10,
+           price_a_c = if_else(is.na(price_a), 0, price_a - 10),
+           price_b_c = if_else(is.na(price_b), 0, price_b - 20)) %>%
+    cross_join(tibble(alternative = factor(outcomes, levels = outcomes))) %>%
+    mutate(price = case_when(alternative == "A" ~ price_a_c,
+                             alternative == "B" ~ price_b_c,
+                             TRUE ~ 0))
+}
+call_observed <- function(results, name, at, changes, population, ...) {
+  compute_ames(results, make_regressors_na, name = name, at = at, changes = changes,
+               population = population, n_draws = N_PREDICTION_TEST,
+               n_workers = N_WORKERS_TEST, ...)
+}
+
+# The probabilities of one expert of the model with one set of constants, by hand
+theta_common <- results_common$coefficients
+random_common <- results_common$random
+L_common <- matrix(0, nrow(random_common), nrow(random_common))
+for (i in seq_len(nrow(random_common))) {
+  for (j in seq_len(i)) {
+    L_common[i, j] <- theta_common[[paste0("chol.", random_common$name[j], ":", random_common$name[i])]]
+  }
+}
+deviations_common <- Z %*% t(L_common)
+probabilities_common <- function(is_hvac, is_sweep, income_low, price_a_c, price_b_c) {
+  utility <- matrix(0, N_PREDICTION_TEST, length(outcomes), dimnames = list(NULL, outcomes))
+  for (k in seq_len(nrow(random_common))) {
+    technology <- random_common$technology[k]
+    utility[, technology] <- theta_common[[paste0("(Intercept):", technology)]] +
+      theta_common[[paste0("is_hvac:", technology)]] * is_hvac +
+      theta_common[[paste0("is_sweep:", technology)]] * is_sweep +
+      theta_common[[paste0("income_low:", technology)]] * income_low + deviations_common[, k]
+  }
+  utility[, "A"] <- utility[, "A"] + theta_common[["price"]] * price_a_c
+  utility[, "B"] <- utility[, "B"] + theta_common[["price"]] * price_b_c
+  colMeans(exp(utility) / rowSums(exp(utility)))
+}
+# The average over some experts (rows), for a vignette with income_low, at their own
+# prices unless price_a_c or price_b_c is given for them
+is_hvac_of <- as.numeric(experts$expert_group == "HVAC installers")
+is_sweep_of <- as.numeric(experts$expert_group == "Chimney sweeps")
+average_by_hand <- function(rows, income_low, price_a_c, price_b_c) {
+  total <- rep(0, length(outcomes))
+  for (i in rows) {
+    total <- total + probabilities_common(is_hvac_of[i], is_sweep_of[i], income_low,
+                                          price_a_c[i], price_b_c[i])
+  }
+  total / length(rows)
+}
+rows_of_profile <- list(
+  "All experts" = seq_len(n_experts),
+  "Energy advisers" = which(experts$expert_group == "Energy advisers"),
+  "HVAC installers" = which(experts$expert_group == "HVAC installers"),
+  "Chimney sweeps" = which(experts$expert_group == "Chimney sweeps")
+)
+profiles_observed <- list(
+  "All experts" = list(),
+  "Energy advisers" = list(expert_group = "Energy advisers"),
+  "HVAC installers" = list(expert_group = "HVAC installers"),
+  "Chimney sweeps" = list(expert_group = "Chimney sweeps")
+)
+in_outcome_order <- function(table, column) {
+  table[[column]][match(outcomes, table$outcome)]
+}
+
+# B: every expert at their own prices and group, the reference vignette set by `at`
+changes_observed <- list(
+  income_low = list(to = list(income = "low")),
+  price_a_up = list(from = list(price_a = 8), to = list(price_a = 12)),
+  same_state = list(from = list(price_a = 12), to = list(price_a = 12))
+)
+at_vignette <- list(income = "high")
+population_experts <- experts
+results_common <- call_observed(results_common, "observed", at_vignette, changes_observed,
+                                population_experts, profiles = profiles_observed)
+observed <- results_common$ames$observed
+price_a_c_own <- experts$price_a - 10
+price_b_c_own <- experts$price_b - 20
+gaps_baseline <- numeric(0)
+gaps_income <- numeric(0)
+gaps_price <- numeric(0)
+for (profile_name in names(rows_of_profile)) {
+  rows <- rows_of_profile[[profile_name]]
+  by_hand_own <- average_by_hand(rows, 0, price_a_c_own, price_b_c_own)
+  baseline_rows <- observed$baseline %>%
+    filter(profile == profile_name)
+  gaps_baseline <- c(gaps_baseline,
+                     max(abs(in_outcome_order(baseline_rows, "probability") - by_hand_own)))
+  by_hand_low <- average_by_hand(rows, 1, price_a_c_own, price_b_c_own)
+  income_rows <- observed$table %>%
+    filter(profile == profile_name, effect == "income_low")
+  gaps_income <- c(gaps_income,
+                   max(abs(in_outcome_order(income_rows, "ame") - (by_hand_low - by_hand_own))))
+  by_hand_p8 <- average_by_hand(rows, 0, rep(-2, n_experts), price_b_c_own)
+  by_hand_p12 <- average_by_hand(rows, 0, rep(2, n_experts), price_b_c_own)
+  price_rows <- observed$table %>%
+    filter(profile == profile_name, effect == "price_a_up")
+  gaps_price <- c(gaps_price,
+                  max(abs(in_outcome_order(price_rows, "ame") - (by_hand_p12 - by_hand_p8))),
+                  max(abs(in_outcome_order(price_rows, "p_from") - by_hand_p8)))
+}
+check("B: the baseline is the average over the experts, by hand", max(gaps_baseline) < 1e-10)
+check("B: a change of `at`-level variable, to the experts' own state: by hand", max(gaps_income) < 1e-10)
+check("B: a change with `from` and `to`, set for every expert: by hand", max(gaps_price) < 1e-10)
+sizes_observed <- observed$baseline %>%
+  filter(outcome == "A")
+check("B: the profiles count their experts",
+      identical(sizes_observed$n_experts, as.integer(lengths(rows_of_profile))) &&
+        identical(sizes_observed$n_units, sizes_observed$n_experts))
+pooled <- observed$baseline %>%
+  filter(profile == "All experts") %>%
+  arrange(match(outcome, outcomes))
+by_group <- observed$baseline %>%
+  filter(profile != "All experts")
+weighted <- by_group %>%
+  group_by(outcome) %>%
+  summarise(probability = sum(probability * n_experts) / sum(n_experts))
+check("B: the pooled average is the average of the groups, weighted by their size",
+      max(abs(pooled$probability - weighted$probability[match(pooled$outcome, weighted$outcome)])) < 1e-12)
+same_state_observed <- observed$table %>%
+  filter(effect == "same_state")
+check("B: from equal to to gives exactly 0, with no spread",
+      all(same_state_observed$ame == 0) && all(same_state_observed$se == 0))
+check("B: the draws are states x outcomes x Krinsky-Robb draws, averages only",
+      identical(dim(observed$draws[["HVAC installers"]]),
+                as.integer(c(1 + 2 * length(changes_observed), length(outcomes), N_KR_TEST))))
+serialized_ames <- rawToChar(serialize(observed, NULL, ascii = TRUE))
+check("nothing at the level of experts is saved",
+      !grepl(experts$resp_uid[1], serialized_ames, fixed = TRUE) &&
+        !grepl(experts$resp_uid[n_experts], serialized_ames, fixed = TRUE) &&
+        observed$population$experts == n_experts)
+
+# D: another household, the same experts: the new baseline is the old effect's `to`
+results_common <- call_observed(results_common, "observed_low", list(income = "low"),
+                                list(back = list(to = list(income = "high"))),
+                                population_experts, profiles = profiles_observed)
+low_baseline <- results_common$ames$observed_low$baseline
+to_low <- observed$table %>%
+  filter(effect == "income_low")
+joined_low <- low_baseline %>%
+  left_join(to_low, by = c("profile", "outcome"), relationship = "one-to-one")
+check("D: another `at` moves the household: its baseline is the old effect's `to`",
+      max(abs(joined_low$probability - joined_low$p_to)) < 1e-12)
+
+# A population of one expert is a reference expert: the same numbers as without one
+one_expert <- tibble(resp_uid = "one", expert_group = "Energy advisers", income = "high",
+                     age = 50, price_a = 10, price_b = 20)
+results_common <- call_ames(results_common, "reference_expert", changes = changes_base,
+                            profiles = list("Energy advisers" = list(expert_group = "Energy advisers")))
+reference_expert <- results_common$ames$reference_expert
+results_common <- call_observed(results_common, "one_expert", list(), changes_base, one_expert,
+                                profiles = list("Energy advisers" = list()), check_sample = FALSE)
+same_as_reference <- results_common$ames$one_expert
+check("a population of one expert gives the effects of a reference expert",
+      max(abs(same_as_reference$draws[["Energy advisers"]] -
+                reference_expert$draws[["Energy advisers"]])) < 1e-12 &&
+        max(abs(same_as_reference$table$ame - reference_expert$table$ame)) < 1e-12 &&
+        all(same_as_reference$table$n_experts == 1))
+results_common <- call_observed(results_common, "copies", list(), changes_base,
+                                bind_rows(one_expert, one_expert %>% mutate(resp_uid = "two"),
+                                          one_expert %>% mutate(resp_uid = "three")),
+                                profiles = list("Energy advisers" = list()), check_sample = FALSE)
+copies <- results_common$ames$copies
+check("copies of one expert give the same averages, counted as units and experts",
+      max(abs(copies$draws[["Energy advisers"]] - same_as_reference$draws[["Energy advisers"]])) < 1e-12 &&
+        all(copies$table$n_units == 3) && all(copies$table$n_experts == 3))
+
+# 15. Missing answers: an effect leaves out the experts who did not answer -------
+experts_na <- experts
+experts_na$price_a[seq(1, n_experts, by = 10)] <- NA
+reporters <- !is.na(experts_na$price_a)
+price_a_c_na <- if_else(is.na(experts_na$price_a), 0, experts_na$price_a - 10)
+changes_na <- list(
+  price_a_up = changes_observed$price_a_up,
+  na_effect = list(from = list(price_a = 10), to = list(price_a = NA_real_))
+)
+results_common <- call_observed(results_common, "observed_na", at_vignette, changes_na,
+                                experts_na, profiles = profiles_observed)
+with_na <- results_common$ames$observed_na
+gaps_na <- numeric(0)
+counts_ok <- logical(0)
+for (profile_name in names(rows_of_profile)) {
+  all_rows <- rows_of_profile[[profile_name]]
+  reporter_rows <- all_rows[reporters[all_rows]]
+  by_hand_p8 <- average_by_hand(reporter_rows, 0, rep(-2, n_experts), price_b_c_own)
+  by_hand_p12 <- average_by_hand(reporter_rows, 0, rep(2, n_experts), price_b_c_own)
+  price_rows <- with_na$table %>%
+    filter(profile == profile_name, effect == "price_a_up")
+  gaps_na <- c(gaps_na, max(abs(in_outcome_order(price_rows, "ame") - (by_hand_p12 - by_hand_p8))))
+  na_rows <- with_na$table %>%
+    filter(profile == profile_name, effect == "na_effect")
+  baseline_na <- with_na$baseline %>%
+    filter(profile == profile_name)
+  gaps_na <- c(gaps_na, max(abs(in_outcome_order(baseline_na, "probability") -
+                                  average_by_hand(all_rows, 0, price_a_c_na, price_b_c_own))))
+  counts_ok <- c(counts_ok, all(price_rows$n_experts == length(reporter_rows)),
+                 all(na_rows$n_experts == length(all_rows)),
+                 all(baseline_na$n_experts == length(all_rows)))
+}
+check("a price change averages over the experts who reported a price, by hand", max(gaps_na) < 1e-10)
+check("and the table counts them; an effect that sets the variable to NA keeps everyone",
+      all(counts_ok))
+results_common <- call_observed(results_common, "observed_all", at_vignette, changes_na,
+                                experts_na, profiles = profiles_observed, exclude_na = FALSE)
+everyone <- results_common$ames$observed_all$table %>%
+  filter(effect == "price_a_up")
+check("exclude_na = FALSE: nobody is left out",
+      identical(everyone$n_experts[everyone$outcome == "A"],
+                as.integer(lengths(rows_of_profile))))
+
+# Without `from` an effect starts at the experts as they are, and with exclude_na
+# at those who answered: its start is the average over them, not the baseline. With
+# NA in `from` it is the effect of a price of 12 against not answering, for everyone.
+changes_partial <- list(
+  to_only = list(to = list(price_a = 12)),
+  from_na = list(from = list(price_a = NA_real_), to = list(price_a = 12))
+)
+messages_partial <- character(0)
+results_common <- withCallingHandlers(
+  call_observed(results_common, "observed_partial", at_vignette, changes_partial,
+                experts_na, profiles = profiles_observed),
+  message = function(m) {
+    messages_partial <<- c(messages_partial, conditionMessage(m))
+    invokeRestart("muffleMessage")
+  }
+)
+partial <- results_common$ames$observed_partial
+gaps_partial <- numeric(0)
+counts_partial <- logical(0)
+for (profile_name in names(rows_of_profile)) {
+  all_rows <- rows_of_profile[[profile_name]]
+  reporter_rows <- all_rows[reporters[all_rows]]
+  to_only_rows <- partial$table %>%
+    filter(profile == profile_name, effect == "to_only")
+  gaps_partial <- c(
+    gaps_partial,
+    max(abs(in_outcome_order(to_only_rows, "p_from") -
+              average_by_hand(reporter_rows, 0, price_a_c_na, price_b_c_own))),
+    max(abs(in_outcome_order(to_only_rows, "p_to") -
+              average_by_hand(reporter_rows, 0, rep(2, n_experts), price_b_c_own)))
+  )
+  from_na_rows <- partial$table %>%
+    filter(profile == profile_name, effect == "from_na")
+  gaps_partial <- c(
+    gaps_partial,
+    max(abs(in_outcome_order(from_na_rows, "p_from") -
+              average_by_hand(all_rows, 0, rep(0, n_experts), price_b_c_own))),
+    max(abs(in_outcome_order(from_na_rows, "p_to") -
+              average_by_hand(all_rows, 0, rep(2, n_experts), price_b_c_own)))
+  )
+  counts_partial <- c(counts_partial, all(to_only_rows$n_experts == length(reporter_rows)),
+                      all(from_na_rows$n_experts == length(all_rows)))
+}
+check("no `from`, some experts left out: the start averages over those who answered, by hand",
+      max(gaps_partial) < 1e-10)
+check("and NA in `from` keeps everyone; the table counts both", all(counts_partial))
+baseline_pooled <- partial$baseline %>%
+  filter(profile == "All experts")
+to_only_pooled <- partial$table %>%
+  filter(profile == "All experts", effect == "to_only")
+check("the start of such an effect is not the baseline of everyone",
+      max(abs(in_outcome_order(to_only_pooled, "p_from") -
+                in_outcome_order(baseline_pooled, "probability"))) > 1e-6)
+check("the log says which effects leave experts out, and how many at most",
+      any(grepl("experts left out of an effect, at most: to_only (40)", messages_partial, fixed = TRUE)))
+
+# 16. The answers: the effect over the vignettes the experts answered -------------
+# C: units are the 6 x 400 answers; at is empty
+population_answers <- decisions %>%
+  select(resp_uid, vig_num, expert_group, income, age, price_a, price_b)
+changes_answers <- list(
+  income_low = list(to = list(income = "low")),
+  price_a_up = changes_observed$price_a_up,
+  age_up = list(from = list(age = 40), to = list(age = 60))
+)
+messages_answers <- character(0)
+results_common <- withCallingHandlers(
+  call_observed(results_common, "answers", list(), changes_answers, population_answers,
+                profiles = list("All experts" = list())),
+  message = function(m) {
+    messages_answers <<- c(messages_answers, conditionMessage(m))
+    invokeRestart("muffleMessage")
+  }
+)
+answers <- results_common$ames$answers
+is_hvac_answer <- as.numeric(decisions$expert_group == "HVAC installers")
+is_sweep_answer <- as.numeric(decisions$expert_group == "Chimney sweeps")
+income_low_answer <- as.numeric(decisions$income == "low")
+average_over_answers <- function(income_low, price_a_c) {
+  total <- rep(0, length(outcomes))
+  for (i in seq_len(nrow(decisions))) {
+    total <- total + probabilities_common(is_hvac_answer[i], is_sweep_answer[i],
+                                          income_low[i], price_a_c[i], decisions$price_b[i] - 20)
+  }
+  total / nrow(decisions)
+}
+own_answers <- average_over_answers(income_low_answer, decisions$price_a - 10)
+low_answers <- average_over_answers(rep(1, nrow(decisions)), decisions$price_a - 10)
+check("C: the baseline is the average over all the answers, by hand",
+      max(abs(in_outcome_order(answers$baseline, "probability") - own_answers)) < 1e-10)
+income_answers <- answers$table %>%
+  filter(effect == "income_low")
+check("C: an effect over the answers, by hand",
+      max(abs(in_outcome_order(income_answers, "ame") - (low_answers - own_answers))) < 1e-10)
+check("C: the units are the answers, the experts those who gave them",
+      all(answers$table$n_units == nrow(decisions)) && all(answers$table$n_experts == n_experts))
+observed_shares <- as.numeric(results_common$choice_counts[outcomes]) / results_common$fit$n_choices
+check("C: over all answers the probabilities are close to the observed shares",
+      max(abs(in_outcome_order(answers$baseline, "probability") - observed_shares)) < 0.02)
+check("C: and nothing is said about it", !any(grepl("observed shares", messages_answers, fixed = TRUE)))
+
+# 17. A model by group: the group of each expert sets their random part ---------
+# The prices of B are fixed by `at`, so that only price A varies and the by-hand
+# function of section 6 applies
+at_fixed_b <- list(income = "high", price_b = 20)
+results_group <- call_observed(results_group, "observed", at_fixed_b, changes_observed[1:2],
+                               population_experts, profiles = profiles_observed)
+observed_group <- results_group$ames$observed
+gaps_group <- numeric(0)
+for (profile_name in c("Energy advisers", "HVAC installers", "Chimney sweeps")) {
+  rows <- rows_of_profile[[profile_name]]
+  group_column <- c("Energy advisers" = "is_adviser", "HVAC installers" = "is_hvac",
+                    "Chimney sweeps" = "is_sweep")[[profile_name]]
+  total <- rep(0, length(outcomes))
+  for (i in rows) {
+    total <- total + probabilities_by_hand(group_column, results_group$coefficients,
+                                           income_low = 0, price_a_c = price_a_c_own[i])
+  }
+  baseline_group <- observed_group$baseline %>%
+    filter(profile == profile_name)
+  gaps_group <- c(gaps_group,
+                  max(abs(in_outcome_order(baseline_group, "probability") - total / length(rows))))
+}
+check("a model by group: each expert's own group's constants, averaged, by hand", max(gaps_group) < 1e-10)
+pooled_group <- observed_group$baseline %>%
+  filter(profile == "All experts") %>%
+  arrange(match(outcome, outcomes))
+weighted_group <- observed_group$baseline %>%
+  filter(profile != "All experts") %>%
+  group_by(outcome) %>%
+  summarise(probability = sum(probability * n_experts) / sum(n_experts))
+check("a model by group: the pooled average mixes the groups' constants in proportion",
+      max(abs(pooled_group$probability -
+                weighted_group$probability[match(pooled_group$outcome, weighted_group$outcome)])) < 1e-12)
+
+# 18. Blocks and sessions: the same numbers however the work is divided ----------
+# 2,400 answers x 4 states in blocks of fewer units, on one session and on two
+results_one_session <- results_common
+results_one_session$folder <- other_folder
+results_one_session$ames <- list()
+one_session <- compute_ames(results_one_session, make_regressors_na, name = "answers",
+                            at = list(), changes = changes_answers, population = population_answers,
+                            profiles = list("All experts" = list()), n_draws = N_PREDICTION_TEST,
+                            n_workers = 1)
+check("one session or two, the same numbers",
+      max(abs(one_session$ames$answers$draws[["All experts"]] -
+                answers$draws[["All experts"]])) < 1e-12)
+
+# 19. What stops, and what is said --------------------------------------------------
+stops_with("a population that is not the estimation sample stops", "estimation sample",
+           call_observed(results_common, "x", at_vignette, changes_observed,
+                         population_experts[1:300, ]))
+results_other_population <- call_observed(results_one_session, "other", at_vignette,
+                                          list(income_low = changes_observed$income_low),
+                                          population_experts[1:300, ], check_sample = FALSE,
+                                          profiles = list("All experts" = list()))
+check("check_sample = FALSE: another population on purpose",
+      all(results_other_population$ames$other$baseline$n_experts == 300))
+stops_with("a profile that selects nobody stops", "selects no unit",
+           call_observed(results_common, "x", at_vignette, changes_observed, population_experts,
+                         profiles = list("Nobody" = list(expert_group = "Teachers"))))
+stops_with("a profile that selects on an unknown column stops", "not in the population",
+           call_observed(results_common, "x", at_vignette, changes_observed, population_experts,
+                         profiles = list("Nobody" = list(speciality = "Teachers"))))
+stops_with("a population without resp_uid stops", "resp_uid",
+           call_observed(results_common, "x", at_vignette, changes_observed,
+                         population_experts %>% select(-resp_uid)))
+stops_with("a change of a variable that is nowhere stops", "not in `at`",
+           call_observed(results_common, "x", at_vignette,
+                         list(typo = list(to = list(incomme = "low"))), population_experts))
+stops_with("NA in `to` only stops over a population", "NA on one side only",
+           call_observed(results_common, "x", at_vignette,
+                         list(bad = list(to = list(price_a = NA_real_))), population_experts))
+stops_with("NA in `from` only stops over a population", "NA on one side only",
+           call_observed(results_common, "x", at_vignette,
+                         list(bad = list(from = list(price_a = NA_real_),
+                                         to = list(income = "low"))), population_experts))
+results_few_experts <- call_observed(
+  results_one_session, "few", at_vignette, changes_observed[1], population_experts,
+  profiles = list("Five experts" = list(resp_uid = experts$resp_uid[1:5]),
+                  "Everyone" = list())
+)
+ame_few <- read_excel(file.path(results_few_experts$folder, "results.xlsx"), sheet = "ame_few")
+check("a profile selected on any column; with five experts it shows its effects and its count (Max, 2026-11-12)",
+      !any(is.na(results_few_experts$ames$few$table$ame)) && !any(is.na(ame_few$ame)) &&
+        all(ame_few$n_experts[ame_few$profile == "Five experts"] == 5))
+price_none <- experts
+price_none$price_a <- NA_real_
+messages_empty <- character(0)
+results_empty <- withCallingHandlers(
+  call_observed(results_one_session, "empty", at_vignette, changes_observed[1:2],
+                price_none, profiles = profiles_observed),
+  message = function(m) {
+    messages_empty <<- c(messages_empty, conditionMessage(m))
+    invokeRestart("muffleMessage")
+  }
+)
+check("an effect that no profile includes is said so, and not said to move nothing",
+      any(grepl("no unit of any profile is included in: price_a_up", messages_empty, fixed = TRUE)) &&
+        !any(grepl("move nothing in this model: price_a_up", messages_empty, fixed = TRUE)))
+price_never <- experts
+price_never$price_a[price_never$expert_group == "Chimney sweeps"] <- NA
+results_nobody <- call_observed(results_one_session, "nobody", at_vignette, changes_observed[2],
+                                price_never, profiles = profiles_observed)
+sweeps_price <- results_nobody$ames$nobody$table %>%
+  filter(profile == "Chimney sweeps")
+check("an effect that no expert of a profile is included in: blank, counted as 0 experts",
+      all(is.na(sweeps_price$ame)) && all(sweeps_price$n_experts == 0) &&
+        !any(is.na((results_nobody$ames$nobody$table %>% filter(profile == "HVAC installers"))$ame)))
+
+# 20. Loading and the workbook ---------------------------------------------------
+messages_loaded <- character(0)
+results_common <- withCallingHandlers(
+  call_observed(results_common, "observed", at_vignette, changes_observed, population_experts,
+                profiles = profiles_observed),
+  message = function(m) {
+    messages_loaded <<- c(messages_loaded, conditionMessage(m))
+    invokeRestart("muffleMessage")
+  }
+)
+check("the same call over observed experts loads", any(grepl("nothing changed", messages_loaded)))
+experts_changed <- experts
+experts_changed$price_a[1] <- experts_changed$price_a[1] + 1
+messages_changed <- character(0)
+results_changed <- withCallingHandlers(
+  call_observed(results_common, "observed", at_vignette, changes_observed, experts_changed,
+                profiles = profiles_observed),
+  message = function(m) {
+    messages_changed <<- c(messages_changed, conditionMessage(m))
+    invokeRestart("muffleMessage")
+  }
+)
+check("another price of one expert computes again", !any(grepl("nothing changed", messages_changed)))
+workbook_observed <- file.path(results_changed$folder, "results.xlsx")
+pp_observed <- read_excel(workbook_observed, sheet = "pp_observed")
+print(pp_observed, n = 8)
+check("the readable sheet counts the experts after the effect",
+      identical(names(pp_observed)[1:3], c("profile", "effect", "experts")) &&
+        pp_observed$experts[1] == n_experts)
+definitions_observed <- read_excel(workbook_observed, sheet = "effect_definitions")
+check("the definitions say that the population was observed",
+      any(definitions_observed$effects == "observed" & definitions_observed$effect == "population" &
+            definitions_observed$variable == "experts" & definitions_observed$value == as.character(n_experts)))
+pp_reference <- read_excel(workbook_observed, sheet = "pp_base")
+check("a reference expert's sheet has no column of experts", !"experts" %in% names(pp_reference))
 
 cat("compute_ames: all checks passed\n")

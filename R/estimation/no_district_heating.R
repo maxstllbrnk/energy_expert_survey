@@ -57,15 +57,15 @@ run_summary_statistics(experts, vignettes,
                        file.path(est_dir, "summary_statistics"), sample_label)
 
 # 4. The regressors ------------------------------------------------------------
-# Two placeholders. COP: the electricity price divided by it is the heat pump's
+# One placeholder. COP: the electricity price divided by it is the heat pump's
 # price per kWh of heat, the same for both heat distributions for now (Max,
 # 2026-10-19). The price is centred before it is divided: the part this leaves
 # out, the mean price divided by the COP, differs only with the heat
 # distribution, so the coefficients of floor_heating take it up if the two COPs
-# differ. HYBRID_GAS_SHARE: the share of the heat from the gas boiler of a hybrid
-# heating (Max, 2026-10-20).
+# differ. The hybrid heating has no price of its own: it runs on the heat pump and
+# uses gas only as a backup, so the electricity price and its expected rise enter
+# its row as they enter the heat pump's (Max, 2026-11-12).
 COP <- c(radiators = 3, floor_heating = 3)
-HYBRID_GAS_SHARE <- 0.5
 
 # Where the answers are centred, the same in both estimation scripts, so that
 # they share one reference expert. setNames(): the values, with these names.
@@ -133,29 +133,20 @@ make_regressors <- function(states) {
       if_else(is.na(rise), 0, rise - rise_share[[fuel]])
   }
 
-  # (c) The heat pump per kWh of heat. The hybrid: the weighted average of gas
-  # and the heat pump, not reported or blank if one of them is.
+  # (c) The heat pump and the hybrid per kWh of heat
   states <- states %>%
     mutate(
       cop = if_else(floor_heating == 1, COP[["floor_heating"]],
                     COP[["radiators"]]),
-      price_hpelec_heat_c = price_hpelec_c / cop,
-      price_hybrid_na = if_else(price_gas_na == 1 | price_hpelec_na == 1, 1, 0),
-      price_hybrid_c = if_else(
-        price_hybrid_na == 1, 0,
-        HYBRID_GAS_SHARE * price_gas_c +
-          (1 - HYBRID_GAS_SHARE) * price_hpelec_heat_c
-      ),
-      pexp_hybrid_na = if_else(pexp_gas_na == 1 | pexp_hpelec_na == 1, 1, 0),
-      pexp_hybrid_c = if_else(
-        pexp_hybrid_na == 1, 0,
-        HYBRID_GAS_SHARE * pexp_gas_c + (1 - HYBRID_GAS_SHARE) * pexp_hpelec_c
-      )
+      price_hpelec_heat_c = price_hpelec_c / cop
     )
 
   # (d) One row per alternative. cross_join(): every state with every
   # alternative. With one coefficient for all technologies: what differs between
-  # the alternatives, 0 in the rows of the others.
+  # the alternatives, 0 in the rows of the others. One blank dummy per fuel, also
+  # in the hybrid's rows: with separate hybrid dummies, (4pe)'s Hessian was not
+  # positive definite in the arm fw (Max, 2026-11-12).
+  uses_electricity <- c("Wärmepumpe", "Hybridheizung")
   states %>%
     cross_join(tibble(
       alternative = factor(alternatives, levels = alternatives)
@@ -165,28 +156,26 @@ make_regressors <- function(states) {
         alternative == "Gasheizung" ~ price_gas_c,
         alternative == "Ölheizung" ~ price_oil_c,
         alternative == "Pelletheizung" ~ price_pellet_c,
-        alternative == "Wärmepumpe" ~ price_hpelec_heat_c,
-        alternative == "Hybridheizung" ~ price_hybrid_c,
+        alternative %in% uses_electricity ~ price_hpelec_heat_c,
         TRUE ~ 0
       ),
       gas_price_na = if_else(alternative == "Gasheizung", price_gas_na, 0),
       oil_price_na = if_else(alternative == "Ölheizung", price_oil_na, 0),
       pellet_price_na = if_else(alternative == "Pelletheizung", price_pellet_na, 0),
-      hpelec_price_na = if_else(alternative == "Wärmepumpe", price_hpelec_na, 0),
-      hybrid_price_na = if_else(alternative == "Hybridheizung", price_hybrid_na, 0),
+      hpelec_price_na = if_else(alternative %in% uses_electricity,
+                                price_hpelec_na, 0),
       expects_rise = case_when(
         alternative == "Gasheizung" ~ pexp_gas_c,
         alternative == "Ölheizung" ~ pexp_oil_c,
         alternative == "Pelletheizung" ~ pexp_pellet_c,
-        alternative == "Wärmepumpe" ~ pexp_hpelec_c,
-        alternative == "Hybridheizung" ~ pexp_hybrid_c,
+        alternative %in% uses_electricity ~ pexp_hpelec_c,
         TRUE ~ 0
       ),
       gas_rise_na = if_else(alternative == "Gasheizung", pexp_gas_na, 0),
       oil_rise_na = if_else(alternative == "Ölheizung", pexp_oil_na, 0),
       pellet_rise_na = if_else(alternative == "Pelletheizung", pexp_pellet_na, 0),
-      hpelec_rise_na = if_else(alternative == "Wärmepumpe", pexp_hpelec_na, 0),
-      hybrid_rise_na = if_else(alternative == "Hybridheizung", pexp_hybrid_na, 0)
+      hpelec_rise_na = if_else(alternative %in% uses_electricity,
+                               pexp_hpelec_na, 0)
     )
 }
 
@@ -258,7 +247,7 @@ attribute_changes <- list(
 )
 # Prices from the 25th to the 75th percentile (Max, 2026-10-29), so that the
 # terms compare on one scale. A fuel moves every technology that uses it:
-# electricity the heat pump and the hybrid, gas the gas heating and the hybrid.
+# electricity the heat pump and the hybrid, gas only the gas heating.
 price_changes <- list(
   price_gas = list(from = list(price_gas_kwh = price_q25[["gas"]]),
                    to = list(price_gas_kwh = price_q75[["gas"]])),
@@ -268,10 +257,17 @@ price_changes <- list(
                    to = list(price_oil_kwh = price_q75[["oil"]])),
   price_pellet = list(from = list(price_pellet_kwh = price_q25[["pellet"]]),
                       to = list(price_pellet_kwh = price_q75[["pellet"]])),
-  price_na_gas = list(to = list(price_gas_kwh = NA_real_)),
-  price_na_hpelec = list(to = list(price_hpelec_kwh = NA_real_)),
-  price_na_oil = list(to = list(price_oil_kwh = NA_real_)),
-  price_na_pellet = list(to = list(price_pellet_kwh = NA_real_))
+  # Not reporting a price against reporting the mean. `from` is given, so that
+  # over observed experts it is the same for every expert, whatever they answered
+  # (docs/results_contract.md); at the reference expert it is `at` anyway.
+  price_na_gas = list(from = list(price_gas_kwh = price_mean[["gas"]]),
+                      to = list(price_gas_kwh = NA_real_)),
+  price_na_hpelec = list(from = list(price_hpelec_kwh = price_mean[["hpelec"]]),
+                         to = list(price_hpelec_kwh = NA_real_)),
+  price_na_oil = list(from = list(price_oil_kwh = price_mean[["oil"]]),
+                      to = list(price_oil_kwh = NA_real_)),
+  price_na_pellet = list(from = list(price_pellet_kwh = price_mean[["pellet"]]),
+                         to = list(price_pellet_kwh = NA_real_))
 )
 expectation_changes <- list(
   expects_rise_gas = list(from = list(pexp_gas_rise = 0),
@@ -282,10 +278,25 @@ expectation_changes <- list(
                           to = list(pexp_oil_rise = 1)),
   expects_rise_pellet = list(from = list(pexp_pellet_rise = 0),
                              to = list(pexp_pellet_rise = 1)),
-  rise_na_gas = list(to = list(pexp_gas_rise = NA_real_)),
-  rise_na_hpelec = list(to = list(pexp_hpelec_rise = NA_real_)),
-  rise_na_oil = list(to = list(pexp_oil_rise = NA_real_)),
-  rise_na_pellet = list(to = list(pexp_pellet_rise = NA_real_))
+  # Leaving Q17 blank against expecting no rise, with `from` for the same reason
+  rise_na_gas = list(from = list(pexp_gas_rise = 0),
+                     to = list(pexp_gas_rise = NA_real_)),
+  rise_na_hpelec = list(from = list(pexp_hpelec_rise = 0),
+                        to = list(pexp_hpelec_rise = NA_real_)),
+  rise_na_oil = list(from = list(pexp_oil_rise = 0),
+                     to = list(pexp_oil_rise = NA_real_)),
+  rise_na_pellet = list(from = list(pexp_pellet_rise = 0),
+                        to = list(pexp_pellet_rise = NA_real_))
+)
+# All expected rises together, as the answers are correlated; for the effects over
+# observed experts only, so that the model rule's effects stay as they were
+joint_changes <- list(
+  expects_rise_all = list(
+    from = list(pexp_gas_rise = 0, pexp_hpelec_rise = 0, pexp_oil_rise = 0,
+                pexp_pellet_rise = 0),
+    to = list(pexp_gas_rise = 1, pexp_hpelec_rise = 1, pexp_oil_rise = 1,
+              pexp_pellet_rise = 1)
+  )
 )
 expert_changes <- list(
   heat_pump_at_home = list(from = list(heat_pump_at_home = 0),
@@ -319,7 +330,7 @@ results_m4 <- compute_ames(
 # (4p) adds each technology's price per kWh and its dummy for a price not
 # reported
 formula_m4p <- chosen ~ price + gas_price_na + oil_price_na + pellet_price_na +
-  hpelec_price_na + hybrid_price_na |
+  hpelec_price_na |
   1 + is_hvac + is_sweep +
   age_60 + income_low + heating_oil + replacement_urgent + built_2000 +
   demand_70 + demand_200 + floor_heating
@@ -339,13 +350,12 @@ results_m4p <- compute_ames(
 # coefficient. It starts from (4p), so that it cannot end below it.
 # A dummy that is the same for every expert of the sample (all answered for that
 # fuel, or none) has no coefficient, which make_regressors() cannot know:
-# fit_mixed_logit() then stops and names it. Delete its term from this formula
-# and from that of (6pe), and its change (rise_na_<fuel>) from the lists above:
-# the change would still move the expected rise.
+# fit_mixed_logit() then stops and names it. Delete its term from this formula,
+# and its change (rise_na_<fuel>) from the lists above: the change would still
+# move the expected rise.
 formula_m4pe <- chosen ~ price + gas_price_na + oil_price_na + pellet_price_na +
-  hpelec_price_na + hybrid_price_na +
-  expects_rise + gas_rise_na + oil_rise_na + pellet_rise_na + hpelec_rise_na +
-  hybrid_rise_na |
+  hpelec_price_na +
+  expects_rise + gas_rise_na + oil_rise_na + pellet_rise_na + hpelec_rise_na |
   1 + is_hvac + is_sweep +
   age_60 + income_low + heating_oil + replacement_urgent + built_2000 +
   demand_70 + demand_200 + floor_heating +
@@ -364,31 +374,9 @@ results_m4pe <- compute_ames(
   profiles = EXPERT_GROUPS
 )
 
-# (6pe) is (4pe) with one set of random constants per group, each with its own
-# means and covariance matrix, as the robustness check of the main specification
-# (Max, 2026-10-29). It starts where it predicts the same as (4pe).
-formula_m6pe <- chosen ~ price + gas_price_na + oil_price_na + pellet_price_na +
-  hpelec_price_na + hybrid_price_na +
-  expects_rise + gas_rise_na + oil_rise_na + pellet_rise_na + hpelec_rise_na +
-  hybrid_rise_na |
-  0 + is_hvac + is_sweep + is_adviser +
-  age_60 + income_low + heating_oil + replacement_urgent + built_2000 +
-  demand_70 + demand_200 + floor_heating +
-  hdd_c + heat_pump_at_home_c
-m6pe <- fit_mixed_logit("m6pe", formula_m6pe, choice_data, reference, est_dir,
-                        group_constants = c("is_hvac", "is_sweep", "is_adviser"),
-                        start_from = m4pe)
-results_m6pe <- post_estimation(
-  m6pe, est_dir,
-  label = paste("Random constants by occupational group, correlated,",
-                "with prices and expert characteristics")
-)
-results_m6pe <- compute_ames(
-  results_m6pe, make_regressors, name = "neutral", at = at_neutral,
-  changes = c(attribute_changes, price_changes, expectation_changes,
-              expert_changes),
-  profiles = EXPERT_GROUPS
-)
+# (6pe), the robustness check with random constants by group, is left out in this
+# arm for now (2026-11-12). To add it, copy its block from district_heating.R
+# without the terms of Fernwärme, and add it to cv_models and to the tests below.
 
 # Another reference state, for the same model: an expert with average
 # characteristics, at the share of each answer. Anything else works the same way,
@@ -407,13 +395,88 @@ results_m4pe <- compute_ames(
   changes = attribute_changes, profiles = EXPERT_GROUPS
 )
 
+# Effects over the observed experts (Max, 2026-11-12): every expert keeps their own
+# prices, expected rises, degree days and heat pump, each change is made to every
+# one of them in a household, and the changes in probability are averaged over the
+# experts, by group and pooled. `at` holds the household's vignette only.
+# `population` has to be the estimation sample: the experts with a decision. What a
+# call means, and how to vary it: docs/results_contract.md. The draws are those of
+# the reference expert (Max, 2026-11-12), so each call takes hours; a quick run
+# (config.R) for a first look.
+population_experts <- experts %>%
+  filter(resp_uid %in% decisions$resp_uid) %>%
+  select(resp_uid, expert_group, hdd, heat_pump_at_home,
+         ends_with("_kwh"), ends_with("_rise"))
+profiles_observed <- list("All experts" = list())
+for (group in EXPERT_GROUPS) {
+  profiles_observed[[group]] <- list(expert_group = group)
+}
+
+# Version B: the reference vignette and three other households (Max, 2026-11-12),
+# each with the same changes, so that the effects can be read across households.
+# An attribute change goes from the household's own level to the level it names:
+# demand_70 is 200 to 70 kWh at the inefficient household, 120 to 70 at the
+# reference. So a change to the level a household already has is 0 (heating_oil and
+# demand_200 at the inefficient household; built_2000, demand_70 and floor_heating
+# at the efficient one; age_60 and income_low at the old and poor one), and three
+# leave the design, as no house built in 2000 is unrenovated or has oil heating
+# (heating_oil and demand_200 at the efficient household, built_2000 at the
+# inefficient one). Each call saves a set of effects named observed_<household>.
+at_reference <- at_neutral[grepl("^att_", names(at_neutral))]
+at_inefficient <- at_reference
+at_inefficient$att_current_heating <- "Ölheizung"
+at_inefficient$att_heat_demand <- "200"
+at_efficient <- at_reference
+at_efficient$att_build_year <- "2000"
+at_efficient$att_heat_demand <- "70"
+at_efficient$att_heat_distribution <- "eine Fußbodenheizung"
+at_old_poor <- at_reference
+at_old_poor$att_couple_age <- "Mitte 60"
+at_old_poor$att_income <- "unter 40.000 € brutto im Jahr"
+households <- list(reference = at_reference, inefficient = at_inefficient,
+                   efficient = at_efficient, old_poor = at_old_poor)
+changes_observed <- c(attribute_changes, price_changes, expectation_changes,
+                      expert_changes, joint_changes)
+for (household in names(households)) {
+  results_m4pe <- compute_ames(
+    results_m4pe, make_regressors, name = paste0("observed_", household),
+    at = households[[household]], changes = changes_observed,
+    profiles = profiles_observed, population = population_experts
+  )
+}
+
+# Version C: over every answer of the sample, so over the vignettes that the experts
+# saw and not one household. Every attribute change starts at the reference level,
+# so that each answer adds the change from that level to the one named, whatever
+# level it showed: the usual AME over the sample. With `to` alone, the answers
+# already at the named level would add an effect of 0. Some changes leave the
+# design for some answers: heating_oil and demand_200 in houses built in 2000,
+# built_2000 in houses with oil heating or at 200 kWh. The attributes only, as each
+# answer and change costs two states.
+attribute_changes_answers <- list()
+for (effect in names(attribute_changes)) {
+  variable <- names(attribute_changes[[effect]]$to)
+  attribute_changes_answers[[effect]] <- list(
+    from = at_neutral[variable],
+    to = attribute_changes[[effect]]$to
+  )
+}
+population_answers <- decisions %>%
+  select(resp_uid, vig_num, expert_group, hdd, heat_pump_at_home,
+         ends_with("_kwh"), ends_with("_rise"), starts_with("att_"))
+results_m4pe <- compute_ames(
+  results_m4pe, make_regressors, name = "answers", at = list(),
+  changes = attribute_changes_answers,
+  profiles = profiles_observed, population = population_answers
+)
+
 # 8. How the models compare ----------------------------------------------------
 # The fixed protocol: compare_models(), the rule at the top of its file. The sheet
 # `decision` of model_comparison.xlsx has one row per question. Every model is
 # cross-validated (Max, 2026-11-09): each is estimated five more times, on four
-# sessions, as a fold of (6pe) needs an estimated 3 to 4 GB per session. A quick
-# run (config.R) leaves the cross-validation out, and BIC decides instead.
-cv_models <- c("m4", "m4p", "m4pe", "m6pe")
+# sessions. A quick run (config.R) leaves the cross-validation out, and BIC
+# decides instead.
+cv_models <- c("m4", "m4p", "m4pe")
 if (QUICK_RUN) {
   cv_models <- NULL
 }
@@ -422,14 +485,13 @@ comparison <- compare_models(
   tests = tribble(
     ~question,                                 ~smaller, ~larger,
     "Do the prices matter?",                   "m4",     "m4p",
-    "Do the expert characteristics matter?",   "m4p",    "m4pe",
-    "Do the covariances differ by group?",     "m4pe",   "m6pe"
+    "Do the expert characteristics matter?",   "m4p",    "m4pe"
   ),
   blocks = list(
     prices = c("price", "gas_price_na", "oil_price_na", "pellet_price_na",
-               "hpelec_price_na", "hybrid_price_na"),
+               "hpelec_price_na"),
     expected_rises = c("expects_rise", "gas_rise_na", "oil_rise_na",
-                       "pellet_rise_na", "hpelec_rise_na", "hybrid_rise_na")
+                       "pellet_rise_na", "hpelec_rise_na")
   ),
   final_model = "m4pe",
   ame_name = "neutral",
