@@ -41,7 +41,10 @@ source("tests/selftest.R")                       # checks on the result
 source("R/run_summary_statistics.R")             # the full sample, with response rates
 source("R/estimation/district_heating.R")        # sample, summary statistics, models, comparison
 source("R/estimation/no_district_heating.R")     # the same for the other arm
+source("R/check_results.R")                      # a text summary of every run, to share for checking
 ```
+
+`R/check_results.R` writes `check_results.txt` to the output folder: for every estimation folder it finds, each model's formula, fit, convergence and coefficients, the comparison, and every set of effects with its checks, side by side. It needs no change when the estimation scripts change. It prints aggregates only, with anything that rests on fewer than 10 experts shown as `<10`, so the file can be shared with someone who has no access to the secure drive.
 
 Open `energy_expert_survey.Rproj` first, or run `Rscript <file>` from this folder. Requires R 4.6.2. The decks need `pdflatex` (MiKTeX) on R's PATH: if `Sys.which("pdflatex")` is empty, the run skips them with a message, and the rest runs. A re-run reloads every model, result and set of summary statistics whose inputs have not changed, so changing one model re-estimates that model only.
 
@@ -125,6 +128,7 @@ R/setup.R                      packages, figure settings, sources all functions
 R/run_cleaning.R               step 1, runs R/cleaning/
 R/run_summary_statistics.R     step 2, the full sample
 R/estimation/                  step 3, one script per data set; these are the files to edit
+R/check_results.R              after a run, a text summary of every estimation folder, to share
 R/functions/                   the estimation functions, labels and colours, table and figure helpers
 R/summary_statistics/          one function per block of the summary statistics, and the deck
 R/geodata/                     builds the postcode lookup, once
