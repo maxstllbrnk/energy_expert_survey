@@ -22,11 +22,15 @@ before not completed, then the highest page, then the one started first.
 | `price_<fuel>_treatment` | chr | `blank`, `as reported`, `euro`, `per litre or kg`, `euro and per litre or kg`, `not usable` |
 | `pexp_<fuel>_rise` | dbl | 1 if the expert expects the price to rise, 0 if not, `NA` if blank |
 | `own_heating` | chr | answer of Q20, `Keine Angabe` if left blank; `NA` for everyone who stopped before Q20 and did not answer it |
+| `own_heating_group` | chr | `own_heating` in four groups (Max, 2026-11-14): `Heat pump`; `Other renewable` (pellets, district heating, hybrid); `Conventional` (gas, oil); `Other or not stated` (`Sonstiges`, `Keine Angabe`, and everyone who stopped before Q20) |
 | `heat_pump_at_home` | dbl | 1 if a heat pump heats the expert's home, else 0; `NA` for everyone who stopped before Q20 |
+| `hp_course` | dbl | 1 if the expert completed a course on heat pumps, or as an electrician for heat pumps, in the last three years (Q24), else 0 (proposed by Claude, agreed by Max, 2026-11-14); a blank counts as no, also for everyone who stopped before Q24 (Max, 2026-11-14) |
+| `hp_share_installed`, `hp_share_recommended` | dbl | the heat pumps' share in percent of the expert's own systems of the past year (Max, 2026-11-14): for HVAC installers of those installed in 2025 (`mix25_hp_filled`, Q11b), for energy advisers and chimney sweeps of the recommendations of the last year (`adv_share_hp_filled`, Q10b); `NA` for the other group and where the question was not answered |
 | `hdd` | dbl | heating degree days of the expert's NUTS3 region in `HDD_YEAR`; `NA` without `nuts3` |
 | `tp_score`, `risk_score` | dbl | staircase score in (0, 1); also `_cell`, `_levels`, `_complete`. z-scores depend on the sample: compute them in the script |
-| `dem_birthyear_clean`, `dem_training_year_clean`, `firm_employees_clean`, `adv_households_clean`, `co2_est_low_clean`, `co2_est_high_clean` | dbl | the answer after the outlier rule, over everyone who answered, in this order: an answer outside the valid range is impossible (years 1920 to 2010 and 1930 to 2026; the others below 0); a carbon range whose lower end lies above its upper end loses both ends; the counts and carbon prices lose the 0.5% tails, the years do not |
+| `dem_birthyear_clean`, `dem_training_year_clean`, `firm_employees_clean`, `adv_households_clean`, `co2_est_low_clean`, `co2_est_high_clean` | dbl | the answer after the outlier rule, over everyone who answered, in this order: an answer outside the valid range is impossible (years 1920 to 2010 and 1930 to 2026; the others below 0); a carbon range whose lower end lies above its upper end loses both ends; the counts and carbon prices lose the 0.5% tails, the years do not; a training completed before the age of 15 (`TRAINING_MIN_AGE`) loses its year (Max, 2026-11-14) |
 | `age` | dbl | `SURVEY_YEAR` minus `dem_birthyear_clean` |
+| `years_since_training` | dbl | `SURVEY_YEAR` minus `dem_training_year_clean` (Max, 2026-11-14) |
 | `interview_minutes` | dbl | LimeSurvey's total time; for a break-off, the time until the break-off. Not trimmed: use medians and quartiles |
 | `adv_share_<tech>_filled`, `mix25_<tech>_filled` | dbl | share of Q10b and Q11b for an expert who gave shares, 0 where left blank; `NA` for the others, and for an expert with a share of the question outside 0 to 100. `<tech>`: `hp`, `pellet`, `dh`, `gas`, `oil`, `hybrid`, `other` |
 
@@ -69,6 +73,9 @@ scripts can share one reference expert:
   `mean`, `q25`, `q75`
 - `expectations`: one row per fuel: `answered`, `share_rise`
 - `own_heating`: named vector, the share of each answer of Q20, `Keine Angabe` included
+- `own_heating_group`: named vector, the share of each of the four groups
+- `hp_course`: the share with a course on heat pumps
+- `covariates`: one list per variable, `age`, `years_since_training`, `hp_share_installed` (over the HVAC installers who answered), `hp_share_recommended` (over the advisers and sweeps who answered): `n`, `mean`, `q25`, `q75`
 - `hdd`: list: `year`, `n`, `mean`, `q25`, `q75`
 - `n_experts`, `date`
 

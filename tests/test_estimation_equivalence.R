@@ -1197,8 +1197,9 @@ check("start_from_common(): against fit_mixed_logit()",
 # make_regressors(): the rest would estimate.
 script_objects <- function(script) {
   wanted <- c("alternatives", "reference", "reference_values", "COP",
-              "prices", "expectations", "price_mean", "price_q25", "price_q75", "rise_share",
-              "heat_pump_share", "hdd_mean", "make_regressors", "at_neutral", "attribute_changes",
+              "prices", "price_mean", "price_q25", "price_q75", "hdd_mean",
+              "heating_group_share", "hp_course_share", "covariates", "expectation_category",
+              "make_regressors", "at_neutral", "attribute_changes",
               "price_changes", "expectation_changes", "expert_changes")
   objects <- new.env(parent = globalenv())
   for (expression in as.list(parse(script, encoding = "UTF-8", keep.source = FALSE))) {
@@ -1295,7 +1296,8 @@ for (arm_scripts in list(list(arm = "fw", script = "district_heating"),
     experts_old[[paste0("price_", fuel, "_lc")]] <- if_else(is.na(price), 0, log(price) - log(reference_values$prices$mean[k]))
     rise <- experts_old[[paste0("pexp_", fuel, "_rise")]]
     experts_old[[paste0("pexp_", fuel, "_na")]] <- if_else(is.na(rise), 1, 0)
-    experts_old[[paste0("pexp_", fuel, "_c")]] <- if_else(is.na(rise), 0, rise - reference_values$expectations$share_rise[k])
+    # The expected rise is no longer centred (Max, 2026-11-14)
+    experts_old[[paste0("pexp_", fuel, "_c")]] <- if_else(is.na(rise), 0, rise)
   }
   experts_old <- experts_old %>%
     mutate(heat_pump_at_home_old = heat_pump_at_home - reference_values$own_heating[["Wärmepumpe"]],
@@ -1358,8 +1360,11 @@ old_names <- function(names_new) {
 price_reference <- reference_values$prices
 price_quartiles <- reference_values$prices %>%
   select(fuel, q25, q75)
+# The expected rise is no longer centred (Max, 2026-11-14): its share is 0 for the
+# old code
 expert_reference <- list(
-  pexp = reference_values$expectations,
+  pexp = reference_values$expectations %>%
+    mutate(share_rise = 0),
   own_heating_share = reference_values$own_heating,
   hdd_year = reference_values$hdd$year,
   hdd_unit = 1000,
@@ -1379,6 +1384,10 @@ OLD_PRICES <- setdiff(c("price", paste0(OLD_PRICE_VARIABLES$name, "_price_na")),
                       HYBRID_TERMS_OLD)
 OLD_TERMS <- setdiff(c("expects_rise", paste0(OLD_EXPECTATION_VARIABLES$name, "_rise_na")),
                      HYBRID_TERMS_OLD)
+# The effects the old code does not have, by exact name (Max, 2026-11-14): year and
+# demand together, and a rise of more than 10%
+NEW_EFFECTS <- c("built_2000_demand_70",
+                 paste0("expects_large_rise_", c("gas", "hpelec", "dh", "oil", "pellet")))
 for (model_name in c("m4pe", "m6pe")) {
   results_file <- file.path(OUTPUT_DIR, "district_heating", model_name, "results.rds")
   if (!file.exists(results_file)) {
@@ -1468,6 +1477,9 @@ for (model_name in c("m4pe", "m6pe")) {
     for (k in seq_len(nrow(new_table))) {
       effect <- new_table$effect[k]
       outcome_name <- new_table$outcome[k]
+      if (effect %in% NEW_EFFECTS) {
+        next
+      }
       if (effect %in% ATTRIBUTE_DUMMIES$dummy) {
         row_from <- "base"
         row_to <- paste0("base|", effect)
@@ -1492,40 +1504,17 @@ for (model_name in c("m4pe", "m6pe")) {
   check(paste(model_name, "every old change is among the new effects"),
         length(setdiff(c(old_ids, ATTRIBUTE_DUMMIES$dummy), new_ames$table$effect)), 0.5)
   check(paste(model_name, "every new effect is an old change"),
-        length(setdiff(new_ames$table$effect, c(old_ids, ATTRIBUTE_DUMMIES$dummy))), 0.5)
+        length(setdiff(new_ames$table$effect,
+                       c(old_ids, ATTRIBUTE_DUMMIES$dummy, NEW_EFFECTS))), 0.5)
   cat(model_name, ":", n_compared, "effects compared\n")
   check(paste(model_name, "probabilities at the neutral state"), largest_baseline, TOLERANCE)
   check(paste(model_name, "effects"), largest_effect, TOLERANCE)
   check(paste(model_name, "standard errors"), largest_se, TOLERANCE)
 
-  # The script's other reference state, at the average expert, is the reference state
-  # of the old 01_run_specifications.R: the AMEs of its section 4.4
-  if (model_name == "m4pe") {
-    vignettes_at_mean <- as_tibble(REFERENCE_LEVELS) %>%
-      mutate(vignette = "reference")
-    for (k in seq_len(nrow(ATTRIBUTE_DUMMIES))) {
-      variation <- as_tibble(REFERENCE_LEVELS)
-      variation[[ATTRIBUTE_DUMMIES$attribute[k]]] <- ATTRIBUTE_DUMMIES$level[k]
-      vignettes_at_mean <- bind_rows(vignettes_at_mean, variation %>%
-                                       mutate(vignette = ATTRIBUTE_DUMMIES$dummy[k]))
-    }
-    vignettes_at_mean <- vignettes_at_mean %>%
-      mutate(hdd_c = 0, heat_pump_at_home = 0)
-    X_average <- design_by_profile(vignettes_at_mean, groups_old, c(constants, specification$regressors),
-                                   ATTRIBUTE_DUMMIES)
-    old_average <- ame_krinsky_robb(theta_old, draws_old, X_average, standard_draws, random_old,
-                                    outcomes, fixed_old)
-    joined_average <- old_average$table %>%
-      mutate(profile = labels_new[profile], effect = vignette) %>%
-      inner_join(results$ames$average$table, by = c("profile", "effect", "outcome"),
-                 suffix = c("_old", "_new"), relationship = "one-to-one")
-    stopifnot(nrow(joined_average) == nrow(old_average$table),
-              nrow(joined_average) == nrow(results$ames$average$table))
-    check("m4pe at the average expert: AMEs against ame_krinsky_robb()",
-          max(abs(joined_average$ame_old - joined_average$ame_new)), TOLERANCE)
-    check("m4pe at the average expert: standard errors",
-          max(abs(joined_average$se_old - joined_average$se_new)), TOLERANCE)
-  }
+  # The old reference state at the average expert (section 4.4 of the old
+  # 01_run_specifications.R) is no longer compared: the scripts dropped it, and with
+  # Q17 and the heating at home as answers, an expected rise or a heat pump at its
+  # share cannot be set (Max, 2026-11-14)
 }
 
 cat("\nEquivalence with the old functions: all checks passed\n")

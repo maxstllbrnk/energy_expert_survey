@@ -117,15 +117,25 @@ MIN_CONTACTS <- 30
 # so that each 2.5% tail rests on 125 draws. Fewer in a synthetic run, which only
 # tests the code, and in a quick run. N_WORKERS: the R sessions for the Hessian
 # and the Krinsky-Robb loop; lower it if something else runs on this computer.
+# N_DRAWS_PREDICTION_OTHER: the prediction draws of the sets of effects other than
+# the main one (Max, 2026-11-14). Against 20,000 draws, at standard deviations of
+# the constants as large as the models', 1,000 draws move an effect by at most
+# 0.16 percentage points and 5,000 by 0.05 (synthetic (4pe), 2026-11-14).
 if (USE_SYNTHETIC_DATA || QUICK_RUN) {
   N_DRAWS_MODEL <- 100
   N_DRAWS_PREDICTION <- 1000
+  N_DRAWS_PREDICTION_OTHER <- 1000
   N_DRAWS_KR <- 200
 } else {
   N_DRAWS_MODEL <- 1000
   N_DRAWS_PREDICTION <- 5000
+  N_DRAWS_PREDICTION_OTHER <- 1000
   N_DRAWS_KR <- 5000
 }
+# The main set of effects, which leads every results workbook and which
+# compare_models() reads: every expert of the sample at the reference vignette
+# (Max, 2026-11-14)
+MAIN_AMES <- "observed_reference"
 N_WORKERS <- parallel::detectCores()
 if (USE_SYNTHETIC_DATA) {
   N_WORKERS <- 2

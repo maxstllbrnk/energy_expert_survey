@@ -261,6 +261,20 @@ DESIGN_LEVELS <- tribble(
   "att_heat_distribution",  "Heat distribution",        "eine Fußbodenheizung",                           "Underfloor heating",             FALSE
 )
 
+# The design leaves out two kinds of house: none built in 2000 is unrenovated
+# (200 kWh/m²) or has oil heating, so its 128 vignettes are the 192 combinations of
+# the levels above without these 64. compute_ames() leaves a unit out of an effect
+# whose change takes it outside the design (Max, 2026-11-14).
+
+#' TRUE for each state inside the design of the vignettes
+#'
+#' @param states table with att_build_year, att_current_heating and att_heat_demand
+#' @return logical, one value per row
+is_in_design <- function(states) {
+  !(states$att_build_year == "2000" &
+      (states$att_current_heating == "Ölheizung" | states$att_heat_demand == "200"))
+}
+
 # 5. Colours -------------------------------------------------------------------
 # The original palette of the project (commit ced89b0)
 COLOUR_BAR <- "#2a78d6"         # every single-colour bar and histogram

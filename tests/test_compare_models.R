@@ -580,6 +580,35 @@ for (added_se in c(0.005, 0.02)) {
               comparison_added$decision$verdict_ame == "did not move")
   }
 }
+# ame_profiles: the AME step reads only the rows of these profiles (Max, 2026-11-14).
+# The added effect of 2 pp is the chimney sweeps', so without them it does not count.
+added_ses <- se_values
+added_ses[18] <- 0.005
+ames_added <- make_ames(added_values, added_ses, baseline_values)
+ames_added$at_means$table$effect[18] <- "only_in_this_model"
+ames_added$at_means$changes$only_in_this_model <- list(to = list(x_relevant = 1))
+set_ames("m_relevant", ames_added)
+comparison_profiles <- compare_models(
+  est_dir,
+  tests = tests %>% filter(larger == "m_relevant"),
+  ame_name = "at_means",
+  ame_profiles = c("Energy advisers", "HVAC installers"),
+  n_fresh_draws = 2,
+  n_workers = 2
+)
+stopifnot(comparison_profiles$decision$ame_rows_shared == 12,
+          is.na(comparison_profiles$decision$ame_added_rows_moved),
+          comparison_profiles$decision$proposal ==
+            "keep smaller as main; report larger as robustness")
+# A misspelled profile stops, instead of leaving the AME step without rows
+misspelled_message <- tryCatch({
+  compare_models(est_dir, tests = tests %>% filter(larger == "m_relevant"),
+                 ame_name = "at_means", ame_profiles = c("Energy advisors"),
+                 n_fresh_draws = 2, n_workers = 2)
+  "no error"
+}, error = function(e) conditionMessage(e))
+stopifnot(grepl("no profile of the set at_means is called Energy advisors",
+                misspelled_message, fixed = TRUE))
 # The same AMEs at another reference state: they are not compared. An effect that the
 # two models define differently: its rows are not compared.
 ames_other_state <- make_ames(ame_values + 0.005, se_values, baseline_values)

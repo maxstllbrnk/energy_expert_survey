@@ -34,7 +34,8 @@
 # The AMEs are those both models compute, and those only the larger model has,
 # which count as moving from 0, their value in the smaller model, if their 95%
 # Krinsky-Robb interval excludes 0 (Max, 2026-11-09): a larger model passes if its
-# new terms or its other effects move by ame_threshold.
+# new terms or its other effects move by ame_threshold. The estimation scripts read
+# the main set (MAIN_AMES in config.R) for the three groups (Max, 2026-11-14).
 # For models that do not nest each other: prefer a model if Vuong's test and
 # cross-validation (or BIC, as above) agree on it, otherwise data cannot decide.
 # A model that did not converge, or whose Hessian is not positive definite, never
@@ -320,6 +321,10 @@ p_text <- function(p_value) {
 #'                      coefficient per technology
 #' @param final_model   NULL, or the name of the model of the block tests
 #' @param ame_name      NULL, or the name of a set of AMEs in results$ames
+#' @param ame_profiles  NULL: every profile of the set; or the profiles the AME
+#'                      step reads, e.g. EXPERT_GROUPS, so that a pooled row, whose
+#'                      interval is narrower than its groups', does not let an
+#'                      added AME count on its own (Max, 2026-11-14)
 #' @param cv_models     NULL, or the names of the models to cross-validate
 #' @param ame_threshold an AME moving by less than this (0.01: 1 pp) is immaterial
 #' @param alpha         the level of the tests
@@ -327,8 +332,8 @@ p_text <- function(p_value) {
 #' @param n_workers     R sessions for the fresh draws and the folds
 #' @return the sheets, a named list of tibbles
 compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
-                           ame_name = NULL, cv_models = NULL, ame_threshold = 0.01,
-                           alpha = 0.05, n_fresh_draws = 12,
+                           ame_name = NULL, ame_profiles = NULL, cv_models = NULL,
+                           ame_threshold = 0.01, alpha = 0.05, n_fresh_draws = 12,
                            n_workers = N_WORKERS) {
   start_time <- Sys.time()
 
@@ -1183,6 +1188,24 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
           !identical(ames_smaller$at, ames_larger$at)) {
         next
       }
+      if (!is.null(ame_profiles)) {
+        # A misspelled profile would leave no rows, and the rule would then read as
+        # if no AME moved
+        unknown_profiles <- setdiff(ame_profiles, c(ames_smaller$table$profile,
+                                                    ames_larger$table$profile))
+        if (length(unknown_profiles) > 0) {
+          stop("ame_profiles: no profile of the set ", ame_name, " is called ",
+               paste(unknown_profiles, collapse = ", "))
+        }
+        ames_smaller$table <- ames_smaller$table %>%
+          filter(profile %in% ame_profiles)
+        ames_smaller$baseline <- ames_smaller$baseline %>%
+          filter(profile %in% ame_profiles)
+        ames_larger$table <- ames_larger$table %>%
+          filter(profile %in% ame_profiles)
+        ames_larger$baseline <- ames_larger$baseline %>%
+          filter(profile %in% ame_profiles)
+      }
       # A model has the effects of its terms, so the sets of effects can differ. An
       # effect that both have counts only if both define it alike; an effect of the
       # same name that the two define differently does not count at all.
@@ -1519,7 +1542,9 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
       "0; the rule counts the rows of both kinds of AME, not the baselines. A test ",
       "without ",
       "a row: a model does not have this set, or has it at another reference state ",
-      "(at)."
+      "(at).",
+      if (is.null(ame_profiles)) " Every profile of the set." else
+        paste0(" Only the profiles ", paste(ame_profiles, collapse = ", "), ".")
     )
   }
   sheets <- list(

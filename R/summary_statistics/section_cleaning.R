@@ -161,13 +161,16 @@ section_cleaning <- function(dirs) {
   trimmed[!outliers$is_trimmed] <- ""
   reversed <- fmt_int(outliers$reversed)
   reversed[!(outliers$variable %in% c("co2_est_low", "co2_est_high"))] <- ""
-  # In the order of the rule: impossible, reversed, trimmed
+  too_young <- fmt_int(outliers$too_young)
+  too_young[outliers$variable != "dem_training_year"] <- ""
+  # In the order of the rule: impossible, reversed, trimmed, before the age of 15
   outlier_cells <- tibble(
     label = latex_text(outliers$label),
     answered = fmt_int(outliers$answered),
     impossible = fmt_int(outliers$impossible),
     reversed = reversed,
     trimmed = trimmed,
+    too_young = too_young,
     used = fmt_int(outliers$used)
   )
   # tolower(): the label inside a sentence
@@ -193,12 +196,15 @@ section_cleaning <- function(dirs) {
       "lower end lies above its upper end loses both ends. Trimmed: below the ",
       setting_value("trim_lower_percent"), "% or above the ",
       setting_value("trim_upper_percent"), "% quantile of the remaining ",
-      "answers; the years are not trimmed. The shares of the ",
+      "answers; the years are not trimmed. Before age ",
+      setting_value("training_min_age"), ": a training completed before that age ",
+      "loses its year. The shares of the ",
       "technologies (Q10b, Q11b) should sum to 100 but do not for ", share_text,
       "; they are used as reported. A person with a share outside 0 to 100 has ",
       "none of that question (", outside_text, ")."
     )),
-    col_names = c("", "Answered", "Impossible", "Reversed", "Trimmed", "Used")
+    col_names = c("", "Answered", "Impossible", "Reversed", "Trimmed",
+                  paste("Before age", setting_value("training_min_age")), "Used")
   )
 
   # 5. The list of exhibits ----------------------------------------------------

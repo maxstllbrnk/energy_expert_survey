@@ -288,7 +288,11 @@ for (i in which(reached("time_crit_rank"))) {
 birth_year <- round(rnorm(n, 1970, 11))
 birth_year[sample(n, 8)] <- sample(c(65, 72, -1957, 197, 19700), 8, replace = TRUE)
 main$dem_birthyear <- blank_unless(birth_year, reached("time_dem_birthyear") & runif(n) > .05)
-training_year <- pmin(round(rnorm(n, 1995, 11)), 2026)
+# Training completed some 15 to 35 years after birth; for four persons before the
+# age of 15, which the cleaning sets to missing (Max, 2026-11-14)
+training_year <- pmin(birth_year + round(rnorm(n, 24, 4)), 2026)
+too_young <- sample(n, 4)
+training_year[too_young] <- birth_year[too_young] + 10
 training_year[sample(n, 6)] <- sample(c(95, 88, 1, 20255), 6, replace = TRUE)
 main$dem_training_year <- blank_unless(training_year, reached("time_dem_training_year") & runif(n) > .05)
 main$dem_education <- blank_unless(

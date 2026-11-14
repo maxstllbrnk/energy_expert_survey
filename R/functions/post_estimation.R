@@ -43,7 +43,9 @@ post_estimation <- function(model, est_dir, label = "", n_draws_kr = N_DRAWS_KR,
   model_dir <- file.path(est_dir, name)
   results_file <- file.path(model_dir, "results.rds")
   theta_hat <- coef(model)
-  fingerprint <- rlang::hash(list(theta_hat, n_draws_kr, h))
+  # The last element names how the sample hash is computed (since 2026-11-14 sorted
+  # the same way on every computer): results saved another way are computed again
+  fingerprint <- rlang::hash(list(theta_hat, n_draws_kr, h, "sample hash, radix sort"))
   if (!force && file.exists(results_file)) {
     saved_results <- readRDS(results_file)
     if (identical(saved_results$fingerprint, fingerprint)) {
@@ -238,7 +240,8 @@ post_estimation <- function(model, est_dir, label = "", n_draws_kr = N_DRAWS_KR,
     fit = fit,
     diagnostics = diagnostics,
     choice_counts = choice_counts,
-    sample_hash = rlang::hash(sort(prepared$experts)),
+    # method = "radix": the same order on every computer, whatever its language
+    sample_hash = rlang::hash(sort(prepared$experts, method = "radix")),
     ames = list(),
     n_draws_kr = n_draws_kr,
     fingerprint = fingerprint,
@@ -254,17 +257,19 @@ post_estimation <- function(model, est_dir, label = "", n_draws_kr = N_DRAWS_KR,
 }
 
 #' The results to read: one Excel workbook per model. The sheets to read come
-#' first, rounded; the long sheets follow with grey tabs and every digit, for
-#' reuse. Called by post_estimation() and compute_ames(); the file is rewritten
-#' each time.
+#' first; the long sheets follow with grey tabs and every digit, for reuse. Called
+#' by post_estimation() and compute_ames(); the file is rewritten each time.
 #'   overview                    the model, its fit and how it converged
 #'   coefficients_by_technology  one row per regressor, one column per technology
 #'   constants_sd, constants_correlations    of the random constants
-#'   pp_<name>                   one row per effect, one column per outcome, in
-#'                               percentage points; one per call of compute_ames()
-#'   effect_definitions          the reference state and the changes of each call
+#'   ame_<name>                  one per set of effects (compute_ames()), the main
+#'                               set (MAIN_AMES in config.R) first: per profile the
+#'                               probabilities at the baseline, then the effects,
+#'                               each with its Krinsky-Robb standard error and 95%
+#'                               interval; every digit kept, two shown
+#'   effect_definitions          what each set sets and changes
 #'   choice_counts               the recommendations in the sample
-#'   fit, coefficients, ame_<name>, baseline_<name>    the long sheets
+#'   fit, coefficients           the long sheets
 #'
 #' @param results the results, a list
 #' @return nothing; writes <results$folder>/results.xlsx
@@ -289,9 +294,11 @@ write_results_excel <- function(results) {
   sheet_guide <- paste0(
     "coefficients_by_technology: utility relative to ",
     outcome_labels[[results$reference]], ", estimate and standard error ",
-    "clustered by expert. pp_<name>: the probabilities at the reference state ",
-    "and the effects, in percentage points, with Krinsky-Robb standard errors. ",
-    "Grey tabs: every digit."
+    "clustered by expert. ame_<name>: one sheet per set of effects, the main set (",
+    MAIN_AMES, ") first; per profile the probabilities at the baseline in %, then ",
+    "the effects in percentage points, each with its Krinsky-Robb standard error ",
+    "and 95% percentile interval. effect_definitions: what each set sets and ",
+    "changes. Grey tabs: every digit."
   )
   overview <- tibble(
     item = c("Model", "Label", "Formula", "Reference outcome", "Experts",
@@ -378,49 +385,58 @@ write_results_excel <- function(results) {
                                             n_frozen = 3)
   )
 
-  # (d) Per call of compute_ames(): the probabilities at the reference state and
-  # the effects side by side, in percentage points, and what each effect changes
+  # (d) One sheet per set of effects (compute_ames()), the main set first: per
+  # profile the probabilities at the baseline, in %, then the effects, in
+  # percentage points, each with its Krinsky-Robb standard error and 95% percentile
+  # interval, and what each effect changes. Every digit kept, two shown; filters
+  # on. A blank effect left out every unit of its profile.
+  ame_names <- c(intersect(MAIN_AMES, names(results$ames)),
+                 setdiff(names(results$ames), MAIN_AMES))
+  number_format <- xl_num_format("0.00")
   definition_rows <- list()
-  for (ame_name in names(results$ames)) {
+  for (ame_name in ame_names) {
     ames <- results$ames[[ame_name]]
-    # Effects saved before n_experts existed have none
-    if (!"n_experts" %in% names(ames$table)) {
-      ames$table$n_experts <- NA_integer_
-      ames$baseline$n_experts <- NA_integer_
+    baseline_rows <- ames$baseline %>%
+      transmute(profile, effect = "Probability at the baseline", outcome,
+                experts = n_experts, answers = n_units,
+                estimate = 100 * probability, se = 100 * se,
+                ci_low = 100 * ci_low_kr, ci_high = 100 * ci_high_kr,
+                excludes_0 = NA_character_, p_from = NA_real_, p_to = NA_real_)
+    effect_rows <- ames$table %>%
+      transmute(profile, effect, outcome, experts = n_experts, answers = n_units,
+                estimate = 100 * ame, se = 100 * se,
+                ci_low = 100 * ci_low_kr, ci_high = 100 * ci_high_kr,
+                excludes_0 = if_else(ci_low_kr > 0 | ci_high_kr < 0, "yes", "no"),
+                p_from = 100 * p_from, p_to = 100 * p_to)
+    # Sorted by profile, the baseline first, then the effects in the order of the
+    # call, the outcomes in the order of the tables
+    profile_order <- unique(ames$baseline$profile)
+    effect_order <- c("Probability at the baseline", unique(ames$table$effect))
+    ame_sheet <- bind_rows(baseline_rows, effect_rows) %>%
+      mutate(profile_position = match(profile, profile_order),
+             effect_position = match(effect, effect_order),
+             outcome_position = match(outcome, outcomes)) %>%
+      arrange(profile_position, effect_position, outcome_position) %>%
+      mutate(outcome = unname(outcome_labels[outcome])) %>%
+      select(-profile_position, -effect_position, -outcome_position)
+    # A reference expert has no experts to count; over experts, an answer is an
+    # expert, so the column of answers stays only over the answers
+    if (is.null(ames$population)) {
+      ame_sheet <- ame_sheet %>%
+        select(-experts, -answers)
+    } else if (identical(ame_sheet$experts, ame_sheet$answers)) {
+      ame_sheet <- ame_sheet %>%
+        select(-answers)
     }
-    per_effect <- bind_rows(
-      ames$baseline %>%
-        transmute(profile, effect = "Probability at the reference state",
-                  outcome, value = probability, se, n_experts),
-      ames$table %>%
-        select(profile, effect, outcome, value = ame, se, n_experts)
+    decimal_columns <- intersect(c("estimate", "se", "ci_low", "ci_high", "p_from",
+                                   "p_to"), names(ame_sheet))
+    sheets[[paste0("ame_", ame_name)]] <- xl_sheet(
+      ame_sheet, cols = xl_col_spec(decimal_columns, format = number_format),
+      freeze = list(row = 1, col = 3), auto_colwidth = TRUE, autofilter = TRUE
     )
-    effect_names <- unique(per_effect$effect)
-    profile_names <- unique(per_effect$profile)
-    pp <- tibble(profile = rep(profile_names, each = length(effect_names)),
-                 effect = rep(effect_names, times = length(profile_names)))
-    for (outcome_name in outcomes) {
-      one_outcome <- per_effect %>%
-        filter(outcome == outcome_name)
-      positions <- match(paste(pp$profile, pp$effect),
-                         paste(one_outcome$profile, one_outcome$effect))
-      label <- outcome_labels[[outcome_name]]
-      pp[[label]] <- 100 * one_outcome$value[positions]
-      pp[[paste(label, "se")]] <- 100 * one_outcome$se[positions]
-    }
-    # With observed experts: how many each row averages over, after the effect
-    if (any(!is.na(per_effect$n_experts))) {
-      experts_of_row <- per_effect %>%
-        distinct(profile, effect, n_experts)
-      row_positions <- match(paste(pp$profile, pp$effect),
-                             paste(experts_of_row$profile, experts_of_row$effect))
-      pp <- pp %>%
-        mutate(experts = experts_of_row$n_experts[row_positions], .after = effect)
-    }
-    sheets[[paste0("pp_", ame_name)]] <- readable_sheet(pp, 2, n_frozen = 2)
 
     settings <- list()
-    settings[["reference state|at"]] <- ames$at
+    settings[["baseline|at"]] <- ames$at
     if (!is.null(ames$population)) {
       settings[["population|observed"]] <- ames$population
     }
@@ -474,11 +490,6 @@ write_results_excel <- function(results) {
   # (e) The long sheets
   sheets$fit <- long_sheet(fit)
   sheets$coefficients <- long_sheet(coefficient_table)
-  for (ame_name in names(results$ames)) {
-    ames <- results$ames[[ame_name]]
-    sheets[[paste0("ame_", ame_name)]] <- long_sheet(ames$table)
-    sheets[[paste0("baseline_", ame_name)]] <- long_sheet(ames$baseline)
-  }
   write_xlsx(sheets, file.path(results$folder, "results.xlsx"))
 }
 

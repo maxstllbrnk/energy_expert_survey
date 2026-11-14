@@ -23,11 +23,15 @@
 #   4. the last question answered
 #   5. the energy prices per kWh (Max, 2026-10-19, 2026-10-20 and 2026-11-09)
 #   6. the expected price rises (Max, 2026-10-27)
-#   7. the heating at home (Max, 2026-11-01 and 2026-11-09)
+#   7. the heating at home, and its four groups (Max, 2026-11-01, 2026-11-09 and
+#      2026-11-14)
 #   8. the heating degree days (Max, 2026-10-27)
 #   9. the time and risk preference scores
-#  10. the outlier rule, age and duration (Max, 2026-10-28 and 2026-11-09)
-#  11. the shares of the technologies (Max, 2026-10-29 and 2026-11-09)
+#  10. the outlier rule, a training completed before the age of 15, age and the
+#      years since training (Max, 2026-10-28, 2026-11-09 and 2026-11-14)
+#  11. the shares of the technologies, and the heat pump's share of the expert's
+#      group (Max, 2026-10-29, 2026-11-09 and 2026-11-14)
+#  12. courses on heat pumps (Max, 2026-11-14)
 # What depends on a sample or a model stays in the estimation scripts: centring,
 # the dummies for missing answers, the COP, the share of gas in the hybrid
 # heating, z-scores.
@@ -68,6 +72,19 @@ PEXP_RISE <- c("bis zu 10 % höher", "mehr als 10% höher")
 # Heating at home (Q20)
 OWN_HEATING_ANSWERS <- c("Wärmepumpe", "Pelletheizung", "Fernwärme", "Gasheizung",
                          "Ölheizung", "Hybridheizung", "Sonstiges")
+# ... and its four groups (Max, 2026-11-14). Conventional heating is the reference
+# of the models; "Sonstiges", a blank and an expert who never saw Q20 form a group
+# of their own.
+OWN_HEATING_GROUPS <- c(
+  "Wärmepumpe" = "Heat pump",
+  "Pelletheizung" = "Other renewable", "Fernwärme" = "Other renewable",
+  "Hybridheizung" = "Other renewable",
+  "Gasheizung" = "Conventional", "Ölheizung" = "Conventional",
+  "Sonstiges" = "Other or not stated", "Keine Angabe" = "Other or not stated"
+)
+
+# A training completed before this age cannot be read (Max, 2026-11-14)
+TRAINING_MIN_AGE <- 15
 
 # The outlier rule, over everyone who answered, so that an answer is kept or
 # removed in every table alike (Max, 2026-10-28 and 2026-11-09), in this order:
@@ -315,6 +332,17 @@ for (answer_level in c(OWN_HEATING_ANSWERS, "Keine Angabe")) {
   reference_own_heating[answer_level] <-
     mean(experts$own_heating[in_reference] == answer_level)
 }
+# own_heating_group: the four groups of OWN_HEATING_GROUPS (Max, 2026-11-14). An
+# expert who never saw Q20 (own_heating NA) counts as not stated. unname(): the
+# groups without the answers as names.
+experts <- experts %>%
+  mutate(own_heating_group = coalesce(unname(OWN_HEATING_GROUPS[own_heating]),
+                                      "Other or not stated"))
+reference_own_heating_group <- numeric(0)
+for (group_level in unique(OWN_HEATING_GROUPS)) {
+  reference_own_heating_group[group_level] <-
+    mean(experts$own_heating_group[in_reference] == group_level)
+}
 
 # 8. Heating degree days -------------------------------------------------------
 # Of the NUTS3 region of the expert's postcode in HDD_YEAR, from Eurostat. NA for
@@ -386,10 +414,21 @@ for (k in seq_along(OUTLIER_VARIABLES)) {
   outlier_counts$trimmed[k] <- sum(!is.na(possible[[variable]])) - sum(!is.na(values))
   outlier_counts$used[k] <- sum(!is.na(values))
 }
+# (d) A training completed before the age of TRAINING_MIN_AGE cannot be read: the
+# year of training goes (Max, 2026-11-14). After (a) to (c), so between valid years
+# only; without a valid year of birth the year of training stays.
+age_at_training <- experts$dem_training_year_clean - experts$dem_birthyear_clean
+is_too_young <- coalesce(age_at_training < TRAINING_MIN_AGE, FALSE)
+experts$dem_training_year_clean[is_too_young] <- NA
+is_training_row <- outlier_counts$variable == "dem_training_year"
+outlier_counts$too_young <- 0L
+outlier_counts$too_young[is_training_row] <- sum(is_too_young)
+outlier_counts$used[is_training_row] <- sum(!is.na(experts$dem_training_year_clean))
 print(outlier_counts)
 
 experts <- experts %>%
   mutate(age = SURVEY_YEAR - dem_birthyear_clean,
+         years_since_training = SURVEY_YEAR - dem_training_year_clean,
          interview_minutes = time_interview / 60)
 
 # 11. The shares of the technologies (Q10b, Q11b) -------------------------------
@@ -423,7 +462,30 @@ for (question in names(share_questions)) {
 }
 print(share_sums)
 
-# 12. The vignettes ------------------------------------------------------------
+# The heat pump's share of the expert's own systems of the past year (Max,
+# 2026-11-14): of those installed in 2025 for the HVAC installers (Q11b), of the
+# recommendations of the last year for the energy advisers and chimney sweeps
+# (Q10b). NA for the other group, and where the question was not answered. %in%:
+# FALSE also for an expert without a group.
+experts <- experts %>%
+  mutate(
+    hp_share_installed = if_else(expert_group %in% "HVAC installers",
+                                 mix25_hp_filled, NA_real_),
+    hp_share_recommended = if_else(
+      expert_group %in% c("Energy advisers", "Chimney sweeps"),
+      adv_share_hp_filled, NA_real_
+    )
+  )
+
+# 12. Courses on heat pumps (Q24) ----------------------------------------------
+# hp_course: 1 if the expert completed a course on heat pumps, or as an electrician
+# for heat pumps, in the last three years (proposed by Claude, agreed by Max,
+# 2026-11-14); a blank counts as no (Max, 2026-11-14), also for an expert who never
+# saw Q24
+experts <- experts %>%
+  mutate(hp_course = if_else(cpd_hp %in% "Ja" | cpd_hp_electrician %in% "Ja", 1, 0))
+
+# 13. The vignettes ------------------------------------------------------------
 # The vignettes of the attempts that stayed, without the expert who answered in
 # both arms. Every expert keeps six rows, also one who broke off before the
 # vignettes (the design is known either way); vig_rec is NA where the vignette
@@ -435,15 +497,35 @@ vignettes <- vignettes_long %>%
   arrange(resp_uid, vig_num)
 check_unique(vignettes, c("resp_uid", "vig_num"))
 
-# 13. Write --------------------------------------------------------------------
+# 14. Write --------------------------------------------------------------------
 # The reference values: aggregates of the completed questionnaires of the three
 # groups in both arms. The estimation scripts centre at them and take their
 # changes from them, so that both arms share one reference expert (Max,
-# 2026-11-09).
+# 2026-11-09). The expert's covariates of the models (Max, 2026-11-14): the mean and
+# quartiles of each over the reference experts who answered, the heat pump's shares
+# within the groups that answered each question.
+reference_covariates <- list()
+for (variable in c("age", "years_since_training", "hp_share_installed",
+                   "hp_share_recommended")) {
+  values <- experts[[variable]][in_reference]
+  n_answered <- sum(!is.na(values))
+  if (n_answered < MIN_N) {
+    stop("Only ", n_answered, " answers of ", variable, ": fewer than ", MIN_N,
+         " behind its mean and quartiles")
+  }
+  quartiles <- quantile(values, c(0.25, 0.75), na.rm = TRUE, names = FALSE)
+  reference_covariates[[variable]] <- list(
+    n = n_answered, mean = mean(values, na.rm = TRUE),
+    q25 = quartiles[1], q75 = quartiles[2]
+  )
+}
 reference_values <- list(
   prices = reference_prices,
   expectations = reference_expectations,
   own_heating = reference_own_heating,
+  own_heating_group = reference_own_heating_group,
+  hp_course = mean(experts$hp_course[in_reference]),
+  covariates = reference_covariates,
   hdd = reference_hdd,
   n_experts = sum(in_reference),
   date = Sys.Date()

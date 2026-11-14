@@ -7,10 +7,10 @@
 #          the estimation script, and for effects over observed experts their
 #          source variables (`population`)
 # Outputs: results$ames[[name]]; results.rds and results.xlsx of the model
-# Checks : one value per variable in `at`; a change sets known variables; the
-#          population is the model's estimation sample; every coefficient has a
-#          column; one row per state x alternative; the probabilities are finite
-#          at every draw
+# Checks : one value per variable in `at`; a change sets known variables, the same
+#          in `from` and `to`; the population is the model's estimation sample;
+#          every coefficient has a column; one row per state x alternative; the
+#          probabilities are finite at every draw
 ################################################################################
 # The model is that of simulated_likelihood.R. For an expert drawn at random,
 # the probability of outcome j in state v (a vignette and an expert's
@@ -38,6 +38,13 @@
 #      every expert keeps their characteristics and every vignette that they
 #      answered. The effect over the vignettes of the design.
 #   D. as B with another `at`: the effect for another household.
+# An effect leaves out the units whose regressors its change does not move (a
+# household that already has the level a change names, a covariate that enters
+# only for another group) and those it takes outside the design of the vignettes
+# (is_in_design() in labels.R), as their effects would read as findings (Max,
+# 2026-11-14); with a population, by default, also the units whose own value of a
+# variable it sets is missing (exclude_na). n_units and n_experts say how many it
+# averages over; an effect that leaves out every unit of a profile is blank there.
 # Krinsky-Robb (Krinsky and Robb 1986) passes the uncertainty in theta through
 # it: the effect at every draw of N(theta_hat, V), with the same z_r throughout,
 # so that the spread reflects only the uncertainty in theta, given the units. The
@@ -64,9 +71,9 @@
 #'                        one row per state x alternative, with the column
 #'                        alternative. It keeps the columns it is given and
 #'                        does not use vig_rec.
-#' @param name            the name of this set of effects, at most 22 characters:
-#'                        the sheets ame_<name>, baseline_<name>, pp_<name>. A
-#'                        name no longer used stays in the results until
+#' @param name            the name of this set of effects, at most 27 characters:
+#'                        the sheet ame_<name> of results.xlsx. A name no longer
+#'                        used stays in the results until
 #'                        post_estimation(force = TRUE) starts them anew.
 #' @param at              source variables, a named list with one value each. Without
 #'                        a population the reference state, all of it. With a
@@ -74,14 +81,18 @@
 #'                        reference vignette; the rest is the unit's own.
 #' @param changes         named list, one element per effect. Each sets `to` and
 #'                        optionally `from`, named lists of source variables, each
-#'                        on top of the unit. Without `from`, an effect starts at the
-#'                        unit as it is (`at` without a population). Several
-#'                        variables may change together. The effect is P(to) -
-#'                        P(from), for every outcome. With a population and
-#'                        exclude_na, an effect leaves out the units whose own value
-#'                        of a variable that it sets is missing, unless it sets
-#'                        that variable to NA in `from` or `to`; n_experts of the
-#'                        table says how many it averages over.
+#'                        on top of the unit: `to` does not build on `from`, so a
+#'                        change with `from` sets the same variables on both sides.
+#'                        Without `from`, an effect starts at the unit as it is
+#'                        (`at` without a population). Several variables may change
+#'                        together. The effect is P(to) - P(from), for every
+#'                        outcome. It leaves out the units whose regressors it does
+#'                        not move or that it takes outside the design; with a
+#'                        population and
+#'                        exclude_na also the units whose own value of a variable
+#'                        that it sets is missing, unless it sets that variable to
+#'                        NA in `from` or `to`. n_units and n_experts of the table
+#'                        say how many it averages over.
 #' @param profiles        a character vector sets expert_group (without a
 #'                        population) or selects it (with one); a named list of
 #'                        lists sets (without a population) or selects (with one,
@@ -98,6 +109,10 @@
 #'                        of the model's estimation sample. FALSE for another
 #'                        population on purpose.
 #' @param n_draws         Halton draws over the random constants
+#' @param keep_draws      TRUE: save the Krinsky-Robb draws of the averages
+#'                        (`draws`), for differences between effects later. FALSE
+#'                        for sets other than the main one: at 5,000 draws they
+#'                        take about 70 MB per set over observed experts.
 #' @param n_workers       R sessions for the Krinsky-Robb loop
 #' @param force           TRUE: compute even if nothing changed
 #' @return results with results$ames[[name]] (docs/results_contract.md); saves
@@ -105,12 +120,12 @@
 compute_ames <- function(results, make_regressors, name, at, changes,
                          profiles = EXPERT_GROUPS, population = NULL,
                          exclude_na = TRUE, check_sample = TRUE,
-                         n_draws = N_DRAWS_PREDICTION,
+                         n_draws = N_DRAWS_PREDICTION, keep_draws = TRUE,
                          n_workers = N_WORKERS, force = FALSE) {
   start_time <- Sys.time()
-  if (nchar(name) > 22) {
-    stop("The name ", name, " makes a sheet name of more than 31 characters, ",
-         "Excel's limit: use at most 22")
+  if (nchar(name) > 27) {
+    stop("The name ", name, " makes a sheet name (ame_<name>) of more than 31 ",
+         "characters, Excel's limit: use at most 27")
   }
   # The effects of earlier calls come from the file, in case the script did not
   # keep what an earlier call returned: saving would otherwise lose them
@@ -170,8 +185,10 @@ compute_ames <- function(results, make_regressors, name, at, changes,
     if (nrow(unit_data) == 0 || !"resp_uid" %in% names(unit_data)) {
       stop("`population` needs rows and the column resp_uid")
     }
+    # method = "radix": the same order on every computer, whatever its language
     if (check_sample &&
-        !identical(rlang::hash(sort(unique(as.character(unit_data$resp_uid)))),
+        !identical(rlang::hash(sort(unique(as.character(unit_data$resp_uid)),
+                                    method = "radix")),
                    results$sample_hash)) {
       stop("The experts of the population are not the estimation sample of model ",
            results$name, ": use the experts of the estimation script, or ",
@@ -204,10 +221,15 @@ compute_ames <- function(results, make_regressors, name, at, changes,
   n_units <- nrow(unit_data)
 
   # (b) The effects: what they set, and the units they average over
-  # setNames(): the values, with these names
+  # setNames(): the values, with these names. Without the attributes of the design
+  # (e.g. in a test without vignettes) every state counts as inside it.
   effects <- names(changes)
   has_from <- setNames(logical(length(effects)), effects)
   included <- list()
+  has_design <- all(c("att_build_year", "att_current_heating", "att_heat_demand") %in%
+                      names(unit_data))
+  # The columns of make_regressors() that the coefficients of the model use
+  term_columns <- setdiff(unique(terms$column), "(Intercept)")
   for (effect in effects) {
     change <- changes[[effect]]
     not_allowed <- setdiff(names(change), c("from", "to"))
@@ -222,17 +244,24 @@ compute_ames <- function(results, make_regressors, name, at, changes,
            "population or the profiles: ", paste(unknown_columns, collapse = ", "))
     }
     has_from[[effect]] <- length(change[["from"]]) > 0
-    # NA on one side only would start (or end) every expert at their own answer,
-    # and the experts who did not answer would add an effect of 0 to the average
-    if (!is.null(population)) {
-      for (variable in union(names(change[["from"]]), names(change[["to"]]))) {
-        na_in_from <- anyNA(change[["from"]][[variable]])
-        na_in_to <- anyNA(change[["to"]][[variable]])
-        if ((na_in_from && is.null(change[["to"]][[variable]])) ||
-            (na_in_to && is.null(change[["from"]][[variable]]))) {
+    # Both sides are set on the unit itself: a variable that only one side sets
+    # would stay at the unit's own value on the other. setequal(): the same
+    # elements, in any order.
+    if (has_from[[effect]] &&
+        !setequal(names(change[["from"]]), names(change[["to"]]))) {
+      stop("The change ", effect, " sets other variables in `from` than in `to`: ",
+           "both sides are set on the unit itself, so both must set the same ",
+           "variables")
+    }
+    # NA in `to` without `from` would start every expert at their own answer, and
+    # the experts who did not answer would add an effect of 0 to the average. With
+    # `from`, both sides set the same variables, so no side sets NA alone.
+    if (!is.null(population) && !has_from[[effect]]) {
+      for (variable in names(change[["to"]])) {
+        if (anyNA(change[["to"]][[variable]])) {
           stop("The change ", effect, " sets ", variable, " to NA on one side only: ",
-               "over a population give the other side a value too (`from` or `to`), ",
-               "so that the effect is the same for every expert")
+               "over a population give `from` a value too, so that the effect is ",
+               "the same for every expert")
         }
       }
     }
@@ -245,7 +274,45 @@ compute_ames <- function(results, make_regressors, name, at, changes,
         }
       }
     }
-    included[[effect]] <- keep
+    # A unit that the change takes outside the design, or whose regressors it does
+    # not move, is left out (Max, 2026-11-14): its effect would be exactly 0 and
+    # read as a finding. The regressors stay put where the unit already has the
+    # level named, or where the variable enters the model only for another group
+    # or not at all (the regressors rather than the variables: Claude's proposal,
+    # 2026-11-14, open). The states at both ends, in the source variables.
+    states_from <- unit_data
+    for (variable in names(change[["from"]])) {
+      states_from[[variable]] <- change[["from"]][[variable]]
+    }
+    states_to <- unit_data
+    for (variable in names(change[["to"]])) {
+      states_to[[variable]] <- change[["to"]][[variable]]
+    }
+    if (has_design) {
+      keep <- keep & is_in_design(states_from) & is_in_design(states_to)
+    }
+    # The regressors of the units still kept, at both ends, in the same order;
+    # ame_row is the unit. %in% TRUE is FALSE also where == is NA.
+    units_kept <- which(keep)
+    is_moved <- rep(FALSE, n_units)
+    if (length(units_kept) > 0) {
+      states_from <- states_from[units_kept, ]
+      states_from$ame_row <- units_kept
+      states_to <- states_to[units_kept, ]
+      states_to$ame_row <- units_kept
+      regressors_from <- make_regressors(states_from) %>%
+        arrange(ame_row, alternative)
+      regressors_to <- make_regressors(states_to) %>%
+        arrange(ame_row, alternative)
+      for (column in term_columns) {
+        value_from <- regressors_from[[column]]
+        value_to <- regressors_to[[column]]
+        is_same <- (value_from == value_to) %in% TRUE |
+          (is.na(value_from) & is.na(value_to))
+        is_moved[regressors_from$ame_row[!is_same]] <- TRUE
+      }
+    }
+    included[[effect]] <- keep & is_moved
   }
 
   # Cells: profile x state, in the order of the draws saved. The states are the
@@ -411,7 +478,7 @@ compute_ames <- function(results, make_regressors, name, at, changes,
   # model predicts. The experts behind each cell and the setting that leaves
   # experts out enter too, as they are saved with the effects.
   fingerprint <- rlang::hash(list(results$fingerprint, at, changes, profiles,
-                                  exclude_na, n_draws, HALTON_PRIMES,
+                                  exclude_na, n_draws, keep_draws, HALTON_PRIMES,
                                   cell_experts, block_hashes))
   if (!force && identical(results$ames[[name]]$fingerprint, fingerprint)) {
     message("Model ", results$name, ": effects ", name,
@@ -565,50 +632,34 @@ compute_ames <- function(results, make_regressors, name, at, changes,
   effects_table <- bind_rows(table_rows)
   baseline_table <- bind_rows(baseline_rows)
 
-  # A change of a variable the model does not use gives exactly 0, which would
-  # read as a finding about that variable
-  moving_effects <- unique(effects_table$effect[which(effects_table$se > 0)])
+  # Blank in every profile: a change of a variable that the model does not use, or
+  # one that leaves out every unit
   empty_effects <- setdiff(effects, effects_table$effect[which(effects_table$n_units > 0)])
-  not_moving <- setdiff(effects, c(moving_effects, empty_effects))
-  if (length(not_moving) > 0) {
-    message("Model ", results$name, ": effects ", name, ": these changes move ",
-            "nothing in this model: ", paste(not_moving, collapse = ", "),
-            " (a variable it does not use, or a level the units already have)")
-  }
   if (length(empty_effects) > 0) {
-    message("Model ", results$name, ": effects ", name, ": no unit of any profile ",
-            "is included in: ", paste(empty_effects, collapse = ", "))
+    message("Model ", results$name, ": effects ", name, ": blank, as they leave out ",
+            "every unit (no regressor moves there, outside the design, or not ",
+            "answered): ", paste(empty_effects, collapse = ", "))
   }
-  # Which effects leave experts out of the average, and how many at most
-  # (exclude_na); n_experts of the table has the number for every profile
+  # Which effects leave experts out of the average, and how many at most;
+  # n_experts of the table has the number for every profile. A blank effect is said
+  # above. Only if some are left out: max() of nothing would warn.
   left_out <- effects_table %>%
     distinct(profile, effect, n_experts) %>%
     left_join(distinct(baseline_table, profile, n_experts_all = n_experts),
               by = "profile", relationship = "many-to-one") %>%
     mutate(n_left_out = n_experts_all - n_experts) %>%
-    filter(n_left_out > 0) %>%
-    group_by(effect) %>%
-    summarise(most = max(n_left_out))
+    filter(n_left_out > 0, n_experts > 0)
   if (nrow(left_out) > 0) {
+    # A count below the minimum cell is not printed (project profile)
+    most_left_out <- left_out %>%
+      group_by(effect) %>%
+      summarise(most = max(n_left_out)) %>%
+      mutate(shown = if_else(most < MIN_N, paste("fewer than", MIN_N),
+                             as.character(most)))
     message("Model ", results$name, ": effects ", name, ": experts left out of an ",
             "effect, at most: ",
-            paste0(left_out$effect, " (", left_out$most, ")", collapse = ", "))
-  }
-  # Over all the answers of the sample and with nothing set, the average
-  # probabilities are the shares of the recommendations, which a model with a
-  # constant for every outcome reproduces up to the simulation error
-  for (p in seq_len(n_profiles)) {
-    baseline_cell <- (p - 1) * n_labels + 1
-    if (length(at) == 0 && cell_units[baseline_cell] == results$fit$n_choices) {
-      observed <- as.numeric(results$choice_counts[outcomes]) / results$fit$n_choices
-      gap <- max(abs(estimates[baseline_cell, ] - observed))
-      if (gap > 0.02) {
-        message("Model ", results$name, ": effects ", name, ": over all ",
-                results$fit$n_choices, " answers the average probabilities differ ",
-                "from the observed shares by up to ", round(100 * gap, 1),
-                " percentage points (profile ", names(profile_settings)[p], ")")
-      }
-    }
+            paste0(most_left_out$effect, " (", most_left_out$shown, ")",
+                   collapse = ", "))
   }
 
   # (h) Save. Averages only: nothing at the level of experts or units
@@ -619,6 +670,9 @@ compute_ames <- function(results, make_regressors, name, at, changes,
       units = n_units,
       exclude_na = exclude_na
     )
+  }
+  if (!keep_draws) {
+    draws <- NULL
   }
   results$ames[[name]] <- list(
     table = effects_table,

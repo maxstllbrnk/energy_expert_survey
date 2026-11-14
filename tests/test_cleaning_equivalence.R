@@ -928,6 +928,17 @@ for (scenario in names(scenario_dirs)) {
   # 4.7 The outlier rule -------------------------------------------------------
   # The old rule over everyone who answered gives the new columns...
   old_outliers <- old_outlier_section(experts)
+  # ...with the rule of 2026-11-14 on top, as in step 06 (d): a training before
+  # the age of TRAINING_MIN_AGE is missing, and `used` counts what remains. So the
+  # excuse of 2026-11-09 below covers only what that decision changed; the rule
+  # itself is checked in section 5 (new rules).
+  old_age_at_training <- old_outliers$data$dem_training_year_clean -
+    old_outliers$data$dem_birthyear_clean
+  old_is_too_young <- coalesce(old_age_at_training < TRAINING_MIN_AGE, FALSE)
+  old_outliers$data$dem_training_year_clean[old_is_too_young] <- NA
+  is_old_training_row <- old_outliers$counts$variable == "dem_training_year"
+  old_outliers$counts$used[is_old_training_row] <-
+    sum(!is.na(old_outliers$data$dem_training_year_clean))
   for (variable in OLD_OUTLIER_VARIABLES) {
     column <- paste0(variable, "_clean")
     compared <- compare_values(compared, column,
@@ -1112,6 +1123,11 @@ rules_main$co2_est_low[carbon_rows] <- 90
 rules_main$co2_est_high[carbon_rows] <- 40
 oil_rows <- sample(which(is_kept & !is.na(rules_main$price_oil)), 2)
 rules_main$price_oil[oil_rows] <- c(1.1, 1.25)
+# The rule of 2026-11-14: a training completed before the age of 15 (the simulation
+# has four such persons too)
+training_rows <- sample(which(is_kept & !is.na(rules_main$dem_training_year) &
+                                between(rules_main$dem_birthyear, 1930, 2000)), 3)
+rules_main$dem_training_year[training_rows] <- rules_main$dem_birthyear[training_rows] + 10
 saveRDS(rules_main, file.path(new_rules_dir, "survey_main.rds"))
 saveRDS(stressed_long, file.path(new_rules_dir, "vignettes_long.rds"))
 CLEAN_DATA_DIR <- new_rules_dir
@@ -1144,6 +1160,42 @@ compared <- compare_values(compared, "new rules: oil up to 1.40 is euro per litr
                            c(11, 12.5), experts$price_oil_kwh[of_oil_person])
 compared <- compare_values(compared, "new rules: own_heating NA where Q20 not reached",
                            !is_q20_reached, is.na(experts$own_heating))
+
+# The rules and variables of 2026-11-14, against what the definitions say
+of_training_person <- match(rules_main$resp_uid[training_rows], experts$resp_uid)
+compared <- compare_values(compared, "new rules: a training before the age of 15 is missing",
+                           rep(TRUE, 3), is.na(experts$dem_training_year_clean[of_training_person]))
+birth_valid <- if_else(between(experts$dem_birthyear, 1920, 2010), experts$dem_birthyear, NA)
+training_valid <- if_else(between(experts$dem_training_year, 1930, 2026),
+                          experts$dem_training_year, NA)
+is_too_young_here <- coalesce(training_valid - birth_valid < 15, FALSE)
+compared <- compare_values(compared, "new rules: trainings before the age of 15, counted",
+                           sum(is_too_young_here),
+                           outlier_counts$too_young[outlier_counts$variable == "dem_training_year"])
+compared <- compare_values(compared, "new rules: years since training",
+                           if_else(is_too_young_here, NA, SURVEY_YEAR - training_valid),
+                           experts$years_since_training)
+group_expected <- case_when(
+  experts$own_heating == "Wärmepumpe" ~ "Heat pump",
+  experts$own_heating %in% c("Pelletheizung", "Fernwärme", "Hybridheizung") ~ "Other renewable",
+  experts$own_heating %in% c("Gasheizung", "Ölheizung") ~ "Conventional",
+  TRUE ~ "Other or not stated"
+)
+compared <- compare_values(compared, "new rules: the four groups of the heating at home",
+                           group_expected, experts$own_heating_group)
+course_expected <- as.numeric(coalesce(experts$cpd_hp == "Ja", FALSE) |
+                                coalesce(experts$cpd_hp_electrician == "Ja", FALSE))
+compared <- compare_values(compared, "new rules: a course on heat pumps, a blank as no",
+                           course_expected, experts$hp_course)
+is_hvac_expert <- coalesce(experts$expert_group == "HVAC installers", FALSE)
+is_recommending_expert <- coalesce(experts$expert_group %in% c("Energy advisers",
+                                                              "Chimney sweeps"), FALSE)
+compared <- compare_values(compared, "new rules: the heat pump share installed, HVAC only",
+                           if_else(is_hvac_expert, experts$mix25_hp_filled, NA),
+                           experts$hp_share_installed)
+compared <- compare_values(compared, "new rules: the heat pump share recommended, advisers and sweeps",
+                           if_else(is_recommending_expert, experts$adv_share_hp_filled, NA),
+                           experts$hp_share_recommended)
 results <- bind_rows(results, compared %>%
                        mutate(scenario = "new rules", .before = 1))
 
