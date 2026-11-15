@@ -66,7 +66,7 @@ To add a variable: one line in `make_regressors()`, one term in a formula, its r
 
 | Function | What it does |
 |---|---|
-| `fit_mixed_logit()` | Estimates your formula with `mlogit`. Keeps the fixes that a direct call would miss: the order of the random constants, starting values from a nested model, Halton primes by group, the restart after code 3, the re-evaluation at code 2. Stops before estimating, and names the term, if a term has missing values or no finite estimate |
+| `fit_mixed_logit()` | Estimates your formula with `mlogit`. Keeps the fixes that a direct call would miss: the order of the random constants, starting values from a nested model, Halton primes by group, the restart after code 2 or 3 (code 2 since 2026-11-15, as it can stop below the maximum), the re-evaluation at code 2. Stops before estimating, and names the term, if a term has missing values or no finite estimate |
 | `post_estimation()` | Standard errors clustered by expert, Krinsky-Robb draws, standard deviations and correlations of the constants, fit and diagnostics. Writes `results.rds` and `results.xlsx` |
 | `compute_ames()` | The change in every probability for any change, of attributes or covariates, for any profile, with Krinsky-Robb standard errors and percentile intervals: at one reference expert, or averaged over the observed experts or their answers (`population`), at any reference vignette (`at`). Four kinds of effect, one function: `docs/results_contract.md` |
 | `compare_models()` | The protocol below. Writes `model_comparison.xlsx` |

@@ -27,7 +27,10 @@ A quick run (`QUICK_RUN` in `config.R`) writes the same tree to `output_quick/`.
 
 Written and tested; see `R/functions/`. The fitted model has `$name` and `$fit_info`
 (`reference`, `outcomes`, `random`, `fixed_parameters`, `start_from`, `log_likelihood_start`,
-`n_draws`, `minutes`, `fingerprint`).
+`n_draws`, `minutes`, `fingerprint`, `restarts_at_code_2`). `restarts_at_code_2` marks a model
+estimated since `fit_mixed_logit()` restarts after code 2 as after code 3 (2026-11-15): a saved
+model without it that ended with code 2 is estimated again, and with it every model that starts
+from it; the others load.
 
 ## `results.rds`: a list
 

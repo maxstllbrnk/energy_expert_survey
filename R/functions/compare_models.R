@@ -214,7 +214,9 @@ fresh_log_likelihood <- function(set, theta, prepared, halton_sequences, primes,
 
 #' One fold of the cross-validation, on an R session of its own: estimate on the
 #' other folds from the full-sample estimates, then evaluate the held-out experts.
-#' Restarts after code 3 as fit_mixed_logit() does.
+#' Restarts after code 3 only; fit_mixed_logit() also restarts after code 2 since
+#' 2026-11-15, so a fold that stops with code 2 below its maximum is not restarted
+#' (whether the folds follow it is open).
 #'
 #' @param job list: model_name, fold, fingerprint; arguments of mlogit();
 #'   training_data, held_out_data
