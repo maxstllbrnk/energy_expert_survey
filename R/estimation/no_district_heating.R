@@ -23,7 +23,7 @@ est_dir <- file.path(OUTPUT_DIR, "no_district_heating")
 # What the sample is, in the notes of its tables and on its deck: change it with the
 # filters below
 sample_label <- paste("Experts who completed, without the district-heating option, with a",
-                      "group, age, year of training and heat pump share")
+                      "group, age and year of training")
 reference <- "Wärmepumpe"
 # Alphabetical: this order sets the order of the random constants, so their
 # Halton primes and the elements of L. Written out, as sort() depends on the
@@ -53,18 +53,20 @@ experts <- experts %>%
 sample_log <- bind_rows(sample_log,
                         count_sample(experts, "With a group", "resp_uid"))
 # The expert's covariates need an answer from every expert, as all models share one
-# sample (Max, 2026-11-14): age, the year training was completed, and the heat
-# pump's share of the question of their group (installed for HVAC installers,
-# recommended for advisers and sweeps)
+# sample (Max, 2026-11-14): age and the year training was completed. The heat
+# pump's share of their group is no longer required (Claude's proposal, agreed by
+# Max, 2026-11-15): Q10b was not asked of offices that ticked only engineering or
+# only "other", nor of advisers and sweeps with no household in Q10a
+# (docs/data_contract.md), so a missing share stays, at the mean with a dummy
+# (section 4). This widens the sample of every model by those experts. What it can
+# now hit: the stop of fit_mixed_logit() on the dummy of one technology
+# (hp_share_na:<technology>), if none of them recommends that technology; the deck
+# of section 3 covers them too.
 experts <- experts %>%
   filter(!is.na(age), !is.na(years_since_training))
 sample_log <- bind_rows(sample_log,
                         count_sample(experts, "With age and year of training",
                                      "resp_uid"))
-experts <- experts %>%
-  filter(!is.na(hp_share_installed) | !is.na(hp_share_recommended))
-sample_log <- bind_rows(sample_log,
-                        count_sample(experts, "With the heat pump share", "resp_uid"))
 # The answers of Q17 as text, so that a change can set any of them
 for (fuel in c("gas", "hpelec", "oil", "pellet")) {
   experts[[paste0("pexp_", fuel)]] <- as.character(experts[[paste0("pexp_", fuel)]])
@@ -148,7 +150,9 @@ make_regressors <- function(states) {
   # the past year in tens of percentage points, 0 at the mean of the group that
   # answered its question and 0 for the other group, and the chimney sweeps' own
   # slope. A course on heat pumps, 0 at its share: Claude's proposal, 2026-11-14,
-  # open.
+  # open. A share of the expert's group that is missing, as its question was not
+  # asked or not answered, is 0 too, with the dummy hp_share_na (Claude's
+  # proposal, agreed by Max, 2026-11-15).
   states <- states %>%
     mutate(
       age_60 = if_else(att_couple_age == "Mitte 60", 1, 0),
@@ -179,12 +183,14 @@ make_regressors <- function(states) {
         (years_since_training - covariates$years_since_training$mean) / 10,
       expert_age_c = (age - covariates$age$mean) / 10,
       hp_course_c = hp_course - hp_course_share,
+      own_hp_share = if_else(is_hvac == 1, hp_share_installed, hp_share_recommended),
+      hp_share_na = if_else(is.na(own_hp_share), 1, 0),
       hp_share_installed_c = if_else(
-        is_hvac == 1,
+        is_hvac == 1 & hp_share_na == 0,
         (hp_share_installed - covariates$hp_share_installed$mean) / 10, 0
       ),
       hp_share_recommended_c = if_else(
-        is_hvac == 0,
+        is_hvac == 0 & hp_share_na == 0,
         (hp_share_recommended - covariates$hp_share_recommended$mean) / 10, 0
       ),
       hp_share_recommended_sweep_c = hp_share_recommended_c * is_sweep
@@ -443,6 +449,15 @@ share_changes <- list(
   hp_share_recommended = list(
     from = list(hp_share_recommended = covariates$hp_share_recommended$q25),
     to = list(hp_share_recommended = covariates$hp_share_recommended$q75)
+  ),
+  # No share against the mean share of the group, which moves only the dummy. Read
+  # as "not asked Q10b (or Q11b), or no answer", not as an effect of the share
+  # (Claude's proposal, agreed by Max, 2026-11-15). `from` is given, as for a
+  # blank price.
+  hp_share_na = list(
+    from = list(hp_share_installed = covariates$hp_share_installed$mean,
+                hp_share_recommended = covariates$hp_share_recommended$mean),
+    to = list(hp_share_installed = NA_real_, hp_share_recommended = NA_real_)
   )
 )
 
@@ -459,8 +474,9 @@ share_changes <- list(
 # reference household. In every set, a heat pump share is blank for the groups
 # that did not answer its question: over the experts because their share is
 # missing, at the reference expert (neutral) because it moves none of their
-# regressors (Claude's proposal, 2026-11-14, open). Every change of section 6 sets
-# the same variables in `from` and `to`, so none stops on that.
+# regressors (Claude's proposal, 2026-11-14, open). Over the experts, it also
+# leaves out each expert whose own share is missing (2026-11-15). Every change of
+# section 6 sets the same variables in `from` and `to`, so none stops on that.
 at_reference <- at_neutral[grepl("^att_", names(at_neutral))]
 at_inefficient <- at_reference
 at_inefficient$att_current_heating <- "Ölheizung"
@@ -672,7 +688,8 @@ results_m4pe_6 <- post_estimation(
 )
 
 # Step 7: the heat pump's share of the past year, installed for HVAC installers and
-# recommended for advisers and sweeps, each with its own slope
+# recommended for advisers and sweeps, each with its own slope, and the dummy for a
+# missing share (2026-11-15), which the step's test adds with the slopes
 formula_m4pe_7 <- chosen ~ log_price_vs_gas +
   gas_price_na + oil_price_na + pellet_price_na + hpelec_price_na +
   expects_rise + expects_rise_large + expects_fall +
@@ -682,7 +699,7 @@ formula_m4pe_7 <- chosen ~ log_price_vs_gas +
   demand_70 + demand_200 + floor_heating + built_2000_x_demand_70 +
   hdd_c + heat_pump_at_home_c + renewable_at_home_c + other_at_home_c +
   years_since_training_c + expert_age_c + hp_course_c +
-  hp_share_installed_c + hp_share_recommended_c
+  hp_share_installed_c + hp_share_recommended_c + hp_share_na
 m4pe_7 <- fit_mixed_logit("m4pe_7", formula_m4pe_7, choice_data, reference, est_dir,
                           start_from = m4pe_6)
 results_m4pe_7 <- post_estimation(
@@ -700,7 +717,8 @@ formula_m4pe_8 <- chosen ~ log_price_vs_gas +
   demand_70 + demand_200 + floor_heating + built_2000_x_demand_70 +
   hdd_c + heat_pump_at_home_c + renewable_at_home_c + other_at_home_c +
   years_since_training_c + expert_age_c + hp_course_c +
-  hp_share_installed_c + hp_share_recommended_c + hp_share_recommended_sweep_c
+  hp_share_installed_c + hp_share_recommended_c + hp_share_na +
+  hp_share_recommended_sweep_c
 m4pe_8 <- fit_mixed_logit("m4pe_8", formula_m4pe_8, choice_data, reference, est_dir,
                           start_from = m4pe_7)
 results_m4pe_8 <- post_estimation(

@@ -42,9 +42,14 @@ The answers of `survey_main` by block: `firm_*` (Q0 to Q6a, with `plz`, `bundesl
 `wave`, `target_group`, `versandrunde`, `is_softlaunch`, `reached_vignettes`,
 `n_vignettes_answered`, `arm_conflict`.
 
-Routing, and so `NA` by design: Q0b only if not the owner; Q8 and Q10 only for firms with
-energy advice, engineering or chimney sweeping; Q11b and Q11c only for HVAC firms; Q18b only
-if the carbon price is known; Q24a only with other training. Soft-launch caveats: Q6 had no
+Routing, and so `NA` by design (the LimeSurvey logic file, checked 2026-11-15): Q0b only if
+not the owner; Q8 and Q10a only for firms that ticked energy advice or chimney sweeping in Q2,
+so not for offices that ticked only engineering or only "other", which count as energy
+advisers; Q10b only if Q10a is at least 1; Q11b only for HVAC firms, Q11c only with a share
+above 0 in Q11b; Q18b only if the carbon price is known; Q24a only with other training. So
+`hp_share_recommended` is missing for every adviser who is one only through engineering or
+"other", and for every adviser or sweep who advised no household on replacing a heating (or
+left Q10a blank). Soft-launch caveats: Q6 had no
 "bundesweit", Q7 was a different ranking task (`is_softlaunch`).
 
 ## `vignettes.rds`: one row per person x vignette, key `resp_uid` x `vig_num`

@@ -48,7 +48,7 @@ section_market <- function(experts, dirs) {
   check_listed_answers(market_rows, experts)
   market_notes <- paste(
     "Shares among the experts who answered. Q8 and Q10a: firms with energy",
-    "advice, engineering or chimney sweeping. Households advised on replacing the",
+    "advice or chimney sweeping. Households advised on replacing the",
     "heating, without negative answers and without the",
     paste0(100 * TRIM_QUANTILES[1], "% lowest and highest answers of all experts."),
     "Q7: the customer groups for energy services; in one soft-launch wave a ranking",
@@ -107,8 +107,9 @@ section_market <- function(experts, dirs) {
   # 2. The technologies, table -------------------------------------------------
   shares_notes <- paste(
     "Q10b: share of each technology among the firm's recommendations of heating",
-    "systems in the last year, asked of firms with energy advice, engineering or",
-    "chimney sweeping. Q11b: share among the heating systems the firm installed",
+    "systems in the last year, asked of firms with energy advice or chimney",
+    "sweeping that advised at least one household (Q10a). Q11b: share among the",
+    "heating systems the firm installed",
     "in 2025, asked of HVAC firms. In percent. A blank counts as 0 for an expert",
     "who gave other shares. As reported, also where the shares do not sum to 100.",
     "Each firm counts once: the mean is not weighted by the number of",
@@ -178,7 +179,8 @@ section_market <- function(experts, dirs) {
       if_else(group == ALL_EXPERTS, "main", "appendix"),
       note = paste(
         "Mean share among the firm's recommendations in the last year (Q10b, firms",
-        "with energy advice, engineering or chimney sweeping) and installations in",
+        "with energy advice or chimney sweeping that advised at least one household)",
+        "and installations in",
         "2025 (Q11b, HVAC firms). Each firm counts once. n: experts who gave",
         "shares. A bar of fewer than", MIN_N, "experts is left out."
       )

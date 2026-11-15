@@ -128,14 +128,22 @@ main$resp_is_owner <- blank_unless(draw_factor(n, c("Ja", "Nein"), c(.8, .2)), r
 main$resp_role <- blank_unless(rep("Mitarbeiter", n), reached("time_resp_role") & coalesce(main$resp_is_owner == "Nein", FALSE))
 
 # Q2, several ticks possible. A few experts submit the page without any tick, a few
-# fill in only "Sonstige".
+# fill in only "Sonstige". One adviser in five works in an engineering office that
+# does not tick energy advice, and so is not asked Q8 and Q10 (logic file,
+# 2026-11-15): every fifth row, without a random draw, so that every other answer
+# keeps the draws it had before. %%: the remainder of a division.
+is_engineering_office <- seq_len(n) %% 5 == 0
 main <- main %>%
   mutate(
     firm_cat_hvac = factor(if_else(true_group == "HVAC installers", "Ja", "Nicht Gewählt"), levels = TICK_LEVELS),
     firm_cat_chimney = factor(if_else(true_group == "Chimney sweeps", "Ja", "Nicht Gewählt"), levels = TICK_LEVELS),
-    # energy advice is ticked by every adviser and by some of the trades too
-    firm_cat_energyadvice = factor(if_else(true_group == "Energy advisers" | runif(n) < .15, "Ja", "Nicht Gewählt"), levels = TICK_LEVELS),
-    firm_cat_engineering = factor(if_else(runif(n) < .12, "Ja", "Nicht Gewählt"), levels = TICK_LEVELS),
+    # energy advice is ticked by the advisers outside engineering offices and by
+    # some of the trades too
+    firm_cat_energyadvice = factor(if_else((true_group == "Energy advisers" & !is_engineering_office) |
+                                             (true_group != "Energy advisers" & runif(n) < .15),
+                                           "Ja", "Nicht Gewählt"), levels = TICK_LEVELS),
+    firm_cat_engineering = factor(if_else((true_group == "Energy advisers" & is_engineering_office) | runif(n) < .12,
+                                          "Ja", "Nicht Gewählt"), levels = TICK_LEVELS),
     firm_cat_other = NA_character_
   )
 no_tick <- runif(n) < .01
@@ -149,7 +157,9 @@ for (column in c("firm_cat_hvac", "firm_cat_chimney", "firm_cat_energyadvice", "
   main[[column]] <- blank_unless(main[[column]], is_at_q2)
 }
 answered_shk <- coalesce(main$firm_cat_hvac == "Ja", FALSE)
-answered_advice <- coalesce(main$firm_cat_energyadvice == "Ja" | main$firm_cat_chimney == "Ja" | main$firm_cat_engineering == "Ja", FALSE)
+# Q8 and Q10a: firms with energy advice or chimney sweeping, not engineering offices
+# (logic file, 2026-11-15)
+answered_advice <- coalesce(main$firm_cat_energyadvice == "Ja" | main$firm_cat_chimney == "Ja", FALSE)
 
 main$firm_employees <- blank_unless(round(exp(rnorm(n, 1.2, 1.1))), reached("time_firm_employees"))
 main$firm_employees[sample(n, 3)] <- 250000
@@ -221,7 +231,23 @@ for (service in names(SERVICE_LABELS)) {
   main[[service]] <- blank_unless(draw_factor(n, TICK_LEVELS, c(.5, .5)), reached("time_svc") & answered_advice)
 }
 main$adv_households <- blank_unless(round(exp(rnorm(n, 3.5, 1.1))), reached("time_adv_households") & answered_advice)
-main$adv_households[sample(n, 2)] <- 900000
+# Q10a: some advised no household, some leave it blank, in fixed rows without a
+# random draw (as the engineering offices above). Two answers far out, for the
+# outlier rule of step 06, among those who answered.
+main$adv_households[seq_len(n) %% 7 == 1 & !is.na(main$adv_households)] <- 0
+main$adv_households[seq_len(n) %% 20 == 2] <- NA
+outlier_rows <- sample(n, 2)
+outlier_rows <- outlier_rows[!is.na(main$adv_households[outlier_rows])]
+# a draw on an expert without an answer moves to the first expert with at least
+# one household, so that two answers always lie far out
+answered_rows <- setdiff(which(main$adv_households >= 1), outlier_rows)
+outlier_rows <- c(outlier_rows, answered_rows)[1:2]
+main$adv_households[outlier_rows] <- 900000
+# Q10b only with at least one household in Q10a (logic file, 2026-11-15)
+asked_q10b <- answered_advice & coalesce(main$adv_households >= 1, FALSE)
+for (suffix in share_suffixes) {
+  main[[paste0("adv_share_", suffix)]][!asked_q10b] <- NA
+}
 
 # 6. Staircases ----------------------------------------------------------------
 # Every expert walks down one branch, up to the last page they submitted. The time
@@ -317,7 +343,7 @@ routes <- list(
   time_resp_role = !is.na(main$resp_role),
   time_mix25 = answered_shk, time_brand_top1 = answered_shk,
   time_svc = answered_advice, time_adv_households = answered_advice,
-  time_adv_share = answered_advice,
+  time_adv_share = asked_q10b,
   time_co2_est = coalesce(main$co2_heard == "Ja", FALSE),
   time_cpd_other_text = !is.na(main$cpd_other_text)
 )
