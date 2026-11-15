@@ -153,6 +153,16 @@ TECHNOLOGY_LABELS <- c(
   "Fernwärme" = "District heating",
   "Keine Empfehlung" = "No recommendation"
 )
+# The outcomes of the models, in the order of the columns of results.xlsx: the
+# recommendations, and the gas and the oil heating as one outcome of the
+# *_grouped.R estimation scripts (Max, 2026-11-14; its name: Claude's proposal,
+# open). Apart from TECHNOLOGY_LABELS, as the tables of the recommendations give
+# each of those a row.
+OUTCOME_LABELS <- c(
+  TECHNOLOGY_LABELS[c("Wärmepumpe", "Pelletheizung", "Hybridheizung")],
+  "Gas- oder Ölheizung" = "Gas or oil heating",
+  TECHNOLOGY_LABELS[c("Gasheizung", "Ölheizung", "Fernwärme", "Keine Empfehlung")]
+)
 # The technologies of the heating at home (Q20)
 OWN_HEATING_LABELS <- c(
   "Wärmepumpe" = "Heat pump",

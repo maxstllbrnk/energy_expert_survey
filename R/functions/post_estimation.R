@@ -282,11 +282,11 @@ write_results_excel <- function(results) {
   # The outcomes in the order and with the names of the tables (labels.R); an
   # outcome without a label keeps its name. intersect(), setdiff(): the elements
   # in both, in the first only. setNames(): the values, with these names.
-  outcomes <- c(intersect(names(TECHNOLOGY_LABELS), results$outcomes),
-                setdiff(results$outcomes, names(TECHNOLOGY_LABELS)))
+  outcomes <- c(intersect(names(OUTCOME_LABELS), results$outcomes),
+                setdiff(results$outcomes, names(OUTCOME_LABELS)))
   outcome_labels <- setNames(outcomes, outcomes)
-  has_label <- outcomes %in% names(TECHNOLOGY_LABELS)
-  outcome_labels[has_label] <- TECHNOLOGY_LABELS[outcomes[has_label]]
+  has_label <- outcomes %in% names(OUTCOME_LABELS)
+  outcome_labels[has_label] <- OUTCOME_LABELS[outcomes[has_label]]
 
   # (a) The overview: fit, then how the estimation ended, then what is where.
   # str_squish(): one space between words, as deparse() breaks a long formula.
