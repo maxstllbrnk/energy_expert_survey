@@ -33,8 +33,7 @@
 #      group (Max, 2026-10-29, 2026-11-09 and 2026-11-14)
 #  12. courses on heat pumps (Max, 2026-11-14)
 # What depends on a sample or a model stays in the estimation scripts: centring,
-# the dummies for missing answers, the COP, the share of gas in the hybrid
-# heating, z-scores.
+# the dummies for missing answers, how the prices enter, z-scores.
 
 # 0. Settings ------------------------------------------------------------------
 

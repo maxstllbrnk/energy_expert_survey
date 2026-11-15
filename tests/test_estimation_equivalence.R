@@ -11,7 +11,8 @@
 #          start_from_common() and start_from_nested() the same starting values;
 #          add_regressors(), add_alternative_prices() and long_terms() the same
 #          regressors as make_regressors() of both scripts, with the hybrid's
-#          rows as the heat pump's (hybrid_as_heat_pump()); term_changes() of old
+#          rows as the heat pump's (hybrid_as_heat_pump()) and the price relative
+#          to gas from the old log price (log_price_vs_gas_old()); term_changes() of old
 #          01_run_term_effects.R the same effects as the changes of the script
 ################################################################################
 
@@ -1196,7 +1197,7 @@ check("start_from_common(): against fit_mixed_logit()",
 # On the synthetic cleaned data. From each script only its settings, its lists and
 # make_regressors(): the rest would estimate.
 script_objects <- function(script) {
-  wanted <- c("alternatives", "reference", "reference_values", "COP",
+  wanted <- c("alternatives", "reference", "reference_values",
               "prices", "price_mean", "price_q25", "price_q75", "hdd_mean",
               "heating_group_share", "hp_course_share", "covariates", "expectation_category",
               "make_regressors", "at_neutral", "attribute_changes",
@@ -1260,12 +1261,29 @@ hybrid_as_heat_pump <- function(choice_long, key) {
   is_hybrid <- choice_long$alternative == "Hybridheizung"
   is_heat_pump <- choice_long$alternative == "Wärmepumpe"
   stopifnot(identical(choice_long[[key]][is_hybrid], choice_long[[key]][is_heat_pump]))
-  for (term in c("price", "expects_rise", "hpelec_price_na", "hpelec_rise_na")) {
+  for (term in c("log_price", "expects_rise", "hpelec_price_na", "hpelec_rise_na")) {
     choice_long[[term]][is_hybrid] <- choice_long[[term]][is_heat_pump]
   }
   choice_long$hybrid_price_na <- NULL
   choice_long$hybrid_rise_na <- NULL
   choice_long
+}
+# Since 2026-11-15 the scripts price each technology relative to gas, in logs
+# (Claude's proposal, agreed by Max): log_price_vs_gas_old() computes that term from
+# the old code's log price, own row minus the gas heating's row of the same decision,
+# both 0 at the mean, and 0 for "Keine Empfehlung". The old code's COP (COP_OLD)
+# enters only its price in levels, which is no longer compared: in logs it cancels.
+COP_OLD <- c(radiators = 3, floor_heating = 3)
+log_price_vs_gas_old <- function(choice_long, key) {
+  gas_rows <- choice_long %>%
+    filter(alternative == "Gasheizung") %>%
+    select(all_of(c(key, "log_price"))) %>%
+    rename(log_price_gas = log_price)
+  choice_long %>%
+    left_join(gas_rows, by = key, relationship = "many-to-one") %>%
+    mutate(log_price_vs_gas = if_else(alternative == "Keine Empfehlung", 0,
+                                      log_price - log_price_gas)) %>%
+    select(-log_price_gas)
 }
 OLD_GROUPS <- c("HVAC installers" = "SHK-Handwerk", "Chimney sweeps" = "Schornsteinfeger",
                 "Energy advisers" = "Energieberater")
@@ -1311,13 +1329,14 @@ for (arm_scripts in list(list(arm = "fw", script = "district_heating"),
 
   decisions_wide <- decisions_old %>%
     add_regressors(ATTRIBUTE_DUMMIES) %>%
-    add_alternative_prices(objects$COP, HYBRID_GAS_SHARE_OLD)
+    add_alternative_prices(COP_OLD, HYBRID_GAS_SHARE_OLD)
   long_old <- decisions_wide %>%
     cross_join(tibble(alternative = factor(sort(outcomes_arm), levels = sort(outcomes_arm)))) %>%
     long_terms(price_variables, expectation_variables, reference_values$own_heating,
                OWN_HEATING_ANSWERS, outcomes_arm) %>%
     arrange(chid, alternative) %>%
-    hybrid_as_heat_pump("chid")
+    hybrid_as_heat_pump("chid") %>%
+    log_price_vs_gas_old("chid")
   long_new <- objects$make_regressors(decisions_old) %>%
     arrange(chid, alternative)
 
@@ -1326,11 +1345,14 @@ for (arm_scripts in list(list(arm = "fw", script = "district_heating"),
                               paste(long_new$chid, long_new$alternative))), 0.5)
   check(paste(arm_scripts$arm, "alternatives are alphabetical on this computer"),
         as.numeric(!identical(sort(outcomes_arm), objects$alternatives)), 0.5)
-  same_names <- c(ATTRIBUTE_DUMMIES$dummy, "price", paste0(price_variables$name, "_price_na"),
+  same_names <- c(ATTRIBUTE_DUMMIES$dummy, "log_price_vs_gas",
+                  paste0(price_variables$name, "_price_na"),
                   "expects_rise", paste0(expectation_variables$name, "_rise_na"))
   same_names <- setdiff(same_names, HYBRID_TERMS_OLD)
   largest <- 0
   for (column in same_names) {
+    # A column missing on one side would give numeric(0), which max() passes
+    stopifnot(column %in% names(long_old), column %in% names(long_new))
     largest <- max(largest, abs(long_old[[column]] - long_new[[column]]))
     if (anyNA(long_new[[column]])) stop("Missing values in ", column)
   }
@@ -1375,13 +1397,15 @@ data_reference <- list(
   price_quartiles = price_quartiles,
   expert_reference = expert_reference,
   hdd_quartiles = c(q25 = reference_values$hdd$q25, q75 = reference_values$hdd$q75),
-  price_settings = list(cop = objects$COP, hybrid_gas_share = HYBRID_GAS_SHARE_OLD),
+  price_settings = list(cop = COP_OLD, hybrid_gas_share = HYBRID_GAS_SHARE_OLD),
   price_variables = OLD_PRICE_VARIABLES,
   expectation_variables = OLD_EXPECTATION_VARIABLES,
   own_heating_answers = OWN_HEATING_ANSWERS
 )
-OLD_PRICES <- setdiff(c("price", paste0(OLD_PRICE_VARIABLES$name, "_price_na")),
-                      HYBRID_TERMS_OLD)
+# The old code makes its price changes for the term log_price, and the probabilities
+# use the term of the scripts, which log_price_vs_gas_old() computes from it
+OLD_PRICE_DUMMIES <- setdiff(paste0(OLD_PRICE_VARIABLES$name, "_price_na"),
+                             HYBRID_TERMS_OLD)
 OLD_TERMS <- setdiff(c("expects_rise", paste0(OLD_EXPECTATION_VARIABLES$name, "_rise_na")),
                      HYBRID_TERMS_OLD)
 # The effects the old code does not have, by exact name (Max, 2026-11-14): year and
@@ -1413,7 +1437,8 @@ for (model_name in c("m4pe", "m6pe")) {
     constants <- c("is_shk", "is_schornsteinfeger", "is_energieberater")
     shifts <- character(0)
   }
-  specification <- list(constants = constants, prices = c(OLD_PRICES, OLD_TERMS),
+  specification <- list(constants = constants,
+                        prices = c("log_price", OLD_PRICE_DUMMIES, OLD_TERMS),
                         regressors = c(shifts, ATTRIBUTE_DUMMIES$dummy, "hdd_c", "heat_pump_at_home"))
   changes_old <- term_changes(specification, ATTRIBUTE_DUMMIES, outcomes, data_reference,
                               c("Wärmepumpe" = "Gasheizung"))
@@ -1443,13 +1468,14 @@ for (model_name in c("m4pe", "m6pe")) {
   states_long <- states %>%
     mutate(berufsgruppe = groups_old[1], own_heating = "Keine Angabe") %>%
     add_regressors(ATTRIBUTE_DUMMIES) %>%
-    add_alternative_prices(objects$COP, HYBRID_GAS_SHARE_OLD) %>%
+    add_alternative_prices(COP_OLD, HYBRID_GAS_SHARE_OLD) %>%
     cross_join(tibble(alternative = outcomes)) %>%
     long_terms(OLD_PRICE_VARIABLES, OLD_EXPECTATION_VARIABLES, reference_values$own_heating,
                OWN_HEATING_ANSWERS, outcomes) %>%
-    hybrid_as_heat_pump("vignette")
+    hybrid_as_heat_pump("vignette") %>%
+    log_price_vs_gas_old("vignette")
   generic_values <- list()
-  for (term in specification$prices) {
+  for (term in c("log_price_vs_gas", OLD_PRICE_DUMMIES, OLD_TERMS)) {
     values <- matrix(NA_real_, nrow(states), length(outcomes), dimnames = list(states$vignette, outcomes))
     for (outcome_name in outcomes) {
       values[, outcome_name] <- states_long[[term]][states_long$alternative == outcome_name]
