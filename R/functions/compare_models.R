@@ -214,9 +214,13 @@ fresh_log_likelihood <- function(set, theta, prepared, halton_sequences, primes,
 
 #' One fold of the cross-validation, on an R session of its own: estimate on the
 #' other folds from the full-sample estimates, then evaluate the held-out experts.
-#' Restarts after code 3 only; fit_mixed_logit() also restarts after code 2 since
-#' 2026-11-15, so a fold that stops with code 2 below its maximum is not restarted
-#' (whether the folds follow it is open).
+#' Restarts after code 2 or 3, at most three times, as fit_mixed_logit() does: a
+#' fold that stopped with code 2 below its maximum would evaluate the held-out
+#' experts at other parameters than the fold's estimates, so that their
+#' log-likelihood would be off, in either direction (Claude's proposal, agreed by
+#' Max, 2026-11-16; until then after code 3 only).
+#' The re-evaluation that fit_mixed_logit() makes at code 2 is not needed: the fold
+#' uses only the coefficients, which are those of the last iterate.
 #'
 #' @param job list: model_name, fold, fingerprint; arguments of mlogit();
 #'   training_data, held_out_data
@@ -253,7 +257,7 @@ cross_validate_fold <- function(job) {
     arguments <- fix_terms_without_variation(arguments)
     fit <- do.call("mlogit", arguments)
     for (restart in 1:3) {
-      if (fit$est.stat$code != 3) break
+      if (!(fit$est.stat$code %in% c(2, 3))) break
       arguments$start <- setNames(as.numeric(fit$coefficients),
                                   names(fit$coefficients))
       fit <- do.call("mlogit", arguments)
@@ -863,7 +867,9 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
     # (b) The jobs. Starting values for every parameter, also those fixed by
     # constPar. The call of a model evaluated again at code 2 holds iterlim = 0,
     # which goes. A model whose folds ran on the same estimates and folds is loaded,
-    # and so is each fold of a run that was cut off.
+    # and so is each fold of a run that was cut off. The fingerprint also names how
+    # a fold restarts, so that folds saved before they restarted after code 2
+    # (2026-11-16) run again.
     # hash(): a short code that changes whenever its object does.
     jobs <- list()
     cv_saved <- list()
@@ -872,7 +878,8 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
       model <- models[[model_name]]
       fingerprint <- rlang::hash(list(results_list[[model_name]]$coefficients,
                                       expert_folds$expert, expert_folds$fold,
-                                      prepared_list[[model_name]]$n_draws))
+                                      prepared_list[[model_name]]$n_draws,
+                                      "restart after code 2 or 3"))
       saved_file <- file.path(est_dir, model_name, "cross_validation.rds")
       if (file.exists(saved_file)) {
         saved <- readRDS(saved_file)
@@ -1036,7 +1043,8 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
     }
     cv_note <- sprintf(paste0(
       "%d folds by expert, %s, the same folds for all models. Estimated on the other ",
-      "folds with mlogit from the full-sample estimates, then the log-likelihood of ",
+      "folds with mlogit from the full-sample estimates, restarted up to three times ",
+      "after code 2 or 3, then the log-likelihood of ",
       "the held-out experts with iterlim = 0, on the draws mlogit gives them. Gain: ",
       "larger minus smaller, mean per expert, with its SE over experts; the folds ",
       "share experts in training, so this SE is rather too small. A model is favoured ",

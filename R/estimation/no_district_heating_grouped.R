@@ -10,10 +10,11 @@
 # Checks : the sample at every step; one row per expert x vignette; known levels;
 #          every recommendation has its outcome
 ################################################################################
-# The same sample, models, effects and comparison as no_district_heating.R, which
-# stays the main script. Its models have other outcomes, so compare_models() cannot
-# compare them with these: the two scripts compare only descriptively, through the
-# effects on the outcomes they share.
+# The same sample, models, effects and comparison as no_district_heating.R. Since
+# 2026-11-16 this script is the main run of arm nofw, and no_district_heating.R,
+# with the gas and the oil heating apart, is kept (Max). Its models have other
+# outcomes, so compare_models() cannot compare them with these: the two scripts
+# compare only descriptively, through the effects on the outcomes they share.
 # To add a variable: one line in make_regressors() and one term in a formula.
 # make_regressors() then needs its source variable in every state: at_neutral needs
 # its reference value, and a variable of the expert goes into expert_variables
@@ -38,8 +39,8 @@ reference <- "Wärmepumpe"
 # opposite directions, and they are priced differently. Grouped here from vig_rec,
 # which stays as it is in vignettes.rds, as the grouping is a choice of the model,
 # not of the cleaning. Written out, so that an answer missing here stops the
-# script (section 5). The name of the grouped outcome: Claude's proposal,
-# 2026-11-14, open.
+# script (section 5). The name of the grouped outcome: Claude's proposal, agreed by
+# Max, 2026-11-16.
 outcome_of_recommendation <- c(
   "Gasheizung" = "Gas- oder Ölheizung",
   "Ölheizung" = "Gas- oder Ölheizung",
@@ -121,7 +122,8 @@ run_summary_statistics(experts, vignettes,
 # makes up a small part of it (Max, 2026-11-14): its price relative to gas is 0,
 # like the gas heating's in no_district_heating.R. Its expected change and its
 # blank dummies are those of gas too, as the hybrid takes the heat pump's (Claude's
-# proposal, 2026-11-14, open). The oil price and Q17 for oil enter no model here.
+# proposal, agreed by Max, 2026-11-16). The oil price and Q17 for oil enter no
+# model here.
 
 # Where the answers are centred, the same in both estimation scripts, so that
 # they share one reference expert. setNames(): the values, with these names. The
@@ -602,7 +604,8 @@ results_m4pe <- post_estimation(
 )
 
 # (6pe), the robustness check with random constants by group, is left out in this
-# arm for now (2026-11-12), as in no_district_heating.R. To add it, copy its block
+# arm for now (2026-11-12), as in no_district_heating.R; for this script too
+# (Claude's proposal, agreed by Max, 2026-11-16). To add it, copy its block
 # from district_heating_grouped.R without the terms of Fernwärme, and add it to
 # results_of_model, changes_of_model, cv_models and the tests below.
 

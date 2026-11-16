@@ -9,6 +9,9 @@
 # Checks : the sample at every step; one row per expert x vignette; known levels
 #          and recommendations
 ################################################################################
+# Since 2026-11-16 the main run of arm fw is district_heating_grouped.R, with the
+# gas and the oil heating as one outcome; this script, which keeps them apart, is
+# kept (Max).
 # To add a variable: one line in make_regressors() and one term in a formula.
 # make_regressors() then needs its source variable in every state: at_neutral needs
 # its reference value, and a variable of the expert goes into expert_variables

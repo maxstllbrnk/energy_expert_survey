@@ -11,11 +11,11 @@
     m4pe/                           model.rds  results.rds  results.xlsx  cross_validation.rds
     model_comparison/               model_comparison.rds  model_comparison.xlsx
   no_district_heating/              the same
-  district_heating_grouped/         the same, for the variant with gas and oil as one outcome
+  district_heating_grouped/         the same, with gas and oil as one outcome: the main run
   no_district_heating_grouped/      the same
 ```
 
-The outcomes of a model are in `results$outcomes`: in the `*_grouped.R` variants the gas and the oil
+The outcomes of a model are in `results$outcomes`: in the `*_grouped.R` scripts the gas and the oil
 heating are one outcome, `Gas- oder Ölheizung` (label "Gas or oil heating", `OUTCOME_LABELS` in
 `labels.R`, which orders and names the outcomes of `results.xlsx`).
 

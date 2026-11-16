@@ -30,7 +30,7 @@ wave_1_2026/output/                  on the secure drive
     m6pe/                            one folder per model
     model_comparison/                model_comparison.xlsx  model_comparison.rds
   no_district_heating/               the same
-  district_heating_grouped/          the same, for the variant with gas and oil as one outcome
+  district_heating_grouped/          the same, with gas and oil as one outcome: the main run
   no_district_heating_grouped/       the same
 ```
 
@@ -41,10 +41,10 @@ renv::restore()                                  # once per computer
 source("R/run_cleaning.R")                       # raw exports to experts.rds, vignettes.rds, the report
 source("tests/selftest.R")                       # checks on the result
 source("R/run_summary_statistics.R")             # the full sample, with response rates
-source("R/estimation/district_heating.R")        # sample, summary statistics, models, comparison
-source("R/estimation/no_district_heating.R")     # the same for the other arm
-source("R/estimation/district_heating_grouped.R")     # variant: gas and oil heating as one outcome
-source("R/estimation/no_district_heating_grouped.R")  # the same for the other arm
+source("R/estimation/district_heating_grouped.R")     # main run, arm fw: sample, summary statistics, models, comparison
+source("R/estimation/no_district_heating_grouped.R")  # main run, arm nofw
+source("R/estimation/district_heating.R")        # kept: gas and oil heating apart, arm fw
+source("R/estimation/no_district_heating.R")     # kept: the same for arm nofw
 source("R/check_results.R")                      # a text summary of every run, to share for checking
 ```
 
@@ -68,7 +68,7 @@ There is one script per data set in `R/estimation/`. Each goes through the same 
 
 To add a variable: one line in `make_regressors()`, one term in a formula, its reference value in `at_neutral`, and, for a variable of the expert, its name in `expert_variables`, which both populations carry. Its effect is a change in one of the lists, and that list goes into `changes_of_model` for every model that has the term. Models that do not use it stay loaded. To study another sample: copy a script and change its filters and its folder name.
 
-A variant of a script carries a suffix, writes to its own folder and keeps the sample label of its data set (Max, 2026-11-12). The variants so far, `*_grouped.R`, group the outcomes (Max, 2026-11-14): the gas and the oil heating are one outcome, `Gas- oder Ölheizung`, priced by gas, as oil is recommended too rarely for a coefficient of its own on every term. The grouping happens in the script; `vig_rec` stays as it is. Their models have other outcomes than those of the main scripts, so `compare_models()` cannot compare the two: they compare only descriptively, through the effects on the outcomes they share. In the main scripts, the effect on the gas heating plus that on the oil heating is the effect on the two together.
+A variant of a script carries a suffix, writes to its own folder and keeps the sample label of its data set (Max, 2026-11-12). The variants so far, `*_grouped.R`, group the outcomes (Max, 2026-11-14): the gas and the oil heating are one outcome, `Gas- oder Ölheizung`, priced by gas, as oil is recommended too rarely for a coefficient of its own on every term. The grouping happens in the script; `vig_rec` stays as it is. Since 2026-11-16 the grouped scripts are the main run in both arms, and the ungrouped scripts are kept (Max, 2026-11-16). In the quick run on the real data, the random constants of the gas and the oil heating were almost perfectly correlated in arm fw. Grouping them also gives both arms the same outcomes. The grouped and the ungrouped models have different outcomes, so `compare_models()` cannot compare the two: they compare only descriptively, through the effects on the outcomes they share. In the ungrouped scripts, the effect on the gas heating plus that on the oil heating is the effect on the two together.
 
 | Function | What it does |
 |---|---|
@@ -81,7 +81,7 @@ A variant of a script carries a suffix, writes to its own folder and keeps the s
 `results.xlsx` starts with the sheets to read: overview and fit, coefficients by technology, standard
 deviations and correlations of the constants, then one sheet `ame_<name>` per set of effects, the main set (`observed_reference`, `MAIN_AMES` in `config.R`) first: the probabilities at the baseline in %, then every effect in percentage points with its Krinsky-Robb standard error and 95% interval, with filters. The long sheets with every digit follow, with grey tabs. The fields of `results.rds` are in `docs/results_contract.md`, so that later scripts can build any table or figure from them.
 
-On a model with 113 parameters and 1,500 simulated experts, on an 8-core laptop, a Hessian takes at most about 11 minutes, against about 2 hours before, and all AMEs of a model at a reference expert about a minute; the effects over the observed experts take about 125 times as long as in a quick run, some hours per set (per 1,000 experts about 1.5 to 3 hours on eight sessions at 5,000 prediction draws, `docs/results_contract.md`). The main set of every model uses 5,000 prediction draws, the other households and the answers 1,000 (`N_DRAWS_PREDICTION_OTHER`), which together take about a quarter of the time. With four models per script, a full run of both scripts was estimated at about 25 hours on eight sessions. With the eight steps of the covariates (12 models in arm fw, 11 in nofw), the effects alone take about five times as long, scaled from the synthetic runs, so a full run takes several days; none of this is measured on the real data yet. The two `*_grouped.R` variants add roughly two thirds of that again, by their parameters ((4pe) has 90 instead of 111 in arm fw, 70 instead of 90 in nofw) and one outcome fewer; an estimate, not measured. `mlogit()` itself takes as long as it takes. Lower `N_WORKERS` in `config.R` if something else runs on the computer. The cross-validation runs on four sessions, as a fold of (6pe) needs an estimated 3 to 4 GB per session.
+On a model with 113 parameters and 1,500 simulated experts, on an 8-core laptop, a Hessian takes at most about 11 minutes, against about 2 hours before, and all AMEs of a model at a reference expert about a minute; the effects over the observed experts take about 125 times as long as in a quick run, some hours per set (per 1,000 experts about 1.5 to 3 hours on eight sessions at 5,000 prediction draws, `docs/results_contract.md`). The main set of every model uses 5,000 prediction draws, the other households and the answers 1,000 (`N_DRAWS_PREDICTION_OTHER`), which together take about a quarter of the time. With four models per script, a full run of both scripts was estimated at about 25 hours on eight sessions. With the eight steps of the covariates (12 models in arm fw, 11 in nofw), the effects alone take about five times as long, scaled from the synthetic runs, so a full run takes several days; none of this is measured on the real data yet. The two `*_grouped.R` scripts, the main run since 2026-11-16, take roughly two thirds of that, by their parameters ((4pe) has 90 instead of 111 in arm fw, 70 instead of 90 in nofw) and one outcome fewer; running the ungrouped scripts as well adds the full amount. Both are estimates, not measured. `mlogit()` itself takes as long as it takes. Lower `N_WORKERS` in `config.R` if something else runs on the computer. The cross-validation runs on four sessions, as a fold of (6pe) needs an estimated 3 to 4 GB per session.
 
 ## How models are compared
 
