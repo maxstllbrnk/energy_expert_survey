@@ -1199,7 +1199,7 @@ check("start_from_common(): against fit_mixed_logit()",
 script_objects <- function(script) {
   wanted <- c("alternatives", "reference", "reference_values",
               "prices", "price_mean", "price_q25", "price_q75", "hdd_mean",
-              "heating_group_share", "hp_course_share", "covariates", "expectation_category",
+              "heating_group_share", "covariates", "expectation_category",
               "make_regressors", "at_neutral", "attribute_changes",
               "price_changes", "expectation_changes", "expert_changes")
   objects <- new.env(parent = globalenv())
@@ -1317,8 +1317,9 @@ for (arm_scripts in list(list(arm = "fw", script = "district_heating"),
     # The expected rise is no longer centred (Max, 2026-11-14)
     experts_old[[paste0("pexp_", fuel, "_c")]] <- if_else(is.na(rise), 0, rise)
   }
+  # The heat pump at home is no longer centred at its share (Max, 2026-11-16)
   experts_old <- experts_old %>%
-    mutate(heat_pump_at_home_old = heat_pump_at_home - reference_values$own_heating[["Wärmepumpe"]],
+    mutate(heat_pump_at_home_old = heat_pump_at_home,
            hdd_c_old = if_else(is.na(hdd), 0, (hdd - reference_values$hdd$mean) / 1000))
   decisions_old <- vignettes_clean %>%
     filter(resp_uid %in% experts_old$resp_uid, !is.na(vig_rec)) %>%
@@ -1362,7 +1363,7 @@ for (arm_scripts in list(list(arm = "fw", script = "district_heating"),
             abs(long_old$is_energieberater - long_new$is_adviser)), 1e-12)
   check(paste(arm_scripts$arm, "degree days and a heat pump at home"),
         max(abs(long_old$hdd_c_old - long_new$hdd_c),
-            abs(long_old$heat_pump_at_home_old - long_new$heat_pump_at_home_c)), 1e-12)
+            abs(long_old$heat_pump_at_home_old - long_new$own_heat_pump)), 1e-12)
 }
 
 # 8. term_changes() of old 01_run_term_effects.R against the script's changes ----
@@ -1377,17 +1378,19 @@ old_names <- function(names_new) {
   names_new <- gsub("is_hvac", "is_shk", names_new, fixed = TRUE)
   names_new <- gsub("is_sweep", "is_schornsteinfeger", names_new, fixed = TRUE)
   names_new <- gsub("is_adviser", "is_energieberater", names_new, fixed = TRUE)
-  gsub("heat_pump_at_home_c", "heat_pump_at_home", names_new, fixed = TRUE)
+  gsub("own_heat_pump", "heat_pump_at_home", names_new, fixed = TRUE)
 }
 price_reference <- reference_values$prices
 price_quartiles <- reference_values$prices %>%
   select(fuel, q25, q75)
-# The expected rise is no longer centred (Max, 2026-11-14): its share is 0 for the
-# old code
+# The expected rise is no longer centred (Max, 2026-11-14), nor the heat pump at
+# home (Max, 2026-11-16): their shares are 0 for the old code
+own_heating_share_old <- reference_values$own_heating
+own_heating_share_old[["Wärmepumpe"]] <- 0
 expert_reference <- list(
   pexp = reference_values$expectations %>%
     mutate(share_rise = 0),
-  own_heating_share = reference_values$own_heating,
+  own_heating_share = own_heating_share_old,
   hdd_year = reference_values$hdd$year,
   hdd_unit = 1000,
   hdd_mean = reference_values$hdd$mean

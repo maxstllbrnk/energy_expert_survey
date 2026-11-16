@@ -401,6 +401,8 @@ print(comparison$cross_validation %>%
                favours, usable),
       n = Inf, width = Inf)
 stopifnot(all(cv_rows$folds_converged == 5), all(cv_rows$experts == n_experts),
+          all(cv_rows$fold_restarts >= 0), all(cv_rows$fold_restarts <= 15),
+          all(cv_rows$folds_with_three_restarts <= cv_rows$folds_converged),
           grepl("stratified by", comparison$cross_validation$note[1], fixed = TRUE))
 for (model_name in cv_rows$item) {
   fit_of_model <- comparison$fit %>%
@@ -900,6 +902,43 @@ message_swapped <- message_of_stop(
 )
 cat("Swapped:", message_swapped, "\n")
 stopifnot(grepl("Swap", message_swapped, fixed = TRUE))
+
+# A fold whose first estimation stops with code 2 below its maximum restarts and
+# counts the restart (2026-11-16), so that a counter stuck at 0 fails here. A
+# stand-in for mlogit() gives only that first estimation a large ftol; the calls
+# with estimate = FALSE or iterlim = 0 only build data or evaluate.
+# cross_validate_fold() finds mlogit() in the global environment first, where the
+# stand-in sits for this check only.
+estimations <- 0
+mlogit <- function(...) {
+  arguments <- list(...)
+  if (!isFALSE(arguments$estimate) && !identical(arguments$iterlim, 0)) {
+    estimations <<- estimations + 1
+    if (estimations == 1) arguments$ftol <- 0.5
+  }
+  do.call(mlogit::mlogit, arguments)
+}
+fold_arguments <- as.list(m_base$call)[-1]
+fold_arguments$iterlim <- NULL
+fold_arguments$print.level <- 0
+fold_arguments$start <- 0.7 * setNames(as.numeric(m_base$coefficients),
+                                       names(m_base$coefficients))
+expert_of_row <- as.character(idx(m_base)$resp_uid)
+is_held_out <- expert_of_row %in% unique(expert_of_row)[1:20]
+fold_file <- file.path(est_dir, "fold_restart_check.rds")
+fold_restarted <- cross_validate_fold(list(
+  model_name = "m_base", fold = 1, fingerprint = "restart check",
+  arguments = fold_arguments,
+  training_data = m_base$model[!is_held_out, ],
+  held_out_data = m_base$model[is_held_out, ],
+  fold_file = fold_file
+))
+rm(mlogit)
+invisible(file.remove(fold_file))
+cat("A fold stopped with code 2:", fold_restarted$restarts, "restart(s), then code",
+    fold_restarted$code, "\n")
+stopifnot(is.na(fold_restarted$error), fold_restarted$restarts >= 1,
+          fold_restarted$code %in% c(1, 2))
 
 # 6. The workbook reads well ---------------------------------------------------
 # The last run that wrote it: (h). Every sheet read back, as a reader opens it.

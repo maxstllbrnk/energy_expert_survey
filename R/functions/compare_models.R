@@ -225,7 +225,8 @@ fresh_log_likelihood <- function(set, theta, prepared, halton_sequences, primes,
 #' @param job list: model_name, fold, fingerprint; arguments of mlogit();
 #'   training_data, held_out_data
 #' @return list: model_name, fold, fingerprint, expert, log_likelihood (one per
-#'   held-out expert), code, iterations, minutes, error; also saved to
+#'   held-out expert), code, iterations (of the last estimation), restarts (0 to
+#'   3), minutes, error; also saved to
 #'   job$fold_file, so that a run that is cut off resumes with the folds it had
 cross_validate_fold <- function(job) {
   start_time <- Sys.time()
@@ -256,11 +257,13 @@ cross_validate_fold <- function(job) {
     arguments$data <- quote(training_data)
     arguments <- fix_terms_without_variation(arguments)
     fit <- do.call("mlogit", arguments)
+    restarts <- 0
     for (restart in 1:3) {
       if (!(fit$est.stat$code %in% c(2, 3))) break
       arguments$start <- setNames(as.numeric(fit$coefficients),
                                   names(fit$coefficients))
       fit <- do.call("mlogit", arguments)
+      restarts <- restart
     }
     # iterlim = 0: the log-likelihood at these parameters, on the draws mlogit gives
     # the held-out experts. fitted(): the expert's probability, once per decision.
@@ -277,10 +280,10 @@ cross_validate_fold <- function(job) {
     list(expert = expert_of_decision[is_first_decision],
          log_likelihood = log(as.numeric(fitted(held_out)))[is_first_decision],
          code = fit$est.stat$code, iterations = fit$est.stat$nb.iter,
-         error = NA_character_)
+         restarts = restarts, error = NA_character_)
   }, error = function(e) {
     list(expert = character(0), log_likelihood = numeric(0), code = NA_real_,
-         iterations = NA_real_, error = conditionMessage(e))
+         iterations = NA_real_, restarts = NA_real_, error = conditionMessage(e))
   })
   fold_result$model_name <- job$model_name
   fold_result$fold <- job$fold
@@ -868,8 +871,8 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
     # constPar. The call of a model evaluated again at code 2 holds iterlim = 0,
     # which goes. A model whose folds ran on the same estimates and folds is loaded,
     # and so is each fold of a run that was cut off. The fingerprint also names how
-    # a fold restarts, so that folds saved before they restarted after code 2
-    # (2026-11-16) run again.
+    # a fold restarts and that it counts its restarts, so that folds saved before
+    # either (2026-11-16) run again.
     # hash(): a short code that changes whenever its object does.
     jobs <- list()
     cv_saved <- list()
@@ -879,7 +882,7 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
       fingerprint <- rlang::hash(list(results_list[[model_name]]$coefficients,
                                       expert_folds$expert, expert_folds$fold,
                                       prepared_list[[model_name]]$n_draws,
-                                      "restart after code 2 or 3"))
+                                      "restart after code 2 or 3, restarts counted"))
       saved_file <- file.path(est_dir, model_name, "cross_validation.rds")
       if (file.exists(saved_file)) {
         saved <- readRDS(saved_file)
@@ -961,6 +964,7 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
           fold = fold_result$fold,
           code = fold_result$code,
           iterations = fold_result$iterations,
+          restarts = fold_result$restarts,
           minutes = fold_result$minutes,
           error = fold_result$error
         ))
@@ -987,6 +991,11 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
         question = NA_character_,
         experts = nrow(per_expert),
         folds_converged = sum(folds_of_model$code %in% c(1, 2)),
+        # Restarts after code 2 or 3 over the folds, at most three per fold: a fold
+        # that took all three and still ended with code 2 may have stopped below its
+        # maximum (Max, 2026-11-16)
+        fold_restarts = sum(folds_of_model$restarts, na.rm = TRUE),
+        folds_with_three_restarts = sum(folds_of_model$restarts == 3, na.rm = TRUE),
         held_out_log_likelihood = sum(per_expert$log_likelihood),
         held_out_per_expert = mean(per_expert$log_likelihood),
         minutes = sum(folds_of_model$minutes),
