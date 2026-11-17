@@ -3,10 +3,10 @@
 #                         heating as one outcome, priced by gas (arm nofw, five
 #                         outcomes)
 # Inputs : experts.rds, vignettes.rds, reference_values.rds (CLEAN_DATA_DIR)
-# Outputs: OUTPUT_DIR/no_district_heating_grouped/: summary_statistics/; per
-#          model, a folder with results.rds, results.xlsx and model.rds;
-#          model_comparison/. model.rds holds the data, so it stays on the secure
-#          drive.
+# Outputs: OUTPUT_DIR/no_district_heating_grouped/: run_info.rds,
+#          summary_statistics/; per model, a folder with results.rds,
+#          results.xlsx and model.rds; model_comparison/. model.rds holds the
+#          data, so it stays on the secure drive.
 # Checks : one row per expert x vignette; known levels; every recommendation
 #          has its outcome
 ################################################################################
@@ -89,6 +89,13 @@ for (fuel in c("gas", "hpelec", "pellet")) {
 
 vignettes <- vignettes_all %>%
   filter(resp_uid %in% experts$resp_uid)
+
+# What this run is, for the output script (R/run_output.R): the label of the
+# sample, its arm and whether the gas and the oil heating are one outcome
+# (2026-11-16). A folder without it is left out of the exhibits.
+dir.create(est_dir, recursive = TRUE, showWarnings = FALSE)
+saveRDS(list(sample_label = sample_label, arm = "nofw", variant = "grouped"),
+        file.path(est_dir, "run_info.rds"))
 
 # 3. Summary statistics of this sample -----------------------------------------
 run_summary_statistics(experts, vignettes,
@@ -802,6 +809,28 @@ for (model_name in names(results_of_model)) {
     changes = changes, profiles = EXPERT_GROUPS, keep_draws = FALSE
   )
 }
+
+# The main model by federal state, for the maps of the output script: every
+# expert of the sample at the reference household, one profile per state that
+# has experts (a profile that selects nobody stops compute_ames()), the
+# probabilities only (Claude's proposal, agreed by Max, 2026-11-16). An expert
+# without a state is in no profile. The main model is that of R/run_output.R;
+# make_regressors() keeps the state as it is, as it is no source variable.
+population_states <- population_experts %>%
+  left_join(experts %>% select(resp_uid, bundesland), by = "resp_uid",
+            relationship = "one-to-one")
+profiles_states <- list()
+for (state in names(STATE_LABELS)) {
+  if (state %in% population_states$bundesland) {
+    profiles_states[[state]] <- list(bundesland = state)
+  }
+}
+results_m4pe <- compute_ames(
+  results_m4pe, make_regressors, name = "observed_states",
+  at = households$reference, changes = list(), profiles = profiles_states,
+  population = population_states, n_draws = N_DRAWS_PREDICTION_OTHER,
+  keep_draws = FALSE
+)
 
 # 9. How the models compare ----------------------------------------------------
 # The fixed protocol: compare_models(), the rule at the top of its file. The sheet

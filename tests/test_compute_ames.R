@@ -149,6 +149,49 @@ check("the fields of the contract are there",
                                        "n_units", "n_experts")) &&
         identical(names(ames$baseline), c("profile", "outcome", "probability", "se", "ci_low_kr",
                                           "ci_high_kr", "n_units", "n_experts")))
+# The terms each change moves, which the output script reads to hide the effects
+# of terms that rest on few experts (2026-11-16); setequal(): the same elements
+check("moved_terms: the columns each change moves, none for a blank change",
+      setequal(names(ames$moved_terms), names(changes_base)) &&
+        setequal(ames$moved_terms$income_low, "income_low") &&
+        setequal(ames$moved_terms$price_a_up, "price") &&
+        length(ames$moved_terms$same_state) == 0 &&
+        setequal(ames$moved_terms$together, c("income_low", "price")))
+# The experts behind each coefficient (post_estimation()), counted by hand: those
+# with the term, and of them those who chose the coefficient's technology
+holders <- choice_long %>%
+  filter(income_low == 1)
+support_a <- results_common$term_support %>%
+  filter(parameter == "income_low:A")
+check("term_support: the experts with a term, and those of them who chose it",
+      support_a$experts_with_term == n_distinct(holders$resp_uid) &&
+        support_a$experts_choosing ==
+          n_distinct(holders$resp_uid[holders$chosen & holders$alternative == "A"]))
+support_price <- results_common$term_support %>%
+  filter(parameter == "price")
+price_rows <- choice_long %>%
+  filter(price != 0)
+check("term_support: a term for all technologies counts the rows it is not 0 in",
+      support_price$experts_with_term == n_distinct(price_rows$resp_uid) &&
+        support_price$experts_choosing ==
+          n_distinct(price_rows$resp_uid[price_rows$chosen]))
+sweeps <- choice_long %>%
+  filter(is_sweep == 1)
+advisers <- choice_long %>%
+  filter(is_hvac == 0, is_sweep == 0)
+support_sweeps <- results_common$constant_support %>%
+  filter(group == "Chimney sweeps", technology == "B")
+support_advisers <- results_common$constant_support %>%
+  filter(group == "Energy advisers", technology == "B")
+check("constant_support: each group's experts, the reference group without a column",
+      support_sweeps$experts == n_distinct(sweeps$resp_uid) &&
+        support_sweeps$experts_choosing ==
+          n_distinct(sweeps$resp_uid[sweeps$chosen & sweeps$alternative == "B"]) &&
+        support_advisers$experts == n_distinct(advisers$resp_uid) &&
+        support_advisers$experts_choosing ==
+          n_distinct(advisers$resp_uid[advisers$chosen & advisers$alternative == "B"]))
+check("constant_support: a model with constants by group has a row per group",
+      setequal(unique(results_group$constant_support$group), EXPERT_GROUPS))
 computed_rows <- ames$table %>%
   filter(effect != "same_state")
 check("without a population: one fictitious expert per profile, so no experts to count",

@@ -40,9 +40,19 @@ DECK_FILE <- "summary_statistics"
 #' @param experts      one row per expert of the sample; NULL: no count on the
 #'                     first slide
 #' @param vignettes    one row per expert x vignette of the sample; NULL: as above
+#' @param title        the title of the first slide; the output script of the
+#'                     models passes its own
+#' @param deck_file    the name of the deck's files, without extension
+#' @param deck_blocks  the blocks of the deck, as DECK_BLOCKS, for "Not shown"
+#' @param author       the line under the subtitle; NULL: the size of the sample
+#' @param not_shown    plain text, one line per item the caller left out, listed
+#'                     under "Not shown"
 #' @return the path of the .pdf if it was written, otherwise NA, invisibly
 build_presentation <- function(exhibits = NULL, output_dir, sample_label,
-                               experts = NULL, vignettes = NULL) {
+                               experts = NULL, vignettes = NULL,
+                               title = "Summary statistics", deck_file = DECK_FILE,
+                               deck_blocks = DECK_BLOCKS, author = NULL,
+                               not_shown = character(0)) {
   # 1. The exhibits in the order of the deck -----------------------------------
   if (is.null(exhibits)) {
     # Everything as text, so that a column without any entry stays a column of text
@@ -89,6 +99,9 @@ build_presentation <- function(exhibits = NULL, output_dir, sample_label,
                             fmt_int(sum(!is.na(vignettes$vig_rec))), " answered")
     }
   }
+  if (!is.null(author)) {
+    sample_size <- latex_text(author)
+  }
   blocks <- unique(exhibits$block)
   lines <- c(
     "% Written by build_presentation() in R/summary_statistics/presentation.R.",
@@ -98,7 +111,7 @@ build_presentation <- function(exhibits = NULL, output_dir, sample_label,
     "\\usepackage[export]{adjustbox}",
     "% Long captions: one line where possible, so that the exhibit keeps the height",
     "\\setbeamerfont{frametitle}{size=\\small}",
-    "\\title{Summary statistics}",
+    paste0("\\title{", latex_text(title), "}"),
     paste0("\\subtitle{", latex_text(sample_label), "}"),
     paste0("\\date{", format(Sys.Date(), "%Y-%m-%d"), "}"),
     paste0("\\author{", sample_size, "}"),
@@ -169,13 +182,14 @@ build_presentation <- function(exhibits = NULL, output_dir, sample_label,
 
   # 4. What the sample does not have -------------------------------------------
   # str_extract(): the part of the text that matches, here up to the first period
-  blocks_missing <- DECK_BLOCKS %>%
+  blocks_missing <- deck_blocks %>%
     filter(!(letter %in% str_extract(blocks, "^[^.]+")))
   lines <- c(lines, "\\section{Not shown}",
-             "\\begin{frame}[label=notshown]{Not shown}", "\\footnotesize")
-  if (nrow(blocks_missing) == 0 && length(files_missing) == 0) {
-    lines <- c(lines, paste0("Every block of the summary statistics wrote exhibits ",
-                             "for this sample."))
+             "\\begin{frame}[allowframebreaks, label=notshown]{Not shown}",
+             "\\footnotesize")
+  if (nrow(blocks_missing) == 0 && length(files_missing) == 0 &&
+      length(not_shown) == 0) {
+    lines <- c(lines, "Every block wrote exhibits for this sample.")
   } else {
     lines <- c(lines, "\\begin{itemize}")
     for (k in seq_len(nrow(blocks_missing))) {
@@ -187,12 +201,15 @@ build_presentation <- function(exhibits = NULL, output_dir, sample_label,
       lines <- c(lines, paste0("\\item In the list of exhibits, but the file does ",
                                "not exist: ", latex_text(file_missing)))
     }
+    for (item in not_shown) {
+      lines <- c(lines, paste0("\\item ", latex_text(item)))
+    }
     lines <- c(lines, "\\end{itemize}")
   }
   lines <- c(lines, "\\end{frame}", "\\end{document}")
 
   # 5. Write and compile -------------------------------------------------------
-  tex_file <- file.path(output_dir, paste0(DECK_FILE, ".tex"))
+  tex_file <- file.path(output_dir, paste0(deck_file, ".tex"))
   # enc2utf8() and useBytes: the text goes out as it is, in UTF-8 as pdflatex reads
   # it, whatever the locale of the session
   writeLines(enc2utf8(lines), tex_file, useBytes = TRUE)
@@ -204,16 +221,16 @@ build_presentation <- function(exhibits = NULL, output_dir, sample_label,
   # on.exit(): back to the old folder when the function ends, also after an error
   old_directory <- setwd(output_dir)
   on.exit(setwd(old_directory))
-  log_path <- file.path(output_dir, paste0(DECK_FILE, ".log"))
-  auxiliary_files <- paste0(DECK_FILE, c(".aux", ".nav", ".out", ".snm", ".toc",
+  log_path <- file.path(output_dir, paste0(deck_file, ".log"))
+  auxiliary_files <- paste0(deck_file, c(".aux", ".nav", ".out", ".snm", ".toc",
                                          ".vrb"))
   # Nothing from an earlier run: no old deck that looks current after a failure,
   # and no auxiliary files that could carry an error over. unlink(): deletes files,
   # and says nothing if a viewer holds one open
-  unlink(c(paste0(DECK_FILE, c(".pdf", ".log")), auxiliary_files))
-  if (file.exists(paste0(DECK_FILE, ".pdf"))) {
+  unlink(c(paste0(deck_file, c(".pdf", ".log")), auxiliary_files))
+  if (file.exists(paste0(deck_file, ".pdf"))) {
     message("The deck was not compiled, its old version could not be deleted: close ",
-            file.path(output_dir, paste0(DECK_FILE, ".pdf")),
+            file.path(output_dir, paste0(deck_file, ".pdf")),
             " in the PDF viewer and run again")
     return(invisible(NA_character_))
   }
@@ -226,16 +243,16 @@ build_presentation <- function(exhibits = NULL, output_dir, sample_label,
   # of the program, 0 without errors
   for (pass in 1:2) {
     status <- system2("pdflatex",
-                      c("-interaction=nonstopmode", paste0(DECK_FILE, ".tex")),
+                      c("-interaction=nonstopmode", paste0(deck_file, ".tex")),
                       stdout = FALSE, stderr = FALSE)
   }
   unlink(auxiliary_files)
-  if (status != 0 || !file.exists(paste0(DECK_FILE, ".pdf"))) {
+  if (status != 0 || !file.exists(paste0(deck_file, ".pdf"))) {
     message("The deck did not compile without errors. See the log: ", log_path,
             "\nIts source: ", tex_file)
     return(invisible(NA_character_))
   }
-  pdf_path <- file.path(output_dir, paste0(DECK_FILE, ".pdf"))
+  pdf_path <- file.path(output_dir, paste0(deck_file, ".pdf"))
   message("Deck: ", pdf_path, " (", nrow(exhibits), " exhibits)")
   invisible(pdf_path)
 }

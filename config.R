@@ -38,6 +38,12 @@ if (file.exists("config.local.R")) {
 # cross-validation, the output in output_quick/ so that it is never taken for the
 # real one. A run with FALSE estimates every model again.
 QUICK_RUN <- FALSE
+# A quick run next to a full run, without editing this file while the full run
+# still has scripts to start: start that R session with the environment variable
+# EES_QUICK_RUN=1. Sys.getenv(): the value of an environment variable, "" if unset.
+if (Sys.getenv("EES_QUICK_RUN") == "1") {
+  QUICK_RUN <- TRUE
+}
 
 # 2. Secure paths --------------------------------------------------------------
 # A session of Claude Code (CLAUDECODE=1) may not touch the real data (project

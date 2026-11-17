@@ -10,9 +10,11 @@
     summary_statistics/             tables/ figures/ maps/ exhibits.csv summary_statistics.pdf fingerprint.rds
     m4pe/                           model.rds  results.rds  results.xlsx  cross_validation.rds
     model_comparison/               model_comparison.rds  model_comparison.xlsx
+    run_info.rds                    sample_label, arm, variant: what the run is, for R/run_output.R
   no_district_heating/              the same
   district_heating_grouped/         the same, with gas and oil as one outcome: the main run
   no_district_heating_grouped/      the same
+  exhibits/                         R/run_output.R, see "The output script" at the end
 ```
 
 The outcomes of a model are in `results$outcomes`: in the `*_grouped.R` scripts the gas and the oil
@@ -54,6 +56,7 @@ from it; the others load.
 | `diagnostics` | list: `code`, `iterations`, `max_gradient`, `scaled_gradient`, `smallest_eigenvalue`, `condition_number`, `start_from`, `log_likelihood_start`, `minutes_estimation` |
 | `choice_counts`, `sample_hash` | recommendations in the sample; hash of the experts, to check that models share one sample |
 | `ames` | named list, one element per call of `compute_ames()`; see below |
+| `term_support`, `constant_support` | the experts behind each coefficient: `parameter`, `column`, `technology`, `experts_with_term` (a value other than 0 in a row of its technology, in any row for a term with one coefficient), `experts_choosing` (of them, those who chose the coefficient's technology; for a term with one coefficient, an alternative in whose row it is not 0); and behind each group's constants: `group`, `technology`, `experts`, `experts_choosing`. Counts, for the minimum cell of the output script; added to saved results when they load (2026-11-16) |
 | `n_draws_kr`, `fingerprint`, `git_commit`, `date` | how it was made |
 
 ## `compute_ames()`
@@ -134,7 +137,7 @@ results_m4pe <- compute_ames(results_m4pe, make_regressors, name = "answers", at
                              n_draws = N_DRAWS_PREDICTION_OTHER, keep_draws = FALSE)
 ```
 
-**The sets of the estimation scripts** (Max, 2026-11-14), for every model, each over the experts of the sample by group and pooled, in section 8 of each script: `observed_reference` (B, the main set, `MAIN_AMES` in `config.R`, which leads the workbook and which `compare_models()` reads for the three groups), `observed_inefficient` (oil heating and 200 kWh), `observed_efficient` (built in 2000, 70 kWh, underfloor heating), `observed_old_poor` (a couple in their 60s with an income below 40,000; all D; these three with the changes of the expert's terms only, not of the attributes, since 2026-11-16, Max), `answers` (C, the attribute changes only) and `neutral` (A, one reference expert per group, to compare with earlier results, at the draws of the main set, as it takes about a minute). Each model has the changes of its own terms (`changes_of_model`), so that `compare_models()` counts an effect only the larger model has as an added one. The joint change of all expected rises is dropped (Max, 2026-11-14).
+**The sets of the estimation scripts** (Max, 2026-11-14), for every model, each over the experts of the sample by group and pooled, in section 8 of each script: `observed_reference` (B, the main set, `MAIN_AMES` in `config.R`, which leads the workbook and which `compare_models()` reads for the three groups), `observed_inefficient` (oil heating and 200 kWh), `observed_efficient` (built in 2000, 70 kWh, underfloor heating), `observed_old_poor` (a couple in their 60s with an income below 40,000; all D; these three with the changes of the expert's terms only, not of the attributes, since 2026-11-16, Max), `answers` (C, the attribute changes only) and `neutral` (A, one reference expert per group, to compare with earlier results, at the draws of the main set, as it takes about a minute). Each model has the changes of its own terms (`changes_of_model`), so that `compare_models()` counts an effect only the larger model has as an added one. The joint change of all expected rises is dropped (Max, 2026-11-14). For the main model only, `observed_states`: every expert at the reference household, one profile per federal state with experts, the probabilities only (no changes), for the maps of the output script (Claude's proposal, agreed by Max, 2026-11-16).
 
 Notes on the units:
 
@@ -152,6 +155,7 @@ Adds to `results$ames[[name]]` a list:
 | `table` | `profile`, `effect`, `outcome`, `p_from`, `p_to`, `ame`, `se`, `z`, `p`, `ci_low`, `ci_high` (ame +- 1.96 se), `ci_low_kr`, `ci_high_kr` (percentiles), `n_units`, `n_experts` (the units and distinct experts the effect averages over: 1 and `NA` for a reference expert, 0 and blank numbers if no unit of the profile is included) |
 | `baseline` | `profile`, `outcome`, `probability`, `se`, `ci_low_kr`, `ci_high_kr`, `n_units`, `n_experts`: the units as they are (at `at`) |
 | `draws` | per profile: states x outcomes x Krinsky-Robb draws of the averages, states named `baseline`, `<effect>\|from`, `<effect>\|to` (`NaN` for a state that leaves out every unit); `NULL` with `keep_draws = FALSE` |
+| `moved_terms` | per effect, the columns of `make_regressors()` that its change moves for at least one unit, so that the output script can hide the effects of a term that few experts carry; added to saved sets when they load (2026-11-16) |
 | `at`, `changes`, `profiles`, `n_draws`, `n_draws_kr`, `fingerprint`, `date` | how it was made |
 | `population` | `NULL` without a population; otherwise `experts`, `units` and `exclude_na`, no data |
 
@@ -202,3 +206,36 @@ excludes 0 (Max, 2026-11-09). An effect of the same name that the two models def
 counts in neither. The estimation scripts compare the main set, `observed_reference`, for the
 three groups only (`ame_profiles = EXPERT_GROUPS`, Max, 2026-11-14): the pooled row's interval is
 narrower than its groups', so it could let an added AME count where no group's would.
+
+## The output script: `R/run_output.R`
+
+The exhibits of the models for the paper, from what the estimation scripts saved (Max, 2026-11-16): the settings in `R/run_output.R`, the functions in `R/model_output/` (not `R/output/`, as `.gitignore` ignores every folder of that name). Run it after the estimation scripts; it reads no `model.rds` and computes no effect again, so it takes minutes, and a run with nothing changed writes nothing (`fingerprint.rds`).
+
+```text
+<OUTPUT_DIR>/exhibits/
+  <estimation folder>/   tables/ figures/ maps/ exhibits.csv exhibits.pdf   one per run
+  across_runs/           the same, for the arms and the outcomes as one or apart
+  numbers.tex            LaTeX macros of the numbers the text quotes
+  log.txt                every message and warning of the last run
+```
+
+**What it reads.** `run_info.rds` of each estimation folder (`sample_label`, `arm`, `variant`; section 2 of every estimation script writes it since 2026-11-16, and a folder without it is left out and named; a new variant script gives its run a `variant` of its own, with its label in `VARIANT_LABELS`), `results.rds` of every model, `model_comparison.rds`, and the column `final_decision` of `model_comparison.xlsx`, which only the workbook holds. After a new run of `compare_models()` your decisions are in the dated copy of the workbook and show as "open" until entered again.
+
+**What you set**, at the top of `R/run_output.R`: the main run of each arm (`main_runs`), the runs with the gas and the oil heating apart (`separate_runs`), the main model, the models that get every exhibit (`full_models`), the comparisons within a run (`models_compared`), and the numbers the text quotes (`text_numbers`). Everything else it finds: runs, models, sets of effects, profiles, outcomes, effects and terms. A new model gets its own exhibits and enters a comparison once it is named there; a model a run does not have is left out of that comparison and named. A term, effect, set, model or outcome without a label in `labels.R` (`TERM_LABELS`, `EFFECT_LABELS` with its block and unit, `SET_LABELS`, `MODEL_LABELS`, `OUTCOME_LABELS`, `OUTCOME_COLOURS`) stops it, with the list of every label missing.
+
+**The exhibits.** Each folder has a deck, `exhibits.pdf`, one frame per exhibit, with what was left out, and why, on its last page.
+
+| Block | Exhibits |
+|---|---|
+| A. The main model | its coefficients (each group's own constant, the terms by technology, the terms with one coefficient, the spread of the random constants); the standard deviations and correlations of the constants; the effects of the main set as a table per profile and per outcome, and as figures by block, for all experts and by group; the effects over the answers; the expert's terms at the four households; the probabilities at the four households |
+| B. Robustness of its effects | the attribute effects under three definitions (a reference expert, the observed experts, the answers); the differences between the groups, from the Krinsky-Robb draws of the main set |
+| C. The models compared | per comparison of the settings: fit and the test against the model before with the rule's proposal and your decision; the terms with one coefficient and the spread of the constants; the coefficients of each outcome; the effects of the main set in each model; then every question of the rule, how each estimation ended, and the predicted against the observed shares |
+| D. Every other model | its coefficients, constants, and the effects of the main set for all experts |
+| E. Maps | the probability of each recommendation at the reference household by state, from the set `observed_states` of the main model: any set of the main model whose profiles are all federal states is drawn as maps |
+| Across runs | the arms side by side (figures by block, a table per outcome, the models and the rule's questions, the households); in each arm the gas and the oil heating as one outcome or apart, on the outcomes both have, and the grouped outcome against the sum of its parts |
+
+**Conventions** (Max, 2026-11-16). Tables give standard errors in parentheses and stars at 10, 5 and 1% (for the effects from the Krinsky-Robb standard error), figures the 95% Krinsky-Robb percentile interval. A row shows a group's own value: the constant plus the group's shift, its standard error from the clustered covariance of the sum. The models are numbered (1), (2), ... in a table, each with what it adds (`MODEL_LABELS`). The arms are compared side by side, without a test of their difference, as they are not randomised. The correlations of the constants are a table. The gas or oil heating has the gas heating's colour. The notes of every table and figure that shows a term of the expert (its characteristics, reported prices or price expectations) say that only the household's attributes are assigned at random, so the estimates of those terms are associations, not causal effects (Max, 2026-11-17; `association_note()` in `estimate_exhibits.R`).
+
+**The minimum cell** is applied once, in `collect_results()`, before anything is computed from the cells: an effect or probability over observed experts or answers needs 10 experts behind it (`n_experts`); a difference between groups and a sum of outcomes need every cell they use. Coefficients, the spread of the constants, effects at a reference expert, fit and tests rest on the whole sample and are shown (an exception of the project profile, Max, 2026-11-16), except a coefficient that fewer than 10 experts carry: fewer than 10 have its term in the rows of its technology, or fewer than 10 of them recommended that technology (`term_support`, `constant_support`). Such a coefficient is hidden, and so is every effect that moves its term (`moved_terms`), in every set. The predicted against the observed shares use cells of at least 60 decisions, which hold at least 10 experts, as `compare_models()` counts decisions. The rule's largest change of an effect is not shown, as `compare_models()` takes that maximum over every cell.
+
+**Krinsky-Robb draws** are paired only within one model, for the differences between groups and the sums of outcomes: every model draws them from the same seed (`post_estimation()`), so the draws of two models are tied in a way that has nothing to do with their sampling.

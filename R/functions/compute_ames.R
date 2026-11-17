@@ -228,8 +228,12 @@ compute_ames <- function(results, make_regressors, name, at, changes,
   included <- list()
   has_design <- all(c("att_build_year", "att_current_heating", "att_heat_demand") %in%
                       names(unit_data))
-  # The columns of make_regressors() that the coefficients of the model use
+  # The columns of make_regressors() that the coefficients of the model use.
+  # moved_terms: the columns each change moves for at least one unit, which the
+  # output script reads to hide the effects of terms that rest on few experts
+  # (2026-11-16).
   term_columns <- setdiff(unique(terms$column), "(Intercept)")
+  moved_terms <- list()
   for (effect in effects) {
     change <- changes[[effect]]
     not_allowed <- setdiff(names(change), c("from", "to"))
@@ -295,6 +299,7 @@ compute_ames <- function(results, make_regressors, name, at, changes,
     # ame_row is the unit. %in% TRUE is FALSE also where == is NA.
     units_kept <- which(keep)
     is_moved <- rep(FALSE, n_units)
+    columns_moved <- character(0)
     if (length(units_kept) > 0) {
       states_from <- states_from[units_kept, ]
       states_from$ame_row <- units_kept
@@ -310,9 +315,13 @@ compute_ames <- function(results, make_regressors, name, at, changes,
         is_same <- (value_from == value_to) %in% TRUE |
           (is.na(value_from) & is.na(value_to))
         is_moved[regressors_from$ame_row[!is_same]] <- TRUE
+        if (any(!is_same)) {
+          columns_moved <- c(columns_moved, column)
+        }
       }
     }
     included[[effect]] <- keep & is_moved
+    moved_terms[[effect]] <- columns_moved
   }
 
   # Cells: profile x state, in the order of the draws saved. The states are the
@@ -483,6 +492,11 @@ compute_ames <- function(results, make_regressors, name, at, changes,
   if (!force && identical(results$ames[[name]]$fingerprint, fingerprint)) {
     message("Model ", results$name, ": effects ", name,
             " loaded, nothing changed")
+    # Effects saved before the moved terms were kept (2026-11-16) get them now
+    if (is.null(results$ames[[name]]$moved_terms)) {
+      results$ames[[name]]$moved_terms <- moved_terms
+      saveRDS(results, results_file)
+    }
     refresh_workbook(results)
     return(results)
   }
@@ -680,6 +694,7 @@ compute_ames <- function(results, make_regressors, name, at, changes,
     draws = draws,
     at = at,
     changes = changes,
+    moved_terms = moved_terms,
     profiles = profiles,
     population = population_summary,
     n_draws = n_draws,

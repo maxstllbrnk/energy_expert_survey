@@ -53,6 +53,14 @@ post_estimation <- function(model, est_dir, label = "", n_draws_kr = N_DRAWS_KR,
               results_file)
       # where they are now, in case the folder has moved since
       saved_results$folder <- model_dir
+      # Results saved before the experts behind each coefficient were counted
+      # (2026-11-16) get the counts now, from the model, without estimating again
+      if (is.null(saved_results$term_support)) {
+        support <- count_term_support(model, saved_results)
+        saved_results$term_support <- support$terms
+        saved_results$constant_support <- support$constants
+        saveRDS(saved_results, results_file)
+      }
       refresh_workbook(saved_results)
       return(saved_results)
     }
@@ -248,12 +256,113 @@ post_estimation <- function(model, est_dir, label = "", n_draws_kr = N_DRAWS_KR,
     git_commit = git_commit,
     date = Sys.Date()
   )
+  # How many experts stand behind each coefficient and each group's constants:
+  # counts, not answers, for the minimum cell of the output script
+  support <- count_term_support(model, results)
+  results$term_support <- support$terms
+  results$constant_support <- support$constants
   saveRDS(results, results_file)
   write_results_excel(results)
   minutes <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))
   message("Model ", name, ": results written to ", model_dir, " (",
           round(minutes, 1), " minutes)")
   results
+}
+
+#' How many experts stand behind each coefficient and each group's constants. The
+#' output script hides a coefficient, and every effect of its term, if fewer than
+#' MIN_N experts have the term in the rows of its technology, or fewer than MIN_N
+#' of them recommended that technology (Claude's proposal, agreed by Max,
+#' 2026-11-16): such a coefficient describes the choices of a few experts. A term
+#' with one coefficient for all technologies counts the experts who chose an
+#' alternative in whose row it is not 0.
+#'
+#' @param model   fitted model (fit_mixed_logit()), with its data
+#' @param results the results of the model
+#' @return list:
+#'   terms     one row per coefficient that is not an element of L: parameter,
+#'             column, technology (NA: one for all), experts_with_term,
+#'             experts_choosing
+#'   constants one row per group x technology: group (the group whose constants
+#'             a coefficient or a sum gives; "All experts" without group
+#'             columns), technology, experts, experts_choosing
+count_term_support <- function(model, results) {
+  # One row per decision x alternative, in the order of model$model
+  index <- idx(model)
+  expert <- as.character(index$resp_uid)
+  alternative <- as.character(index$alternative)
+  is_chosen <- as.logical(model$model[[1]])
+  terms <- coefficient_parts(results)$terms
+
+  # (a) Each coefficient. A column of the formula is in model$model; the constant
+  # is 1 in every row.
+  term_rows <- list()
+  for (k in seq_len(nrow(terms))) {
+    column <- terms$column[k]
+    technology <- terms$technology[k]
+    values <- rep(1, length(expert))
+    if (column != "(Intercept)") {
+      if (!column %in% names(model$model)) {
+        stop("Model ", results$name, ": the column ", column,
+             " of a coefficient is not in the model's data")
+      }
+      values <- as.numeric(model$model[[column]])
+    }
+    # A coefficient of one technology counts the rows of that technology: the
+    # same as every row for a column of the expert or the vignette, fewer for a
+    # column that differs between the alternatives
+    has_term <- !is.na(values) & values != 0
+    if (!is.na(technology)) {
+      has_term <- has_term & alternative == technology
+    }
+    term_rows[[k]] <- tibble(
+      parameter = terms$parameter[k],
+      column = column,
+      technology = technology,
+      experts_with_term = n_distinct(expert[has_term]),
+      experts_choosing = n_distinct(expert[has_term & is_chosen])
+    )
+  }
+
+  # (b) Each group's constants: the experts with the group's column, and the
+  # group without a column of its own (the reference group of a model with a
+  # constant and shifts). Several groups without a column share the constant, as
+  # "Other experts". Without group columns, one row for all experts.
+  technologies <- setdiff(results$outcomes, results$reference)
+  has_column <- GROUP_COLUMNS %in% names(model$model)
+  present_columns <- GROUP_COLUMNS[has_column]
+  groups_without_column <- names(GROUP_COLUMNS)[!has_column]
+  membership <- list()
+  if (length(present_columns) == 0) {
+    membership[[ALL_EXPERTS]] <- rep(TRUE, length(expert))
+  } else {
+    in_a_group <- rep(FALSE, length(expert))
+    for (group in names(present_columns)) {
+      group_values <- as.numeric(model$model[[present_columns[[group]]]])
+      membership[[group]] <- group_values == 1
+      in_a_group <- in_a_group | membership[[group]]
+    }
+    if (length(groups_without_column) == 1) {
+      membership[[groups_without_column]] <- !in_a_group
+    } else if (length(groups_without_column) > 1) {
+      membership[["Other experts"]] <- !in_a_group
+    }
+  }
+  constant_rows <- list()
+  for (group in names(membership)) {
+    for (technology in technologies) {
+      is_member <- membership[[group]]
+      constant_rows[[length(constant_rows) + 1]] <- tibble(
+        group = group,
+        technology = technology,
+        experts = n_distinct(expert[is_member]),
+        experts_choosing = n_distinct(
+          expert[is_member & is_chosen & alternative == technology]
+        )
+      )
+    }
+  }
+  list(terms = bind_rows(term_rows), constants = bind_rows(constant_rows))
 }
 
 #' The results to read: one Excel workbook per model. The sheets to read come

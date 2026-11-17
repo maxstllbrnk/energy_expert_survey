@@ -29,9 +29,14 @@ wave_1_2026/output/                  on the secure drive
     m4pe/                            model.rds  results.rds  results.xlsx
     m6pe/                            one folder per model
     model_comparison/                model_comparison.xlsx  model_comparison.rds
+    run_info.rds                     the sample, arm and outcomes, for R/run_output.R
   no_district_heating/               the same
   district_heating_grouped/          the same, with gas and oil as one outcome: the main run
   no_district_heating_grouped/       the same
+  exhibits/                          R/run_output.R: the exhibits of the models for the paper
+    district_heating_grouped/        tables/  figures/  maps/  exhibits.pdf, one folder per run
+    across_runs/                     the arms side by side; gas and oil as one outcome or apart
+    numbers.tex                      the numbers the text quotes, as LaTeX macros
 ```
 
 ## How to run
@@ -46,24 +51,27 @@ source("R/estimation/no_district_heating_grouped.R")  # main run, arm nofw
 source("R/estimation/district_heating.R")        # kept: gas and oil heating apart, arm fw
 source("R/estimation/no_district_heating.R")     # kept: the same for arm nofw
 source("R/check_results.R")                      # a text summary of every run, to share for checking
+source("R/run_output.R")                         # the exhibits of the models: tables, figures, maps, decks
 ```
 
 `R/check_results.R` writes `check_results.txt` to the output folder: for every estimation folder it finds, each model's formula, fit, convergence and coefficients, the comparison, and every set of effects with its checks, side by side. It needs no change when the estimation scripts change. It prints aggregates only, with anything that rests on fewer than 10 experts shown as `<10`, so the file can be shared with someone who has no access to the secure drive.
 
+`R/run_output.R` writes the exhibits of the models for the paper to `exhibits/` in the output folder. For every estimation folder these are the tables, figures and maps of each model and of the models compared; across the folders, the arms side by side. Each folder has a deck, `exhibits.pdf`, to check them. The script reads only what the estimation scripts saved, so it takes minutes, and a run with nothing changed writes nothing. Its settings at the top say which runs are the main ones, which model is the main specification, which models to compare and which numbers the text quotes. It finds the rest itself; a new term or effect only needs its label in `R/functions/labels.R`. See `docs/results_contract.md`, "The output script".
+
 Open `energy_expert_survey.Rproj` first, or run `Rscript <file>` from this folder. Requires R 4.6.2. The decks need `pdflatex` (MiKTeX) on R's PATH: if `Sys.which("pdflatex")` is empty, the run skips them with a message, and the rest runs. A re-run reloads every model, result and set of summary statistics whose inputs have not changed, so changing one model re-estimates that model only.
 
-**A first run to see that everything runs:** set `QUICK_RUN <- TRUE` in `config.R`. The models then use 100 draws, the AMEs 1,000 and Krinsky-Robb 200, nothing is cross-validated, and everything goes to `output_quick/`, so that it is never taken for the real output. Set it back to `FALSE` for the real run, which estimates every model again. The full run cross-validates every model, which adds five estimations per model; on four sessions that is several hours per script.
+**A first run to see that everything runs:** set `QUICK_RUN <- TRUE` in `config.R`. The models then use 100 draws, the AMEs 1,000 and Krinsky-Robb 200, nothing is cross-validated, and everything goes to `output_quick/`, so that it is never taken for the real output. Set it back to `FALSE` for the real run, which estimates every model again. To make a quick run while a full run is going, do not edit `config.R`: the full run's next script would read it when it starts. Start a second R session with the environment variable `EES_QUICK_RUN=1` instead (in PowerShell `$env:EES_QUICK_RUN = "1"` before `Rscript`). The full run cross-validates every model, which adds five estimations per model; on four sessions that is several hours per script.
 
 ## An estimation script is yours to edit
 
 There is one script per data set in `R/estimation/`. Each goes through the same steps in plain sight:
 
-1. **The sample.** Load the cleaned data, one `filter()` per step.
+1. **The sample.** Load the cleaned data, one `filter()` per step, and save `run_info.rds`, which tells the output script what the run is.
 2. **Summary statistics** of exactly that sample.
 3. **`make_regressors()`**, one function that turns source variables into regressors. The same function builds the data and the states of the AMEs, so nothing is coded twice.
 4. **The reference state and the effects**: `at_neutral`, the households, the lists of `changes` and the populations, in the source variables.
 5. **The models.** You write each formula, then call `fit_mixed_logit()` and `post_estimation()`.
-6. **The effects of every model**: one loop calls `compute_ames()` for each set of effects of each model, with the changes of that model's terms (`changes_of_model`).
+6. **The effects of every model**: one loop calls `compute_ames()` for each set of effects of each model, with the changes of that model's terms (`changes_of_model`); then the main model's probabilities by state, for the maps (`observed_states`).
 7. **`compare_models()`** at the end.
 
 To add a variable: one line in `make_regressors()`, one term in a formula, its reference value in `at_neutral`, and, for a variable of the expert, its name in `expert_variables`, which both populations carry. Its effect is a change in one of the lists, and that list goes into `changes_of_model` for every model that has the term. Models that do not use it stay loaded. To study another sample: copy a script and change its filters and its folder name.
@@ -103,7 +111,7 @@ No single measure settles it. Among the seminar's models, the LR test preferred 
 terms of direct research interest that stay regardless. A nested test that cannot be computed, because its restrictions are not independent at the estimates, is not compared. The reason warns if the robust test rests on few experts.
 
 **Changes to the rule.** On 2026-11-14 (Max), after the quick run on the real data had been read, the AME step switched from the effects at a reference expert (`neutral`) to the main AME, `observed_reference`, the average over the observed experts at the reference vignette, read for the three groups and not for the pooled row, whose narrower interval could let an added effect count on its own. A change to what the rule reads is recorded here, with name and date.
-On 2026-11-14, with the eight steps of the covariates (Claude's proposals, open until Max decides): the sets of (4), (4p), (4pe) and (6pe) gain the joint change of year and demand (`built_2000_demand_70`), and those of (4pe) and (6pe) the large expected rise of each fuel (`expects_large_rise_<fuel>`, there equal to the rise of up to 10%), which count as added AMEs where the smaller model lacks them and as shared ones otherwise; and an effect leaves out the units whose regressors its change does not move, so that a row that was an exact 0 is blank and drops out of the comparison. With the steps, the Holm family grows from three questions to eleven in arm fw and from two to ten in nofw, so the earlier questions face a stricter level.
+On 2026-11-14, with the eight steps of the covariates (Claude's proposals, agreed by Max on 2026-11-16): the sets of (4), (4p), (4pe) and (6pe) gain the joint change of year and demand (`built_2000_demand_70`), and those of (4pe) and (6pe) the large expected rise of each fuel (`expects_large_rise_<fuel>`, there equal to the rise of up to 10%), which count as added AMEs where the smaller model lacks them and as shared ones otherwise; and an effect leaves out the units whose regressors its change does not move, so that a row that was an exact 0 is blank and drops out of the comparison. With the steps, the Holm family grows from three questions to eleven in arm fw and from two to ten in nofw, so the earlier questions face a stricter level.
 On 2026-11-15, with the price relative to gas (Claude's proposal, agreed by Max): the price changes keep their definition, each fuel's reported price from its 25th to its 75th percentile, but `price_gas` now moves every technology other than the gas heating and no recommendation, where it moved only the gas heating before. The price effects that (4p) adds over (4) change with it.
 On 2026-11-15, with the heat pump share no longer required (Claude's proposal, agreed by Max): every model's sample widens by the experts without the share of their group. The sets of steps 7 and 8 gain the effect `hp_share_na`, from the mean share to none, which counts as an added AME in step 7. The share effects average over the experts with a share.
 
@@ -141,6 +149,8 @@ R/run_cleaning.R               step 1, runs R/cleaning/
 R/run_summary_statistics.R     step 2, the full sample
 R/estimation/                  step 3, one script per data set; these are the files to edit
 R/check_results.R              after a run, a text summary of every estimation folder, to share
+R/run_output.R                 step 4, the exhibits of the models for the paper; settings at the top
+R/model_output/                the functions of the output script
 R/functions/                   the estimation functions, labels and colours, table and figure helpers
 R/summary_statistics/          one function per block of the summary statistics, and the deck
 R/geodata/                     builds the postcode lookup, once
@@ -163,6 +173,7 @@ Every data decision is made once, in `R/cleaning/06_experts_vignettes.R`, with i
 | `test_compute_ames.R`                                   | AMEs against a computation by hand                                                      |
 | `test_compare_models.R`                                 | The protocol reaches the right verdict where the truth is known                         |
 | `test_sections.R`, `test_deck.R`                        | Every exhibit in every sample, the minimum cell, the deck                               |
+| `test_output.R`                                         | The output script: every exhibit, the minimum cell, a missing label or model, numbers by hand |
 
 `selftest.R` is the only one meant for the real data.
 

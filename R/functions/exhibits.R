@@ -471,8 +471,11 @@ stack_answers <- function(answers) {
 #' @param colours     colours named by the levels of segment
 #' @param x_title     title of the horizontal axis
 #' @param legend_rows rows of the legend
+#' @param panel_rows  rows of panels: 2 gives four panels room for their labels
+#'                    (the households of the output script of the models)
 #' @return ggplot
-plot_stacked_shares <- function(bars, colours, x_title, legend_rows = 1) {
+plot_stacked_shares <- function(bars, colours, x_title, legend_rows = 1,
+                                panel_rows = 1) {
   n_panels <- n_distinct(bars$panel)
   # .pt: points per mm, as text in a plot has its size in mm
   label_size <- (figure_font_size - 2) / .pt
@@ -533,7 +536,7 @@ plot_stacked_shares <- function(bars, colours, x_title, legend_rows = 1) {
           legend.key.size = unit(7, "pt"),
           legend.key.spacing.x = unit(3, "pt"))
   if (n_panels > 1) {
-    plot <- plot + facet_wrap(~panel, nrow = 1)
+    plot <- plot + facet_wrap(~panel, nrow = panel_rows)
   }
   plot
 }
