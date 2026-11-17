@@ -102,23 +102,24 @@ run_summary_statistics(experts, vignettes,
                        file.path(est_dir, "summary_statistics"), sample_label)
 
 # 4. The regressors ------------------------------------------------------------
-# The prices (Claude's proposal, agreed by Max, 2026-11-15): each technology's price
-# relative to the gas price, in logs, with one coefficient for all technologies;
-# the gas heating and no recommendation have 0. A ratio counts a gap of 10% the
-# same for every fuel, and a factor that scales all of an expert's prices (with or
-# without VAT or the base fee, an old tariff) cancels. Until then each row held its
-# own price in cent per kWh. The heat pump's price per kWh of heat is the
-# electricity price divided by its COP: in logs the COP is a constant, which the
-# constants of the technologies take up (and those of floor_heating, if it
-# differed by heat distribution), so the models need none. The hybrid heating has
-# no price of its own: it runs on the heat pump and uses gas only as a backup, so
-# the electricity price and its expected rise enter its row as they enter the heat
-# pump's (Max, 2026-11-12). The gas or oil heating is priced by gas alone, as oil
-# makes up a small part of it (Max, 2026-11-14): its price relative to gas is 0,
-# like the gas heating's in no_district_heating.R. Its expected change and its
-# blank dummies are those of gas too, as the hybrid takes the heat pump's (Claude's
-# proposal, agreed by Max, 2026-11-16). The oil price and Q17 for oil enter no
-# model here.
+# The prices (Max, 2026-11-17): each technology's own price, in logs, with one
+# coefficient for all technologies; no recommendation has 0, as the option without
+# a price. With one coefficient the model compares the ratios already: the heat
+# pump against the gas or oil heating moves with b x log(electricity price / gas
+# price), and a factor that scales all of an expert's prices (with or without VAT
+# or the base fee, an old tariff) cancels between the technologies with a price.
+# From 2026-11-15 to 2026-11-17 each row held its log price over the gas price,
+# which priced no recommendation as if it used gas. The heat pump's price per kWh
+# of heat is the electricity price divided by its COP: in logs the COP is a
+# constant, which the constants of the technologies take up (and those of
+# floor_heating, if it differed by heat distribution), so the models need none.
+# The hybrid heating has no price of its own: it runs on the heat pump and uses
+# gas only as a backup, so the electricity price and its expected rise enter its
+# row as they enter the heat pump's (Max, 2026-11-12). The gas or oil heating is
+# priced by gas alone, as oil makes up a small part of it (Max, 2026-11-14). Its
+# expected change and its blank dummies are those of gas too, as the hybrid takes
+# the heat pump's (Claude's proposal, agreed by Max, 2026-11-16). The oil price
+# and Q17 for oil enter no model here.
 
 # Where the answers are centred, the same in both estimation scripts, so that
 # they share one reference expert. setNames(): the values, with these names. The
@@ -224,7 +225,7 @@ make_regressors <- function(states) {
 
   # (b) Each fuel's price, and its expected change in four categories against no
   # change, not centred (Max, 2026-11-14). A blank price counts as the fuel's mean,
-  # also in the ratios of (c), and a blank in Q17 as no change, each with a dummy,
+  # also in (c), and a blank in Q17 as no change, each with a dummy,
   # which is the difference to an expert at the mean price, or to one who expects
   # no change. unname(): the categories without the answers as names.
   for (fuel in c("gas", "hpelec", "pellet")) {
@@ -242,20 +243,19 @@ make_regressors <- function(states) {
     states[[paste0("fall_", fuel)]] <- if_else(category %in% "fall", 1, 0)
   }
 
-  # (c) Each fuel's price relative to the gas price, in logs, 0 at the mean prices
-  for (fuel in c("hpelec", "pellet")) {
-    states[[paste0("log_price_vs_gas_", fuel)]] <-
-      log(states[[paste0("price_", fuel, "_filled")]] / states$price_gas_filled) -
-      log(price_mean[[fuel]] / price_mean[["gas"]])
+  # (c) Each fuel's price in logs, 0 at its mean
+  for (fuel in c("gas", "hpelec", "pellet")) {
+    states[[paste0("log_price_", fuel)]] <-
+      log(states[[paste0("price_", fuel, "_filled")]]) - log(price_mean[[fuel]])
   }
 
   # (d) One row per alternative. cross_join(): every state with every
   # alternative. With one coefficient for all technologies: what differs between
-  # the alternatives, 0 in the rows of the others. The price relative to gas is 0
-  # in the rows of the gas or oil heating, so the gas price enters those of every
-  # other technology. One blank dummy per fuel, also in the hybrid's rows: with
-  # separate hybrid dummies, (4pe)'s Hessian was not positive definite in the arm
-  # fw (Max, 2026-11-12).
+  # the alternatives, 0 in the rows of the others. Each technology's rows hold the
+  # log price of its fuel and that fuel's dummies; no recommendation has no price
+  # and 0. One blank dummy per fuel, also in the hybrid's rows: with separate
+  # hybrid dummies, (4pe)'s Hessian was not positive definite in the arm fw (Max,
+  # 2026-11-12).
   uses_electricity <- c("Wärmepumpe", "Hybridheizung")
   uses_gas <- c("Gas- oder Ölheizung")
   states %>%
@@ -263,9 +263,10 @@ make_regressors <- function(states) {
       alternative = factor(alternatives, levels = alternatives)
     )) %>%
     mutate(
-      log_price_vs_gas = case_when(
-        alternative == "Pelletheizung" ~ log_price_vs_gas_pellet,
-        alternative %in% uses_electricity ~ log_price_vs_gas_hpelec,
+      log_price = case_when(
+        alternative %in% uses_gas ~ log_price_gas,
+        alternative == "Pelletheizung" ~ log_price_pellet,
+        alternative %in% uses_electricity ~ log_price_hpelec,
         TRUE ~ 0
       ),
       gas_price_na = if_else(alternative %in% uses_gas, price_gas_na, 0),
@@ -376,9 +377,10 @@ attribute_changes <- list(
   )
 )
 # Prices from the 25th to the 75th percentile (Max, 2026-10-29), so that the
-# terms compare on one scale. A fuel moves every technology priced by it relative
-# to gas: electricity the heat pump and the hybrid, and the gas price every
-# technology other than the gas or oil heating (since 2026-11-15). No oil price.
+# terms compare on one scale. A fuel's price moves every technology priced by it:
+# electricity the heat pump and the hybrid, gas the gas or oil heating (Max,
+# 2026-11-17; from 2026-11-15 to 2026-11-17 the gas price moved every other
+# technology). No oil price.
 price_changes <- list(
   price_gas = list(from = list(price_gas_kwh = price_q25[["gas"]]),
                    to = list(price_gas_kwh = price_q75[["gas"]])),
@@ -556,9 +558,9 @@ results_m4 <- post_estimation(
   m4, est_dir, label = "Random constants, correlated, with occupational group"
 )
 
-# (4p) adds each technology's price relative to the gas price, in logs (section
-# 4), and the dummy of each fuel for a price not reported
-formula_m4p <- chosen ~ log_price_vs_gas +
+# (4p) adds each technology's own price, in logs (section 4), and the dummy of
+# each fuel for a price not reported
+formula_m4p <- chosen ~ log_price +
   gas_price_na + pellet_price_na + hpelec_price_na |
   1 + is_hvac + is_sweep +
   age_60 + income_low + heating_oil + replacement_urgent + built_2000 +
@@ -578,7 +580,7 @@ results_m4p <- post_estimation(
 # fit_mixed_logit() then stops and names it. Delete its term from this formula and
 # those of the steps below, and its change (rise_na_<fuel>) from the lists above:
 # the change would still move the expected rise.
-formula_m4pe <- chosen ~ log_price_vs_gas +
+formula_m4pe <- chosen ~ log_price +
   gas_price_na + pellet_price_na + hpelec_price_na +
   expects_rise + gas_rise_na + pellet_rise_na + hpelec_rise_na |
   1 + is_hvac + is_sweep +
@@ -607,7 +609,7 @@ results_m4pe <- post_estimation(
 # house built in 2000 at 70 kWh, the step needs a decision before it can run.
 # Step 1: a house built in 2000 at 70 kWh, per technology, as year and demand may
 # work as substitutes
-formula_m4pe_1 <- chosen ~ log_price_vs_gas +
+formula_m4pe_1 <- chosen ~ log_price +
   gas_price_na + pellet_price_na + hpelec_price_na +
   expects_rise + gas_rise_na + pellet_rise_na + hpelec_rise_na |
   1 + is_hvac + is_sweep +
@@ -622,7 +624,7 @@ results_m4pe_1 <- post_estimation(
 
 # Step 2: the expected change in four categories, with one coefficient for all
 # technologies each: a rise of more than 10% on top of a rise, and a fall
-formula_m4pe_2 <- chosen ~ log_price_vs_gas +
+formula_m4pe_2 <- chosen ~ log_price +
   gas_price_na + pellet_price_na + hpelec_price_na +
   expects_rise + expects_rise_large + expects_fall +
   gas_rise_na + pellet_rise_na + hpelec_rise_na |
@@ -638,7 +640,7 @@ results_m4pe_2 <- post_estimation(
 
 # Step 3: the heating at home, other renewables and other or not stated, against
 # conventional heating, next to a heat pump
-formula_m4pe_3 <- chosen ~ log_price_vs_gas +
+formula_m4pe_3 <- chosen ~ log_price +
   gas_price_na + pellet_price_na + hpelec_price_na +
   expects_rise + expects_rise_large + expects_fall +
   gas_rise_na + pellet_rise_na + hpelec_rise_na |
@@ -653,7 +655,7 @@ results_m4pe_3 <- post_estimation(
 )
 
 # Step 4: the years since training was completed
-formula_m4pe_4 <- chosen ~ log_price_vs_gas +
+formula_m4pe_4 <- chosen ~ log_price +
   gas_price_na + pellet_price_na + hpelec_price_na +
   expects_rise + expects_rise_large + expects_fall +
   gas_rise_na + pellet_rise_na + hpelec_rise_na |
@@ -669,7 +671,7 @@ results_m4pe_4 <- post_estimation(
 )
 
 # Step 5: age, given the years since training
-formula_m4pe_5 <- chosen ~ log_price_vs_gas +
+formula_m4pe_5 <- chosen ~ log_price +
   gas_price_na + pellet_price_na + hpelec_price_na +
   expects_rise + expects_rise_large + expects_fall +
   gas_rise_na + pellet_rise_na + hpelec_rise_na |
@@ -685,7 +687,7 @@ results_m4pe_5 <- post_estimation(
 )
 
 # Step 6: a course on heat pumps in the last three years
-formula_m4pe_6 <- chosen ~ log_price_vs_gas +
+formula_m4pe_6 <- chosen ~ log_price +
   gas_price_na + pellet_price_na + hpelec_price_na +
   expects_rise + expects_rise_large + expects_fall +
   gas_rise_na + pellet_rise_na + hpelec_rise_na |
@@ -703,7 +705,7 @@ results_m4pe_6 <- post_estimation(
 # Step 7: the heat pump's share of the past year, installed for HVAC installers and
 # recommended for advisers and sweeps, each with its own slope, and the dummy for a
 # missing share (2026-11-15), which the step's test adds with the slopes
-formula_m4pe_7 <- chosen ~ log_price_vs_gas +
+formula_m4pe_7 <- chosen ~ log_price +
   gas_price_na + pellet_price_na + hpelec_price_na +
   expects_rise + expects_rise_large + expects_fall +
   gas_rise_na + pellet_rise_na + hpelec_rise_na |
@@ -721,7 +723,7 @@ results_m4pe_7 <- post_estimation(
 
 # Step 8: the chimney sweeps' own slope of the recommended share, on top of the
 # advisers'
-formula_m4pe_8 <- chosen ~ log_price_vs_gas +
+formula_m4pe_8 <- chosen ~ log_price +
   gas_price_na + pellet_price_na + hpelec_price_na +
   expects_rise + expects_rise_large + expects_fall +
   gas_rise_na + pellet_rise_na + hpelec_rise_na |
@@ -860,7 +862,7 @@ comparison <- compare_models(
     "Step 8: do chimney sweeps have their own share slope?",  "m4pe_7", "m4pe_8"
   ),
   blocks = list(
-    prices = c("log_price_vs_gas", "gas_price_na", "pellet_price_na",
+    prices = c("log_price", "gas_price_na", "pellet_price_na",
                "hpelec_price_na"),
     expected_rises = c("expects_rise", "gas_rise_na", "pellet_rise_na",
                        "hpelec_rise_na")

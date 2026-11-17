@@ -428,7 +428,7 @@ TERM_LABELS <- tribble(
   "hp_share_recommended_c",       "Heat pump share recommended (per 10 pp)",      "The expert",
   "hp_share_na",                  "Heat pump share not asked or not given",       "The expert",
   "hp_share_recommended_sweep_c", "Share recommended × chimney sweep (per 10 pp)", "The expert",
-  "log_price_vs_gas",             "Log price relative to gas",                    "Prices and expectations",
+  "log_price",                    "Log price of the technology's fuel",           "Prices and expectations",
   "gas_price_na",                 "Gas price not reported",                       "Prices and expectations",
   "oil_price_na",                 "Heating oil price not reported",               "Prices and expectations",
   "pellet_price_na",              "Pellet price not reported",                    "Prices and expectations",
