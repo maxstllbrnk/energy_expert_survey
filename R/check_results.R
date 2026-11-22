@@ -115,7 +115,9 @@ if (!is.null(folders_to_check)) {
 
 # 3. One summary per folder ----------------------------------------------------
 # sink(split = TRUE): everything printed goes to the file and the console
-old_options <- options(width = 250)
+# max.print: an R session may print 1,000 values only and cut a wide table there
+# (2026-11-22, the full run's sections 9, 10 and 12)
+old_options <- options(width = 250, max.print = 1e6)
 sink(check_file, split = TRUE)
 tryCatch({
   # system(intern = TRUE): runs a command and returns what it prints
@@ -590,7 +592,9 @@ tryCatch({
         if (!any(duplicated(short_names))) {
           names(reference_wide) <- short_names
         }
-        for (profile_name in profile_order) {
+        # A profile without effects (a federal state of observed_states) is
+        # left out
+        for (profile_name in intersect(profile_order, reference_wide$profile)) {
           cat("  ", profile_name, "\n")
           print_table(reference_wide %>%
                         filter(profile == profile_name) %>%
@@ -604,6 +608,11 @@ tryCatch({
           for (set_name in names(results[[model_name]]$ames)) {
             set_table <- effects %>%
               filter(model == model_name, set == set_name)
+            # A set without effects (the households of m4, the states) is
+            # left out
+            if (nrow(set_table) == 0) {
+              next
+            }
             profile_name <- set_table$profile[1]
             if (ALL_EXPERTS %in% set_table$profile) {
               profile_name <- ALL_EXPERTS
