@@ -142,7 +142,8 @@ run_output <- function(main_runs, separate_runs, main_model, models_compared,
         }
         result <- section_models(collected, run_name, model_name,
                                  full = model_name %in% full_models,
-                                 placement = placement, dirs = dirs)
+                                 placement = placement, dirs = dirs,
+                                 is_main = model_name == main_model)
         exhibits <- bind_rows(exhibits, result$exhibits)
         problems <- c(problems, result$problems)
       }

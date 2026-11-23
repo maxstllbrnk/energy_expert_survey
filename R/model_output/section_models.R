@@ -22,9 +22,11 @@
 #' @param full       TRUE: every exhibit (the main model); FALSE: the core ones
 #' @param placement  "main" or "appendix", for the headline exhibits
 #' @param dirs       the folders of the run's exhibits: tables, figures
+#' @param is_main    TRUE for the main model, which the notes and captions name
+#'                   in words rather than by its code
 #' @return list: exhibits (exhibit_row()s of the files written), problems (none)
 section_models <- function(collected, run_name, model_name, full, placement,
-                           dirs) {
+                           dirs, is_main = FALSE) {
   # 1. What the exhibits of the model share ------------------------------------
   block <- if (full) "A. The main model" else "D. Every other model"
   block_robust <- "B. Robustness of the main model's effects"
@@ -38,9 +40,17 @@ section_models <- function(collected, run_name, model_name, full, placement,
   reference_label <- OUTCOME_LABELS[[model_row$reference]]
   technologies <- model_outcomes %>%
     filter(outcome != model_row$reference)
+  # The main model in words, as a reader of the paper does not know the codes;
+  # every other model by its code, which the tables of every model of a run
+  # explain (Claude's proposal, agreed by Max, 2026-11-23)
   model_title <- paste0(model_text(model_name), " ", MODEL_LABELS[[model_name]])
+  model_words <- paste("Model", model_text(model_name))
+  if (is_main) {
+    model_title <- "the main model"
+    model_words <- "The main model"
+  }
   # str_to_lower(): in small letters, inside a sentence
-  model_note <- paste0("Model ", model_text(model_name), ": ", model_row$label,
+  model_note <- paste0(model_words, ": ", model_row$label,
                        "; a mixed logit with the ", str_to_lower(reference_label),
                        " as reference outcome, standard errors clustered by expert.")
   cell_note <- paste0("--: rests on fewer than ", MIN_N, " experts.")
@@ -520,11 +530,13 @@ section_models <- function(collected, run_name, model_name, full, placement,
   # One key per cell, to find the two cells of a difference
   main_effects$key <- paste(main_effects$profile, main_effects$effect,
                             main_effects$outcome, sep = "|")
+  # (a) Every difference of every pair, as the stars of one pair need the
+  # p-values of all three
+  differences <- tibble()
   for (pair in pairs) {
     if (is.null(group_draws) || !all(pair %in% names(group_draws))) {
       next
     }
-    pair_rows <- list()
     for (effect_name in unique(main_effects$effect)) {
       for (k in seq_len(nrow(model_outcomes))) {
         outcome_name <- model_outcomes$outcome[k]
@@ -555,18 +567,43 @@ section_models <- function(collected, run_name, model_name, full, placement,
           estimate <- first_cell$ame - second_cell$ame
           se <- sd(change_first - change_second)
         }
-        pair_rows[[length(pair_rows) + 1]] <- tibble(
+        differences <- bind_rows(differences, tibble(
+          pair_key = paste(pair, collapse = "|"),
           effect = effect_name, effect_label = first_cell$effect_label,
           block = first_cell$block, column = model_outcomes$outcome_label[k],
           ame = estimate, se = se, p = 2 * pnorm(-abs(estimate / se)),
           status = status
-        )
+        ))
       }
     }
-    if (length(pair_rows) == 0) {
+  }
+  # (b) Holm's correction over the pairs of each effect and outcome (Claude's
+  # proposal, agreed by Max, 2026-11-23), so that a star holds at its level for
+  # the three comparisons of a cell together. A pair counts where the change
+  # applies to both groups, also if the minimum cell hides it, as the comparison
+  # is made all the same. p.adjust(): the p-values after the correction, n of
+  # them in the family; a hidden pair has no p-value and counts as the largest.
+  if (nrow(differences) > 0) {
+    differences <- differences %>%
+      group_by(effect, column) %>%
+      mutate(p = p.adjust(p, method = "holm",
+                          n = sum(status != "not applicable"))) %>%
+      ungroup()
+  }
+
+  # (c) One table per pair
+  for (pair in pairs) {
+    if (nrow(differences) == 0) {
       next
     }
-    cells <- effect_cells(bind_rows(pair_rows), tibble(
+    this_pair <- paste(pair, collapse = "|")
+    pair_rows <- differences %>%
+      filter(pair_key == this_pair) %>%
+      select(-pair_key)
+    if (nrow(pair_rows) == 0) {
+      next
+    }
+    cells <- effect_cells(pair_rows, tibble(
       column = character(0), probability = numeric(0), se = numeric(0),
       status = character(0)
     ))
@@ -577,7 +614,9 @@ section_models <- function(collected, run_name, model_name, full, placement,
                     ", in percentage points. ", set_label,
                     ". Both effects are averaged at the same Krinsky-Robb draws, ",
                     "so the standard error in parentheses accounts for how the ",
-                    "two move together.", association, " ", model_note,
+                    "two move together. The stars are after Holm's correction ",
+                    "over the three pairs of groups, for each effect and ",
+                    "outcome.", association, " ", model_note,
                     " --: one of the two rests ",
                     "on fewer than ", MIN_N, " experts. Blank: the change does ",
                     "not apply to one of the groups.")

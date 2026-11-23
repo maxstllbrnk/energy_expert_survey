@@ -398,7 +398,20 @@ MODEL_LABELS <- c(
   m4pe_5 = "+ age",
   m4pe_6 = "+ course on heat pumps",
   m4pe_7 = "+ heat pump share",
-  m4pe_8 = "+ chimney sweeps' share slope"
+  m4pe_8 = "+ chimney sweeps' share slope",
+  # The main model (Max, 2026-11-23), after (4pe) in the tables: steps 1, 2, 6
+  # and 7 at once
+  m4pe_s = "+ year × demand, expected change, course, share"
+)
+
+# What the codes of the models mean, for the notes of the tables that name every
+# model of a run by its code (Claude's proposal, agreed by Max, 2026-11-23)
+MODEL_CODES_NOTE <- paste(
+  "Models: (4) has the household's attributes and the expert's group, with",
+  "random constants; p adds the prices, e the expert's characteristics; (6pe)",
+  "is (4pe) with constants by group; (4pe_k) is (4pe) after step k of the",
+  "expert's covariates, each step adding to the one before; (4pe_s), the main",
+  "model, is (4pe) with steps 1, 2, 6 and 7."
 )
 
 # The regressors of make_regressors() that have coefficients, as the columns of

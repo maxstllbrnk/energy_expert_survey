@@ -571,7 +571,8 @@ results_m4p <- post_estimation(
   label = "Random constants, correlated, with occupational group and prices"
 )
 
-# (4pe), the main specification (Max, 2026-10-29), adds the expert's
+# (4pe), the main specification until 2026-11-23 (Max, 2026-10-29; since then
+# (4pe)_s, after the steps below), adds the expert's
 # characteristics: the degree days and a heat pump at home per technology; each
 # technology's expected rise and its dummy for a blank in Q17 with one
 # coefficient. It starts from (4p), so that it cannot end below it.
@@ -740,6 +741,32 @@ results_m4pe_8 <- post_estimation(
   m4pe_8, est_dir, label = "(4pe), step 8: the chimney sweeps' own share slope"
 )
 
+# The main model (Max, 2026-11-23): (4pe) with steps 1, 2, 6 and 7, in both arms,
+# chosen after reading the model comparison of the full run of the grouped
+# scripts, so that the arms share one specification. The steps add up, so
+# (4pe)_7 also holds steps 3 to 5; this model leaves them out. It starts from
+# (4pe)_2, which it nests, so that it cannot end below it. It enters no test of section 9, so the questions stay those the
+# decision was read from; (4pe)_7 and (4pe)_8 nest it, and compare_models()
+# checks that they end at least as high.
+formula_m4pe_s <- chosen ~ log_price +
+  gas_price_na + pellet_price_na + hpelec_price_na +
+  expects_rise + expects_rise_large + expects_fall +
+  gas_rise_na + pellet_rise_na + hpelec_rise_na |
+  1 + is_hvac + is_sweep +
+  age_60 + income_low + heating_oil + replacement_urgent + built_2000 +
+  demand_70 + demand_200 + floor_heating + built_2000_x_demand_70 +
+  hdd_c + own_heat_pump + hp_course +
+  hp_share_installed_c + hp_share_recommended_c + hp_share_na
+m4pe_s <- fit_mixed_logit("m4pe_s", formula_m4pe_s, choice_data, reference, est_dir,
+                          start_from = m4pe_2)
+results_m4pe_s <- post_estimation(
+  m4pe_s, est_dir,
+  label = paste("Random constants, correlated, with occupational group, prices,",
+                "expert characteristics, a house built in 2000 at 70 kWh, the",
+                "expected change in four categories, a course on heat pumps and",
+                "the heat pump share")
+)
+
 # 8. The effects of every model ------------------------------------------------
 # For every model (Max, 2026-11-14), over the experts of the sample, by group and
 # pooled:
@@ -761,7 +788,7 @@ results_of_model <- list(
   m4 = results_m4, m4p = results_m4p, m4pe = results_m4pe,
   m4pe_1 = results_m4pe_1, m4pe_2 = results_m4pe_2, m4pe_3 = results_m4pe_3,
   m4pe_4 = results_m4pe_4, m4pe_5 = results_m4pe_5, m4pe_6 = results_m4pe_6,
-  m4pe_7 = results_m4pe_7, m4pe_8 = results_m4pe_8
+  m4pe_7 = results_m4pe_7, m4pe_8 = results_m4pe_8, m4pe_s = results_m4pe_s
 )
 changes_m4pe <- c(attribute_changes, price_changes, expectation_changes,
                   expert_changes)
@@ -780,7 +807,10 @@ changes_of_model <- list(
   m4pe_7 = c(changes_m4pe, fall_changes, heating_changes, training_changes,
              age_changes, course_changes, share_changes),
   m4pe_8 = c(changes_m4pe, fall_changes, heating_changes, training_changes,
-             age_changes, course_changes, share_changes)
+             age_changes, course_changes, share_changes),
+  # The main model: the changes of steps 1, 2, 6 and 7 (the change of step 1,
+  # built_2000_demand_70, is among the attribute changes of every model)
+  m4pe_s = c(changes_m4pe, fall_changes, course_changes, share_changes)
 )
 for (model_name in names(results_of_model)) {
   results <- results_of_model[[model_name]]
@@ -816,8 +846,9 @@ for (model_name in names(results_of_model)) {
 # expert of the sample at the reference household, one profile per state that
 # has experts (a profile that selects nobody stops compute_ames()), the
 # probabilities only (Claude's proposal, agreed by Max, 2026-11-16). An expert
-# without a state is in no profile. The main model is that of R/run_output.R;
-# make_regressors() keeps the state as it is, as it is no source variable.
+# without a state is in no profile. The main model is that of R/run_output.R,
+# (4pe)_s since 2026-11-23 ((4pe) until then); make_regressors() keeps the state
+# as it is, as it is no source variable.
 population_states <- population_experts %>%
   left_join(experts %>% select(resp_uid, bundesland), by = "resp_uid",
             relationship = "one-to-one")
@@ -827,8 +858,8 @@ for (state in names(STATE_LABELS)) {
     profiles_states[[state]] <- list(bundesland = state)
   }
 }
-results_m4pe <- compute_ames(
-  results_m4pe, make_regressors, name = "observed_states",
+results_m4pe_s <- compute_ames(
+  results_m4pe_s, make_regressors, name = "observed_states",
   at = households$reference, changes = list(), profiles = profiles_states,
   population = population_states, n_draws = N_DRAWS_PREDICTION_OTHER,
   keep_draws = FALSE
@@ -842,7 +873,10 @@ results_m4pe <- compute_ames(
 # decides instead. The AME step reads the main set for the three groups, without
 # the pooled row, whose narrower intervals would let an added effect count on its
 # own (Max, 2026-11-14).
-cv_models <- c("m4", "m4p", "m4pe", paste0("m4pe_", 1:8))
+# The blocks are Wald tests in the main model, (4pe)_s since 2026-11-23 ((4pe)
+# until then), the expected change with its four categories (Claude's proposal,
+# 2026-11-23, open).
+cv_models <- c("m4", "m4p", "m4pe", paste0("m4pe_", 1:8), "m4pe_s")
 if (QUICK_RUN) {
   cv_models <- NULL
 }
@@ -864,10 +898,10 @@ comparison <- compare_models(
   blocks = list(
     prices = c("log_price", "gas_price_na", "pellet_price_na",
                "hpelec_price_na"),
-    expected_rises = c("expects_rise", "gas_rise_na", "pellet_rise_na",
-                       "hpelec_rise_na")
+    expected_changes = c("expects_rise", "expects_rise_large", "expects_fall",
+                         "gas_rise_na", "pellet_rise_na", "hpelec_rise_na")
   ),
-  final_model = "m4pe",
+  final_model = "m4pe_s",
   ame_name = MAIN_AMES,
   ame_profiles = EXPERT_GROUPS,
   cv_models = cv_models,

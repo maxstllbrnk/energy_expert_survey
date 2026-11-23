@@ -412,7 +412,7 @@ section_comparison <- function(collected, run_name, models_compared, main_model,
       "exceeds the robust test's critical value. Out of sample: the gain in the ",
       "held-out log-likelihood per expert in paired standard errors, or the ",
       "change in BIC where the cross-validation did not run. The decision is the ",
-      "researchers'."
+      "researchers'. ", MODEL_CODES_NOTE
     )
     file_name <- "tab_decision.tex"
     table_custom(tab, file.path(dirs$tables, file_name), latex_text(notes),
@@ -455,7 +455,7 @@ section_comparison <- function(collected, run_name, models_compared, main_model,
     "the convergence code of the optimizer (1 or 2: a stop at a maximum), the iterations, ",
     "the scaled gradient g' H^-1 g, the condition number of the Hessian, the ",
     "model whose estimates were the starting values, and the minutes of the ",
-    "estimation. Valid: at a maximum by the rule's criteria."
+    "estimation. Valid: at a maximum by the rule's criteria. ", MODEL_CODES_NOTE
   )
   file_name <- "tab_diagnostics.tex"
   table_custom(tab, file.path(dirs$tables, file_name), latex_text(notes),
@@ -494,12 +494,11 @@ section_comparison <- function(collected, run_name, models_compared, main_model,
       save_figure(plot, file.path(dirs$figures, file_name), size = "full")
       exhibits <- bind_rows(exhibits, exhibit_row(
         block, "fit", ALL_EXPERTS, "figure", file.path("figures", file_name),
-        paste0("Predicted against observed recommendations, ",
-               model_text(main_model)),
+        paste0("Predicted against observed recommendations, the main model"),
         "appendix",
         paste0("Each point: the share of one recommendation among the decisions ",
                "at one level of a 0/1 term that varies within an expert, observed ",
-               "and predicted by ", model_text(main_model), ". Only cells of at ",
+               "and predicted by the main model. Only cells of at ",
                "least ", N_VIGNETTES * MIN_N, " decisions, which hold at least ",
                MIN_N, " experts.")
       ))

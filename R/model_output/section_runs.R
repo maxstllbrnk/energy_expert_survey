@@ -89,8 +89,10 @@ section_runs <- function(collected, main_runs, separate_runs, main_model,
       filter(run %in% arm_runs, model == main_model) %>%
       distinct(outcome, position, outcome_label) %>%
       arrange(position)
-    model_note <- paste0("Model ", model_text(main_model), " in both arms, ",
-                         "standard errors clustered by expert.")
+    # The main model in words, as a reader of the paper does not know the codes
+    # (Claude's proposal, agreed by Max, 2026-11-23)
+    model_note <- paste0("The main model in both arms, standard errors clustered ",
+                         "by expert.")
 
     # Figures: all experts, the arms side by side
     for (block_name in EFFECT_BLOCKS) {
@@ -110,7 +112,7 @@ section_runs <- function(collected, main_runs, separate_runs, main_model,
         list(block = block_arms, id = paste0("effects_arms_", block_slug(block_name)),
              group = ALL_EXPERTS,
              caption = paste0(block_name, ": effects on the recommendation in ",
-                              "both arms, ", model_text(main_model)),
+                              "both arms, the main model"),
              placement = "main",
              note = paste0("All experts. ", set_note(main_sets[1, ], TRUE),
                            association_note(block_name), " ", arm_note)),
@@ -159,8 +161,8 @@ section_runs <- function(collected, main_runs, separate_runs, main_model,
           block_arms, "effects_arms", ALL_EXPERTS, "table",
           file.path("tables", file_name),
           paste0("Effects on ",
-                 outcome_phrase(arm_outcomes$outcome_label[k]), " in both arms, ",
-                 model_text(main_model)),
+                 outcome_phrase(arm_outcomes$outcome_label[k]),
+                 " in both arms, the main model"),
           if (k == 1) "main" else "appendix"
         ))
       }
@@ -197,7 +199,7 @@ section_runs <- function(collected, main_runs, separate_runs, main_model,
         block_arms, "baseline_arms", ALL_EXPERTS, "figure",
         file.path("figures", file_name),
         paste0("Predicted recommendations at each household in both arms, ",
-               model_text(main_model)),
+               "the main model"),
         "appendix",
         paste0("All experts. The average predicted probability of each ",
                "recommendation over the observed experts of each arm, each with ",
@@ -309,7 +311,8 @@ section_runs <- function(collected, main_runs, separate_runs, main_model,
         header <- c(header, setNames(2, arm_levels[k]))
       }
       notes <- paste0("Every question of the fixed rule for comparing models, in each ",
-                      "arm; the decision is the researchers'. ", arm_note)
+                      "arm; the decision is the researchers'. ", arm_note, " ",
+                      MODEL_CODES_NOTE)
       file_name <- "tab_decision_arms.tex"
       table_custom(tab, file.path(dirs$tables, file_name), latex_text(notes),
                    col_names = column_names,
@@ -434,8 +437,8 @@ section_runs <- function(collected, main_runs, separate_runs, main_model,
              id = paste0("choice_set_", arm, "_", block_slug(block_name)),
              group = ALL_EXPERTS,
              caption = paste0(block_name, ": gas and oil heating as one outcome ",
-                              "or apart, ", str_to_lower(ARM_LABELS[[arm]]), ", ",
-                              model_text(main_model)),
+                              "or apart, ", str_to_lower(ARM_LABELS[[arm]]),
+                              ", the main model"),
              placement = "appendix",
              note = paste0("All experts. ", set_note(both_sets[1, ], TRUE),
                            association_note(block_name),

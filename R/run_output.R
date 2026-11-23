@@ -26,25 +26,31 @@ source(file.path("R", "setup.R"))
 # oil heating apart, compared with them
 main_runs <- c(fw = "district_heating_grouped", nofw = "no_district_heating_grouped")
 separate_runs <- c(fw = "district_heating", nofw = "no_district_heating")
-# The main specification (Max, 2026-10-29), until the model comparison of the full
-# run has been read (Max, 2026-11-16): every exhibit in every run
-main_model <- "m4pe"
+# The main specification (Max, 2026-11-23): (4pe) with steps 1, 2, 6 and 7 of the
+# expert's covariates, in both arms; (4pe) until then (Max, 2026-10-29). Every
+# exhibit in every run.
+main_model <- "m4pe_s"
 full_models <- main_model
 # The comparisons within a run, each a table of models and their effects side by
-# side; a model that a run does not have is left out there ((6pe) in arm nofw)
+# side; a model that a run does not have is left out there ((6pe) in arm nofw).
+# The first is also the table of the arms side by side. The specifications build
+# up to the main model, and (6pe) stands next to (4pe), whose constants it splits
+# by group (Claude's proposal, 2026-11-23, open; until then (6pe) closed the
+# specifications).
 models_compared <- list(
-  specifications = c("m4", "m4p", "m4pe", "m6pe"),
+  specifications = c("m4", "m4p", "m4pe", "m4pe_s"),
+  covariances = c("m4pe", "m6pe"),
   steps = c("m4pe", paste0("m4pe_", 1:8))
 )
 # The numbers the text quotes, as LaTeX macros in exhibits/numbers.tex: \macro
 # prints the number. quantity: "ame", "se", "ci_low", "ci_high" (percentage
 # points) or "probability" (percent, with effect NA). Letters only in a macro.
 text_numbers <- tribble(
-  ~macro,                ~arm,   ~model, ~set,                 ~profile,      ~effect,              ~outcome,     ~quantity,
-  "hpBaselineFw",        "fw",   "m4pe", "observed_reference", "All experts", NA,                   "Wärmepumpe", "probability",
-  "hpBaselineNofw",      "nofw", "m4pe", "observed_reference", "All experts", NA,                   "Wärmepumpe", "probability",
-  "hpUrgentFw",          "fw",   "m4pe", "observed_reference", "All experts", "replacement_urgent", "Wärmepumpe", "ame",
-  "hpUrgentNofw",        "nofw", "m4pe", "observed_reference", "All experts", "replacement_urgent", "Wärmepumpe", "ame"
+  ~macro,                ~arm,   ~model,     ~set,                 ~profile,      ~effect,              ~outcome,     ~quantity,
+  "hpBaselineFw",        "fw",   main_model, "observed_reference", "All experts", NA,                   "Wärmepumpe", "probability",
+  "hpBaselineNofw",      "nofw", main_model, "observed_reference", "All experts", NA,                   "Wärmepumpe", "probability",
+  "hpUrgentFw",          "fw",   main_model, "observed_reference", "All experts", "replacement_urgent", "Wärmepumpe", "ame",
+  "hpUrgentNofw",        "nofw", main_model, "observed_reference", "All experts", "replacement_urgent", "Wärmepumpe", "ame"
 )
 
 # 2. The exhibits --------------------------------------------------------------

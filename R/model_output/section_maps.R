@@ -55,8 +55,8 @@ section_maps <- function(collected, run_name, main_model, placement, dirs) {
         block, paste0("map_", set_name), ALL_EXPERTS, "map",
         file.path("maps", file_name),
         paste0("Predicted probability of ",
-               outcome_phrase(model_outcomes$outcome_label[k]), " by state, ",
-               model_text(main_model)),
+               outcome_phrase(model_outcomes$outcome_label[k]),
+               " by state, the main model"),
         if (model_outcomes$outcome[k] == model_row$reference) placement else
           "appendix",
         paste0("Sample: ", run_row$sample_label, ". The average predicted ",

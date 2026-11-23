@@ -203,10 +203,17 @@ set_note <- function(set_row, for_figure = FALSE) {
                   "percentile interval from ", draws, ". The household and the ",
                   "values of the changes: the notes of the table of this set."))
   }
+  # The stars take the effect over its standard error as normal, while the
+  # figures show the percentile interval of the same draws, which can differ
+  # from it where the draws are skewed: the note says so (Claude's proposal,
+  # agreed by Max, 2026-11-23)
   paste0(who, " The average change in the probability of each recommendation, ",
          "in percentage points; the probability at the baseline in percent.",
-         values, " Standard errors in parentheses, from ", draws, ". The effects ",
-         "of one change sum to zero over the outcomes.")
+         values, " Standard errors in parentheses, from ", draws, "; the stars ",
+         "take the effect over its standard error as normal, whereas the figures ",
+         "show the 95% percentile interval of the draws, which can differ where ",
+         "the draws are skewed. The effects of one change sum to zero over the ",
+         "outcomes.")
 }
 
 #' The sentence that the estimates of the expert's terms are associations, for

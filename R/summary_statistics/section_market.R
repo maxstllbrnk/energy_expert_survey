@@ -9,10 +9,10 @@
 ################################################################################
 # Q11c is free text. At most this many manufacturers are shown by name.
 N_BRANDS_SHOWN <- 10
-# Free text that names no manufacturer, as spelled after the harmonisation below;
-# it counts as "Other". This list cannot be complete: another German word with at
-# least MIN_N mentions would reach the table, so read the panel of Q11c of the
-# first real run, and add the word here.
+# Free text that names no manufacturer, in any case; it counts as "Other". This
+# list cannot be complete: another German word with at least MIN_N mentions would
+# reach the table, so read the panel of Q11c of each real run, and add the word
+# here.
 NOT_A_BRAND <- c("Sonstige", "Sonstiges", "Other", "Andere", "Keine", "Keiner",
                  "Keine Angabe", "Keine Ahnung", "K.a.", "K. A.", "Ka", "Weiß Nicht",
                  "Weiss Nicht", "Weiß Ich Nicht", "Weiss Ich Nicht", "Nicht Bekannt",
@@ -55,11 +55,38 @@ section_market <- function(experts, dirs) {
     "of six places with the answer \"don't know\", which counts as not answered, so",
     "the question is not like for like across the waves; all waves are pooled. Q11c:",
     "HVAC firms, which manufacturer they sell most of the technology they",
-    "install most; free text, harmonized in case and spacing only. Manufacturers",
-    "with at least", MIN_N, "mentions, at most", N_BRANDS_SHOWN, "of them. Other:",
+    "install most; free text, harmonized in case and spacing only: a",
+    "manufacturer is in capitals if more answers write it so than with capital",
+    "first letters, and with capital first letters otherwise.",
+    "Manufacturers with at least", MIN_N, "mentions, at most", N_BRANDS_SHOWN,
+    "of them. Other:",
     "the rest, and answers that name no manufacturer, which stay in N.",
     cell_note()
   )
+
+  # One spelling per manufacturer, the same in every version (2026-11-23): answers
+  # that differ only in case and spacing are one manufacturer, written in capitals
+  # if more of its answers write it so than with capital first letters (BWT,
+  # where capital first letters alone gave Bwt), and with capital first letters
+  # otherwise. Only these two forms, so that no answer's own spelling is printed,
+  # and none from a list in the code, which would be free text from the data
+  # (project profile).
+  brand_spelling <- tibble(key = character(0), shown = character(0))
+  if ("brand_top1" %in% names(experts)) {
+    # str_squish(): no spaces at the ends, one space within; str_to_lower(),
+    # str_to_upper(), str_to_title(): in small letters, in capitals, with capital
+    # first letters
+    brand_spelling <- tibble(spelling = str_squish(experts$brand_top1)) %>%
+      filter(!is.na(spelling)) %>%
+      mutate(key = str_to_lower(spelling)) %>%
+      group_by(key) %>%
+      summarise(in_capitals = sum(spelling == str_to_upper(key)),
+                in_title_case = sum(spelling == str_to_title(key))) %>%
+      ungroup() %>%
+      mutate(shown = if_else(in_capitals > in_title_case, str_to_upper(key),
+                             str_to_title(key))) %>%
+      select(key, shown)
+  }
 
   for (group in c(ALL_EXPERTS, EXPERT_GROUPS)) {
     group_experts <- subset_group(experts, group)
@@ -68,12 +95,11 @@ section_market <- function(experts, dirs) {
     # describe too few experts
     brand_rows <- tibble()
     if ("brand_top1" %in% names(group_experts)) {
-      # str_squish(): no spaces at the ends, one space within; str_to_title():
-      # capital first letters
-      brand <- str_to_title(str_squish(group_experts$brand_top1))
-      # desc(): from most to fewest; row_number(): the place after sorting
-      brands_shown <- tibble(brand = brand) %>%
-        filter(!is.na(brand), !(brand %in% NOT_A_BRAND)) %>%
+      # match(): the row of brand_spelling with each answer's key
+      key <- str_to_lower(str_squish(group_experts$brand_top1))
+      brand <- brand_spelling$shown[match(key, brand_spelling$key)]
+      brands_shown <- tibble(brand = brand, key = key) %>%
+        filter(!is.na(brand), !(key %in% str_to_lower(NOT_A_BRAND))) %>%
         count(brand) %>%
         filter(n >= MIN_N) %>%
         arrange(desc(n), brand) %>%
