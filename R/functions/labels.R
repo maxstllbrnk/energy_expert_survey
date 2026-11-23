@@ -153,6 +153,16 @@ TECHNOLOGY_LABELS <- c(
   "Fernwärme" = "District heating",
   "Keine Empfehlung" = "No recommendation"
 )
+# The outcomes of the models, in the order of the columns of results.xlsx: the
+# recommendations, and the gas and the oil heating as one outcome of the
+# *_grouped.R estimation scripts (Max, 2026-11-14; its name and, for now, no colour
+# of its own: Claude's proposal, agreed by Max, 2026-11-16). Apart from
+# TECHNOLOGY_LABELS, as the tables of the recommendations give each of those a row.
+OUTCOME_LABELS <- c(
+  TECHNOLOGY_LABELS[c("Wärmepumpe", "Pelletheizung", "Hybridheizung")],
+  "Gas- oder Ölheizung" = "Gas or oil heating",
+  TECHNOLOGY_LABELS[c("Gasheizung", "Ölheizung", "Fernwärme", "Keine Empfehlung")]
+)
 # The technologies of the heating at home (Q20)
 OWN_HEATING_LABELS <- c(
   "Wärmepumpe" = "Heat pump",
@@ -261,6 +271,20 @@ DESIGN_LEVELS <- tribble(
   "att_heat_distribution",  "Heat distribution",        "eine Fußbodenheizung",                           "Underfloor heating",             FALSE
 )
 
+# The design leaves out two kinds of house: none built in 2000 is unrenovated
+# (200 kWh/m²) or has oil heating, so its 128 vignettes are the 192 combinations of
+# the levels above without these 64. compute_ames() leaves a unit out of an effect
+# whose change takes it outside the design (Max, 2026-11-14).
+
+#' TRUE for each state inside the design of the vignettes
+#'
+#' @param states table with att_build_year, att_current_heating and att_heat_demand
+#' @return logical, one value per row
+is_in_design <- function(states) {
+  !(states$att_build_year == "2000" &
+      (states$att_current_heating == "Ölheizung" | states$att_heat_demand == "200"))
+}
+
 # 5. Colours -------------------------------------------------------------------
 # The original palette of the project (commit ced89b0)
 COLOUR_BAR <- "#2a78d6"         # every single-colour bar and histogram
@@ -319,3 +343,189 @@ MAP_LOW <- "#cde2fb"
 MAP_HIGH <- "#0d366b"
 MAP_BREAKOFF_LOW <- "#fde3d5"
 MAP_BREAKOFF_HIGH <- "#8c2d0a"
+
+# 6. The exhibits of the models ------------------------------------------------
+# Read by the output script (R/run_output.R). A term, effect, set or model
+# without a label here stops it, with a list of everything missing, so that no
+# raw name reaches a table or figure.
+
+# The outcomes in colour: the technologies, and the gas or oil heating of the
+# *_grouped.R scripts in the gas heating's colour, as the two never appear in
+# the same run (Claude's proposal, agreed by Max, 2026-11-16). Apart from
+# TECHNOLOGY_COLOURS, which the summary statistics read.
+OUTCOME_COLOURS <- c(
+  TECHNOLOGY_COLOURS[c("Heat pump", "District heating", "Pellet heating",
+                       "Hybrid heating", "Gas heating", "Oil heating",
+                       "No recommendation")],
+  "Gas or oil heating" = "#e87ba4"
+)
+# Filled symbols, so that the groups differ in more than colour
+GROUP_SHAPES <- c(
+  "All experts" = 23,
+  "Energy advisers" = 21,
+  "HVAC installers" = 24,
+  "Chimney sweeps" = 22
+)
+# The symbols of other series (models, households, arms), in this order
+SERIES_SHAPES <- c(21, 24, 22, 23, 25)
+# The 0/1 columns that give each group its constants: a shift on top of the
+# constant, or the group's own constant in a model with constants by group
+GROUP_COLUMNS <- c(
+  "Energy advisers" = "is_adviser",
+  "HVAC installers" = "is_hvac",
+  "Chimney sweeps" = "is_sweep"
+)
+# The estimation scripts with the gas and the oil heating as one outcome and
+# apart (run_info.rds of each estimation folder)
+VARIANT_LABELS <- c(
+  grouped = "Gas and oil heating as one outcome",
+  separate = "Gas and oil heating apart"
+)
+
+# What each model adds to the one before it in the estimation scripts. The
+# tables number the models (1), (2), ... and give these as their headers (Claude's
+# proposal, agreed by Max, 2026-11-16); the texts are Claude's draft, open for
+# Max's edits.
+MODEL_LABELS <- c(
+  m4 = "Attributes and group",
+  m4p = "+ prices",
+  m4pe = "+ expert characteristics",
+  m6pe = "Constants by group",
+  m4pe_1 = "+ year × demand",
+  m4pe_2 = "+ expected change in four categories",
+  m4pe_3 = "+ heating at home",
+  m4pe_4 = "+ years since training",
+  m4pe_5 = "+ age",
+  m4pe_6 = "+ course on heat pumps",
+  m4pe_7 = "+ heat pump share",
+  m4pe_8 = "+ chimney sweeps' share slope",
+  # The main model (Max, 2026-11-23), after (4pe) in the tables: steps 1, 2, 6
+  # and 7 at once
+  m4pe_s = "+ year × demand, expected change, course, share"
+)
+
+# What the codes of the models mean, for the notes of the tables that name every
+# model of a run by its code (Claude's proposal, agreed by Max, 2026-11-23)
+MODEL_CODES_NOTE <- paste(
+  "Models: (4) has the household's attributes and the expert's group, with",
+  "random constants; p adds the prices, e the expert's characteristics; (6pe)",
+  "is (4pe) with constants by group; (4pe_k) is (4pe) after step k of the",
+  "expert's covariates, each step adding to the one before; (4pe_s), the main",
+  "model, is (4pe) with steps 1, 2, 6 and 7."
+)
+
+# The regressors of make_regressors() that have coefficients, as the columns of
+# the coefficient tables name them. panel: where a row goes; "Prices and
+# expectations" holds the terms with one coefficient for all technologies. The
+# constants and the group columns are not listed: the tables show each group's
+# own constant instead.
+TERM_LABELS <- tribble(
+  ~term,                          ~label,                                         ~panel,
+  "age_60",                       "Couple in their mid-60s",                      "The household",
+  "income_low",                   "Income below €40,000",                         "The household",
+  "heating_oil",                  "Oil heating",                                  "The household",
+  "replacement_urgent",           "Broken, urgent replacement",                   "The household",
+  "built_2000",                   "Built in 2000",                                "The household",
+  "demand_70",                    "70 kWh/m² (fully renovated)",                  "The household",
+  "demand_200",                   "200 kWh/m² (not renovated)",                   "The household",
+  "floor_heating",                "Underfloor heating",                           "The household",
+  "built_2000_x_demand_70",       "Built in 2000 × 70 kWh/m²",                    "The household",
+  "hdd_c",                        "Heating degree days (per 1,000)",              "The expert",
+  "own_heat_pump",                "Heat pump at home",                            "The expert",
+  "own_renewable",                "Other renewable heating at home",              "The expert",
+  "own_other_heating",            "Other or no heating stated at home",           "The expert",
+  "years_since_training_c",       "Years since training (per 10)",                "The expert",
+  "expert_age_c",                 "Age (per 10 years)",                           "The expert",
+  "hp_course",                    "Course on heat pumps",                         "The expert",
+  "hp_share_installed_c",         "Heat pump share installed (per 10 pp)",        "The expert",
+  "hp_share_recommended_c",       "Heat pump share recommended (per 10 pp)",      "The expert",
+  "hp_share_na",                  "Heat pump share not asked or not given",       "The expert",
+  "hp_share_recommended_sweep_c", "Share recommended × chimney sweep (per 10 pp)", "The expert",
+  "log_price",                    "Log price of the technology's fuel",           "Prices and expectations",
+  "gas_price_na",                 "Gas price not reported",                       "Prices and expectations",
+  "oil_price_na",                 "Heating oil price not reported",               "Prices and expectations",
+  "pellet_price_na",              "Pellet price not reported",                    "Prices and expectations",
+  "hpelec_price_na",              "Heat-pump electricity price not reported",     "Prices and expectations",
+  "dh_price_na",                  "District heating price not reported",          "Prices and expectations",
+  "expects_rise",                 "Expects its price to rise",                    "Prices and expectations",
+  "expects_rise_large",           "Expects a rise of more than 10%",              "Prices and expectations",
+  "expects_fall",                 "Expects its price to fall",                    "Prices and expectations",
+  "gas_rise_na",                  "Gas price expectation not reported",           "Prices and expectations",
+  "oil_rise_na",                  "Heating oil price expectation not reported",   "Prices and expectations",
+  "pellet_rise_na",               "Pellet price expectation not reported",        "Prices and expectations",
+  "hpelec_rise_na",               "Electricity price expectation not reported",   "Prices and expectations",
+  "dh_rise_na",                   "District heating price expectation not reported", "Prices and expectations"
+)
+
+# The changes of compute_ames(), in the order of the tables and figures. block:
+# one panel or figure each, in the order of EFFECT_BLOCKS, named by the short
+# name its files carry (paths on the secure drive must stay below Windows' 260
+# characters). unit: of the values a continuous change moves between, which the
+# notes quote.
+EFFECT_BLOCKS <- c(household = "The household", prices = "Prices",
+                   price_na = "Price not known", expectations = "Expected price change",
+                   expert = "The expert")
+EFFECT_LABELS <- tribble(
+  ~effect,                     ~label,                                  ~block,                  ~unit,
+  "age_60",                    "Couple in their mid-60s",               "The household",         "",
+  "income_low",                "Income below €40,000",                  "The household",         "",
+  "heating_oil",               "Oil heating",                           "The household",         "",
+  "replacement_urgent",        "Broken, urgent replacement",            "The household",         "",
+  "built_2000",                "Built in 2000",                         "The household",         "",
+  "demand_70",                 "70 kWh/m² (fully renovated)",           "The household",         "",
+  "demand_200",                "200 kWh/m² (not renovated)",            "The household",         "",
+  "floor_heating",             "Underfloor heating",                    "The household",         "",
+  "built_2000_demand_70",      "Built in 2000 at 70 kWh/m²",            "The household",         "",
+  "price_gas",                 "Gas price",                             "Prices",                "ct/kWh",
+  "price_hpelec",              "Heat-pump electricity price",           "Prices",                "ct/kWh",
+  "price_dh",                  "District heating price",                "Prices",                "ct/kWh",
+  "price_oil",                 "Heating oil price",                     "Prices",                "ct/kWh",
+  "price_pellet",              "Pellet price",                          "Prices",                "ct/kWh",
+  "price_na_gas",              "Gas price not known",                   "Price not known",       "",
+  "price_na_hpelec",           "Electricity price not known",           "Price not known",       "",
+  "price_na_dh",               "District heating price not known",      "Price not known",       "",
+  "price_na_oil",              "Heating oil price not known",           "Price not known",       "",
+  "price_na_pellet",           "Pellet price not known",                "Price not known",       "",
+  "expects_rise_gas",          "Gas: rise up to 10%",                   "Expected price change", "",
+  "expects_large_rise_gas",    "Gas: rise above 10%",                   "Expected price change", "",
+  "expects_fall_gas",          "Gas: fall",                             "Expected price change", "",
+  "rise_na_gas",               "Gas: no answer",                        "Expected price change", "",
+  "expects_rise_hpelec",       "Electricity: rise up to 10%",           "Expected price change", "",
+  "expects_large_rise_hpelec", "Electricity: rise above 10%",           "Expected price change", "",
+  "expects_fall_hpelec",       "Electricity: fall",                     "Expected price change", "",
+  "rise_na_hpelec",            "Electricity: no answer",                "Expected price change", "",
+  "expects_rise_dh",           "District heating: rise up to 10%",      "Expected price change", "",
+  "expects_large_rise_dh",     "District heating: rise above 10%",      "Expected price change", "",
+  "expects_fall_dh",           "District heating: fall",                "Expected price change", "",
+  "rise_na_dh",                "District heating: no answer",           "Expected price change", "",
+  "expects_rise_oil",          "Heating oil: rise up to 10%",           "Expected price change", "",
+  "expects_large_rise_oil",    "Heating oil: rise above 10%",           "Expected price change", "",
+  "expects_fall_oil",          "Heating oil: fall",                     "Expected price change", "",
+  "rise_na_oil",               "Heating oil: no answer",                "Expected price change", "",
+  "expects_rise_pellet",       "Pellets: rise up to 10%",               "Expected price change", "",
+  "expects_large_rise_pellet", "Pellets: rise above 10%",               "Expected price change", "",
+  "expects_fall_pellet",       "Pellets: fall",                         "Expected price change", "",
+  "rise_na_pellet",            "Pellets: no answer",                    "Expected price change", "",
+  "heat_pump_at_home",         "Heat pump at home",                     "The expert",            "",
+  "hdd",                       "Heating degree days",                   "The expert",            "degree days",
+  "renewable_at_home",         "Other renewable heating at home",       "The expert",            "",
+  "other_at_home",             "Other or no heating stated at home",    "The expert",            "",
+  "years_since_training",      "Years since training",                  "The expert",            "years",
+  "expert_age",                "Age",                                   "The expert",            "years",
+  "hp_course",                 "Course on heat pumps",                  "The expert",            "",
+  "hp_share_installed",        "Heat pump share installed",             "The expert",            "%",
+  "hp_share_recommended",      "Heat pump share recommended",           "The expert",            "%",
+  "hp_share_na",               "Heat pump share not asked or not given", "The expert",           ""
+)
+
+# The sets of effects of the estimation scripts (section 8). short: in legends.
+SET_LABELS <- tribble(
+  ~set,                   ~label,                                                ~short,
+  "observed_reference",   "The observed experts at the reference household",     "Reference household",
+  "observed_inefficient", "The observed experts at the inefficient household",   "Oil, 200 kWh/m²",
+  "observed_efficient",   "The observed experts at the efficient household",     "2000, 70 kWh/m²",
+  "observed_old_poor",    "The observed experts at the older low-income household", "Mid-60s, low income",
+  "answers",              "The observed experts over the vignettes they answered", "Their own vignettes",
+  "neutral",              "One reference expert per group",                      "Reference expert",
+  "observed_states",      "The observed experts of each state at the reference household", "By state"
+)

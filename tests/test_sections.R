@@ -342,12 +342,19 @@ report("Q28: the weight of the other criterion",
        abs(number_of(cells[3]) - 100 * (6 / 3) / 12) < 0.051, cells[3])
 
 # Q11c: free text in different spellings, an answer that names no manufacturer, a
-# manufacturer below the minimum cell. Vaillant: 15 of 36; Other: 12 + 9 of 36.
+# manufacturer below the minimum cell. A manufacturer is in capitals if more of
+# its answers write it so than with capital first letters, and with capital first
+# letters otherwise, never in an answer's own spelling (2026-11-23): Vaillant 15
+# of 57 (6 against 3 in capitals), BWT 11 (7 in capitals, none Bwt), Wolf 10 (9
+# in small letters and one WoLf, which is not printed). "keine" is in capitals
+# (KEINE 7), which the list of answers without a manufacturer catches in any
+# case. Other: 12 + 9 of 57.
 brand_answers <- tibble(
-  resp_uid = paste0("expert", 1:40),
+  resp_uid = paste0("expert", 1:61),
   expert_group = factor("HVAC installers", levels = EXPERT_GROUPS),
-  brand_top1 = c(rep("vaillant ", 12), rep("VAILLANT", 3), rep("Keine", 12),
-                 rep("Buderus", 9), rep(NA, 4))
+  brand_top1 = c(rep("vaillant ", 6), rep("Vaillant", 6), rep("VAILLANT", 3),
+                 rep("BWT", 7), rep(" bwt", 4), rep("wolf", 9), "WoLf",
+                 rep("KEINE", 7), rep("keine", 5), rep("Buderus", 9), rep(NA, 4))
 )
 dirs_brands <- make_dirs("brands")
 run_brands <- list(exhibits = section_market(brand_answers, dirs_brands),
@@ -355,16 +362,26 @@ run_brands <- list(exhibits = section_market(brand_answers, dirs_brands),
 check_run(run_brands, "brands")
 cells <- table_row(run_brands, "tab_market_all.tex", "Vaillant")
 report("Q11c: spellings of one manufacturer come together",
-       number_of(cells[2]) == 36 && abs(number_of(cells[3]) - 100 * 15 / 36) < 0.051,
+       number_of(cells[2]) == 57 && abs(number_of(cells[3]) - 100 * 15 / 57) < 0.051,
        cells[3])
+cells <- table_row(run_brands, "tab_market_all.tex", "BWT")
+report("Q11c: a manufacturer in capitals stays in capitals",
+       abs(number_of(cells[3]) - 100 * 11 / 57) < 0.051, cells[3])
+cells <- table_row(run_brands, "tab_market_all.tex", "Wolf")
+report("Q11c: otherwise capital first letters, not an answer's own spelling",
+       abs(number_of(cells[3]) - 100 * 10 / 57) < 0.051, cells[3])
 cells <- table_row(run_brands, "tab_market_all.tex", "Other")
 report("Q11c: no manufacturer, and below the minimum cell, go into Other",
-       abs(number_of(cells[3]) - 100 * 21 / 36) < 0.051, cells[3])
+       abs(number_of(cells[3]) - 100 * 21 / 57) < 0.051, cells[3])
 lines <- readLines(file.path(run_brands$output_dir, "tables", "tab_market_all.tex"),
                    encoding = "UTF-8")
-report("Q11c: neither is named",
-       !any(grepl("Keine", lines, fixed = TRUE)) &&
-         !any(grepl("Buderus", lines, fixed = TRUE)))
+report("Q11c: neither is named, nor a spelling that lost",
+       !any(grepl("KEINE", lines, fixed = TRUE)) &&
+         !any(grepl("Keine", lines, fixed = TRUE)) &&
+         !any(grepl("Buderus", lines, fixed = TRUE)) &&
+         !any(grepl("VAILLANT", lines, fixed = TRUE)) &&
+         !any(grepl("Bwt", lines, fixed = TRUE)) &&
+         !any(grepl("WoLf", lines, fixed = TRUE)))
 
 # A histogram draws no bin and no panel below the minimum cell: panel A has one bin
 # of 20 answers, panel B 12 answers, each in a bin of its own

@@ -10,8 +10,11 @@
 #          standard errors as compute_ames(), with the same draws;
 #          start_from_common() and start_from_nested() the same starting values;
 #          add_regressors(), add_alternative_prices() and long_terms() the same
-#          regressors as make_regressors() of both scripts; term_changes() of old
-#          01_run_term_effects.R the same effects as the changes of the script
+#          regressors as make_regressors() of both scripts, with the hybrid's
+#          rows as the heat pump's (hybrid_as_heat_pump()), and make_regressors()
+#          of each grouped script the same regressors as its arm's script;
+#          term_changes() of old 01_run_term_effects.R the same effects as the
+#          changes of the script
 ################################################################################
 
 source(file.path("R", "setup.R"))
@@ -1191,13 +1194,14 @@ check("start_from_common(): against the model it starts from",
 check("start_from_common(): against fit_mixed_logit()",
       abs(log_likelihood_common - m_group$fit_info$log_likelihood_start), 1e-6)
 
-# 7. make_regressors() of both scripts against the old variables ----------------
+# 7. make_regressors() of all four scripts against the old variables ------------
 # On the synthetic cleaned data. From each script only its settings, its lists and
 # make_regressors(): the rest would estimate.
 script_objects <- function(script) {
-  wanted <- c("alternatives", "reference", "reference_values", "COP", "HYBRID_GAS_SHARE",
-              "prices", "expectations", "price_mean", "price_q25", "price_q75", "rise_share",
-              "heat_pump_share", "hdd_mean", "make_regressors", "at_neutral", "attribute_changes",
+  wanted <- c("alternatives", "reference", "reference_values",
+              "prices", "price_mean", "price_q25", "price_q75", "hdd_mean",
+              "heating_group_share", "covariates", "expectation_category",
+              "make_regressors", "at_neutral", "attribute_changes",
               "price_changes", "expectation_changes", "expert_changes")
   objects <- new.env(parent = globalenv())
   for (expression in as.list(parse(script, encoding = "UTF-8", keep.source = FALSE))) {
@@ -1248,6 +1252,29 @@ OLD_EXPECTATION_VARIABLES <- tribble(
   "Hybridheizung", "hybrid", "pexp_hybrid_c", "pexp_hybrid_na",
   "Fernwärme",     "dh",     "pexp_dh_c",     "pexp_dh_na"
 )
+# Until 2026-11-12 the scripts priced the hybrid heating as half gas, half heat pump,
+# as the old code does. Since then it has the heat pump's price, expected rise and
+# blank dummies, and no dummies of its own (Max, 2026-11-12): hybrid_as_heat_pump()
+# makes exactly these changes to the old code's rows, and only in the hybrid's.
+HYBRID_GAS_SHARE_OLD <- 0.5
+HYBRID_TERMS_OLD <- c("hybrid_price_na", "hybrid_rise_na")
+hybrid_as_heat_pump <- function(choice_long, key) {
+  is_hybrid <- choice_long$alternative == "Hybridheizung"
+  is_heat_pump <- choice_long$alternative == "Wärmepumpe"
+  stopifnot(identical(choice_long[[key]][is_hybrid], choice_long[[key]][is_heat_pump]))
+  for (term in c("log_price", "expects_rise", "hpelec_price_na", "hpelec_rise_na")) {
+    choice_long[[term]][is_hybrid] <- choice_long[[term]][is_heat_pump]
+  }
+  choice_long$hybrid_price_na <- NULL
+  choice_long$hybrid_rise_na <- NULL
+  choice_long
+}
+# Since 2026-11-17 the scripts price each technology by its own log price (Max), the
+# old code's term log_price: 0 at the mean and for "Keine Empfehlung". From
+# 2026-11-15 to 2026-11-17 the test derived the price relative to gas from it. The
+# old code's COP (COP_OLD) enters only its price in levels, which is not compared:
+# in logs it cancels.
+COP_OLD <- c(radiators = 3, floor_heating = 3)
 OLD_GROUPS <- c("HVAC installers" = "SHK-Handwerk", "Chimney sweeps" = "Schornsteinfeger",
                 "Energy advisers" = "Energieberater")
 OWN_HEATING_ANSWERS <- c("Wärmepumpe", "Pelletheizung", "Fernwärme", "Gasheizung", "Ölheizung",
@@ -1277,10 +1304,12 @@ for (arm_scripts in list(list(arm = "fw", script = "district_heating"),
     experts_old[[paste0("price_", fuel, "_lc")]] <- if_else(is.na(price), 0, log(price) - log(reference_values$prices$mean[k]))
     rise <- experts_old[[paste0("pexp_", fuel, "_rise")]]
     experts_old[[paste0("pexp_", fuel, "_na")]] <- if_else(is.na(rise), 1, 0)
-    experts_old[[paste0("pexp_", fuel, "_c")]] <- if_else(is.na(rise), 0, rise - reference_values$expectations$share_rise[k])
+    # The expected rise is no longer centred (Max, 2026-11-14)
+    experts_old[[paste0("pexp_", fuel, "_c")]] <- if_else(is.na(rise), 0, rise)
   }
+  # The heat pump at home is no longer centred at its share (Max, 2026-11-16)
   experts_old <- experts_old %>%
-    mutate(heat_pump_at_home_old = heat_pump_at_home - reference_values$own_heating[["Wärmepumpe"]],
+    mutate(heat_pump_at_home_old = heat_pump_at_home,
            hdd_c_old = if_else(is.na(hdd), 0, (hdd - reference_values$hdd$mean) / 1000))
   decisions_old <- vignettes_clean %>%
     filter(resp_uid %in% experts_old$resp_uid, !is.na(vig_rec)) %>%
@@ -1291,12 +1320,13 @@ for (arm_scripts in list(list(arm = "fw", script = "district_heating"),
 
   decisions_wide <- decisions_old %>%
     add_regressors(ATTRIBUTE_DUMMIES) %>%
-    add_alternative_prices(objects$COP, objects$HYBRID_GAS_SHARE)
+    add_alternative_prices(COP_OLD, HYBRID_GAS_SHARE_OLD)
   long_old <- decisions_wide %>%
     cross_join(tibble(alternative = factor(sort(outcomes_arm), levels = sort(outcomes_arm)))) %>%
     long_terms(price_variables, expectation_variables, reference_values$own_heating,
                OWN_HEATING_ANSWERS, outcomes_arm) %>%
-    arrange(chid, alternative)
+    arrange(chid, alternative) %>%
+    hybrid_as_heat_pump("chid")
   long_new <- objects$make_regressors(decisions_old) %>%
     arrange(chid, alternative)
 
@@ -1305,10 +1335,14 @@ for (arm_scripts in list(list(arm = "fw", script = "district_heating"),
                               paste(long_new$chid, long_new$alternative))), 0.5)
   check(paste(arm_scripts$arm, "alternatives are alphabetical on this computer"),
         as.numeric(!identical(sort(outcomes_arm), objects$alternatives)), 0.5)
-  same_names <- c(ATTRIBUTE_DUMMIES$dummy, "price", paste0(price_variables$name, "_price_na"),
+  same_names <- c(ATTRIBUTE_DUMMIES$dummy, "log_price",
+                  paste0(price_variables$name, "_price_na"),
                   "expects_rise", paste0(expectation_variables$name, "_rise_na"))
+  same_names <- setdiff(same_names, HYBRID_TERMS_OLD)
   largest <- 0
   for (column in same_names) {
+    # A column missing on one side would give numeric(0), which max() passes
+    stopifnot(column %in% names(long_old), column %in% names(long_new))
     largest <- max(largest, abs(long_old[[column]] - long_new[[column]]))
     if (anyNA(long_new[[column]])) stop("Missing values in ", column)
   }
@@ -1318,7 +1352,36 @@ for (arm_scripts in list(list(arm = "fw", script = "district_heating"),
             abs(long_old$is_energieberater - long_new$is_adviser)), 1e-12)
   check(paste(arm_scripts$arm, "degree days and a heat pump at home"),
         max(abs(long_old$hdd_c_old - long_new$hdd_c),
-            abs(long_old$heat_pump_at_home_old - long_new$heat_pump_at_home_c)), 1e-12)
+            abs(long_old$heat_pump_at_home_old - long_new$own_heat_pump)), 1e-12)
+
+  # The grouped script of the arm, the main run since 2026-11-16, against this one
+  # (Max, 2026-11-17): "Gas- oder Ölheizung" has the gas heating's regressors, every
+  # other outcome its own. A term the grouped script lacks (oil) is not compared.
+  objects_grouped <- script_objects(file.path("R", "estimation",
+                                              paste0(arm_scripts$script, "_grouped.R")))
+  long_grouped <- objects_grouped$make_regressors(decisions_old) %>%
+    mutate(alternative = as.character(alternative))
+  long_as_grouped <- long_new %>%
+    mutate(alternative = as.character(alternative)) %>%
+    filter(alternative != "Ölheizung") %>%
+    mutate(alternative = if_else(alternative == "Gasheizung", "Gas- oder Ölheizung",
+                                 alternative))
+  grouped_names <- intersect(c(same_names, "is_hvac", "is_sweep", "is_adviser", "hdd_c",
+                               "own_heat_pump"),
+                             names(long_grouped))
+  compared <- inner_join(
+    long_grouped %>% select(chid, alternative, all_of(grouped_names)),
+    long_as_grouped %>% select(chid, alternative, all_of(grouped_names)),
+    by = c("chid", "alternative"), suffix = c("_grouped", "_script"),
+    relationship = "one-to-one"
+  )
+  # A row of one script without its partner counts as a gap of 1
+  largest <- as.numeric(nrow(compared) != nrow(long_grouped))
+  for (column in grouped_names) {
+    largest <- max(largest, abs(compared[[paste0(column, "_grouped")]] -
+                                  compared[[paste0(column, "_script")]]))
+  }
+  check(paste(arm_scripts$arm, "the grouped script: the same regressors"), largest, 1e-12)
 }
 
 # 8. term_changes() of old 01_run_term_effects.R against the script's changes ----
@@ -1333,14 +1396,19 @@ old_names <- function(names_new) {
   names_new <- gsub("is_hvac", "is_shk", names_new, fixed = TRUE)
   names_new <- gsub("is_sweep", "is_schornsteinfeger", names_new, fixed = TRUE)
   names_new <- gsub("is_adviser", "is_energieberater", names_new, fixed = TRUE)
-  gsub("heat_pump_at_home_c", "heat_pump_at_home", names_new, fixed = TRUE)
+  gsub("own_heat_pump", "heat_pump_at_home", names_new, fixed = TRUE)
 }
 price_reference <- reference_values$prices
 price_quartiles <- reference_values$prices %>%
   select(fuel, q25, q75)
+# The expected rise is no longer centred (Max, 2026-11-14), nor the heat pump at
+# home (Max, 2026-11-16): their shares are 0 for the old code
+own_heating_share_old <- reference_values$own_heating
+own_heating_share_old[["Wärmepumpe"]] <- 0
 expert_reference <- list(
-  pexp = reference_values$expectations,
-  own_heating_share = reference_values$own_heating,
+  pexp = reference_values$expectations %>%
+    mutate(share_rise = 0),
+  own_heating_share = own_heating_share_old,
   hdd_year = reference_values$hdd$year,
   hdd_unit = 1000,
   hdd_mean = reference_values$hdd$mean
@@ -1350,13 +1418,21 @@ data_reference <- list(
   price_quartiles = price_quartiles,
   expert_reference = expert_reference,
   hdd_quartiles = c(q25 = reference_values$hdd$q25, q75 = reference_values$hdd$q75),
-  price_settings = list(cop = objects$COP, hybrid_gas_share = objects$HYBRID_GAS_SHARE),
+  price_settings = list(cop = COP_OLD, hybrid_gas_share = HYBRID_GAS_SHARE_OLD),
   price_variables = OLD_PRICE_VARIABLES,
   expectation_variables = OLD_EXPECTATION_VARIABLES,
   own_heating_answers = OWN_HEATING_ANSWERS
 )
-OLD_PRICES <- c("price", paste0(OLD_PRICE_VARIABLES$name, "_price_na"))
-OLD_TERMS <- c("expects_rise", paste0(OLD_EXPECTATION_VARIABLES$name, "_rise_na"))
+# The old code makes its price changes for the term log_price, the term of the
+# scripts too
+OLD_PRICE_DUMMIES <- setdiff(paste0(OLD_PRICE_VARIABLES$name, "_price_na"),
+                             HYBRID_TERMS_OLD)
+OLD_TERMS <- setdiff(c("expects_rise", paste0(OLD_EXPECTATION_VARIABLES$name, "_rise_na")),
+                     HYBRID_TERMS_OLD)
+# The effects the old code does not have, by exact name (Max, 2026-11-14): year and
+# demand together, and a rise of more than 10%
+NEW_EFFECTS <- c("built_2000_demand_70",
+                 paste0("expects_large_rise_", c("gas", "hpelec", "dh", "oil", "pellet")))
 for (model_name in c("m4pe", "m6pe")) {
   results_file <- file.path(OUTPUT_DIR, "district_heating", model_name, "results.rds")
   if (!file.exists(results_file)) {
@@ -1382,7 +1458,8 @@ for (model_name in c("m4pe", "m6pe")) {
     constants <- c("is_shk", "is_schornsteinfeger", "is_energieberater")
     shifts <- character(0)
   }
-  specification <- list(constants = constants, prices = c(OLD_PRICES, OLD_TERMS),
+  specification <- list(constants = constants,
+                        prices = c("log_price", OLD_PRICE_DUMMIES, OLD_TERMS),
                         regressors = c(shifts, ATTRIBUTE_DUMMIES$dummy, "hdd_c", "heat_pump_at_home"))
   changes_old <- term_changes(specification, ATTRIBUTE_DUMMIES, outcomes, data_reference,
                               c("Wärmepumpe" = "Gasheizung"))
@@ -1412,10 +1489,11 @@ for (model_name in c("m4pe", "m6pe")) {
   states_long <- states %>%
     mutate(berufsgruppe = groups_old[1], own_heating = "Keine Angabe") %>%
     add_regressors(ATTRIBUTE_DUMMIES) %>%
-    add_alternative_prices(objects$COP, objects$HYBRID_GAS_SHARE) %>%
+    add_alternative_prices(COP_OLD, HYBRID_GAS_SHARE_OLD) %>%
     cross_join(tibble(alternative = outcomes)) %>%
     long_terms(OLD_PRICE_VARIABLES, OLD_EXPECTATION_VARIABLES, reference_values$own_heating,
-               OWN_HEATING_ANSWERS, outcomes)
+               OWN_HEATING_ANSWERS, outcomes) %>%
+    hybrid_as_heat_pump("vignette")
   generic_values <- list()
   for (term in specification$prices) {
     values <- matrix(NA_real_, nrow(states), length(outcomes), dimnames = list(states$vignette, outcomes))
@@ -1445,6 +1523,9 @@ for (model_name in c("m4pe", "m6pe")) {
     for (k in seq_len(nrow(new_table))) {
       effect <- new_table$effect[k]
       outcome_name <- new_table$outcome[k]
+      if (effect %in% NEW_EFFECTS) {
+        next
+      }
       if (effect %in% ATTRIBUTE_DUMMIES$dummy) {
         row_from <- "base"
         row_to <- paste0("base|", effect)
@@ -1469,40 +1550,17 @@ for (model_name in c("m4pe", "m6pe")) {
   check(paste(model_name, "every old change is among the new effects"),
         length(setdiff(c(old_ids, ATTRIBUTE_DUMMIES$dummy), new_ames$table$effect)), 0.5)
   check(paste(model_name, "every new effect is an old change"),
-        length(setdiff(new_ames$table$effect, c(old_ids, ATTRIBUTE_DUMMIES$dummy))), 0.5)
+        length(setdiff(new_ames$table$effect,
+                       c(old_ids, ATTRIBUTE_DUMMIES$dummy, NEW_EFFECTS))), 0.5)
   cat(model_name, ":", n_compared, "effects compared\n")
   check(paste(model_name, "probabilities at the neutral state"), largest_baseline, TOLERANCE)
   check(paste(model_name, "effects"), largest_effect, TOLERANCE)
   check(paste(model_name, "standard errors"), largest_se, TOLERANCE)
 
-  # The script's other reference state, at the average expert, is the reference state
-  # of the old 01_run_specifications.R: the AMEs of its section 4.4
-  if (model_name == "m4pe") {
-    vignettes_at_mean <- as_tibble(REFERENCE_LEVELS) %>%
-      mutate(vignette = "reference")
-    for (k in seq_len(nrow(ATTRIBUTE_DUMMIES))) {
-      variation <- as_tibble(REFERENCE_LEVELS)
-      variation[[ATTRIBUTE_DUMMIES$attribute[k]]] <- ATTRIBUTE_DUMMIES$level[k]
-      vignettes_at_mean <- bind_rows(vignettes_at_mean, variation %>%
-                                       mutate(vignette = ATTRIBUTE_DUMMIES$dummy[k]))
-    }
-    vignettes_at_mean <- vignettes_at_mean %>%
-      mutate(hdd_c = 0, heat_pump_at_home = 0)
-    X_average <- design_by_profile(vignettes_at_mean, groups_old, c(constants, specification$regressors),
-                                   ATTRIBUTE_DUMMIES)
-    old_average <- ame_krinsky_robb(theta_old, draws_old, X_average, standard_draws, random_old,
-                                    outcomes, fixed_old)
-    joined_average <- old_average$table %>%
-      mutate(profile = labels_new[profile], effect = vignette) %>%
-      inner_join(results$ames$average$table, by = c("profile", "effect", "outcome"),
-                 suffix = c("_old", "_new"), relationship = "one-to-one")
-    stopifnot(nrow(joined_average) == nrow(old_average$table),
-              nrow(joined_average) == nrow(results$ames$average$table))
-    check("m4pe at the average expert: AMEs against ame_krinsky_robb()",
-          max(abs(joined_average$ame_old - joined_average$ame_new)), TOLERANCE)
-    check("m4pe at the average expert: standard errors",
-          max(abs(joined_average$se_old - joined_average$se_new)), TOLERANCE)
-  }
+  # The old reference state at the average expert (section 4.4 of the old
+  # 01_run_specifications.R) is no longer compared: the scripts dropped it, and with
+  # Q17 and the heating at home as answers, an expected rise or a heat pump at its
+  # share cannot be set (Max, 2026-11-14)
 }
 
 cat("\nEquivalence with the old functions: all checks passed\n")

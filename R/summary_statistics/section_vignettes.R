@@ -8,7 +8,7 @@
 #          figures/fig_recommendations_<group>.pdf,
 #          fig_recommendations_groups_all.pdf,
 #          fig_recommendations_<attribute>_<group>.pdf, fig_position_all.pdf,
-#          fig_investment_cost_<group>.pdf
+#          fig_investment_cost_<group>.pdf; maps/map_heat_pump_share_state_<group>.pdf
 # Checks : every level of the design and every answer has a label (label_of());
 #          the minimum cell, in experts: six vignettes can come from one expert
 ################################################################################
@@ -521,6 +521,53 @@ section_vignettes <- function(experts, vignettes, dirs) {
           "installing the system, without subsidies, by the technology recommended",
           "there, both arms. The houses differ between the bars. A bar of fewer",
           "than", MIN_N, "experts is left out."
+        )
+      ))
+    }
+  }
+
+  # 11. The share of heat pump recommendations by state ------------------------
+  # Next to the maps of the predicted probability by state of the output script
+  # (Claude's proposal, agreed by Max, 2026-11-16). A state needs MIN_N experts,
+  # as six vignettes can come from one expert. The state of the expert's postcode
+  # (experts.rds); any_of(): the column if the vignettes have it, so that the
+  # join does not double it.
+  if (has_columns(experts, c("resp_uid", "bundesland"))) {
+    answered_states <- answered %>%
+      select(-any_of("bundesland")) %>%
+      left_join(experts %>% select(resp_uid, bundesland), by = "resp_uid",
+                relationship = "many-to-one") %>%
+      filter(!is.na(bundesland))
+    for (group in c(ALL_EXPERTS, EXPERT_GROUPS)) {
+      group_answered <- subset_group(answered_states, group)
+      if (n_distinct(group_answered$resp_uid) < MIN_N) {
+        next
+      }
+      state_values <- group_answered %>%
+        group_by(bundesland) %>%
+        summarise(n_experts = n_distinct(resp_uid),
+                  share = mean(technology == TECHNOLOGY_LABELS[["Wärmepumpe"]])) %>%
+        ungroup() %>%
+        transmute(state = as.character(bundesland),
+                  value = if_else(n_experts >= MIN_N, share, NA_real_),
+                  label = paste0(formatC(100 * share, format = "f", digits = 0),
+                                 "%"))
+      if (all(is.na(state_values$value))) {
+        next
+      }
+      plot <- plot_state_map(state_values, "Heat pump\nshare",
+                             legend_labels = label_percent(accuracy = 1))
+      file_name <- paste0("map_heat_pump_share_state_", group_slug(group), ".pdf")
+      save_figure(plot, file.path(dirs$maps, file_name), size = "map")
+      # The appendix: the main part of the summary statistics is the brief's
+      # (tests/test_sections.R); a map for it is the researchers' call
+      exhibits <- bind_rows(exhibits, exhibit_row(
+        block, "heat_pump_share_state", group, "map", file.path("maps", file_name),
+        "Share of heat pump recommendations by state", "appendix",
+        note = paste(
+          vignette_note, "The share of the answered vignettes that recommend a",
+          "heat pump, by the state of the expert's postcode. Grey and \"–\":",
+          "fewer than", MIN_N, "experts."
         )
       ))
     }

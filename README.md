@@ -5,8 +5,14 @@ mailing waves. Each expert sees six vignettes of a household and its heating sys
 
 ## Where everything lives
 
-All paths are set in `config.R`; a machine with other paths puts its three roots in a git-ignored
-`config.local.R`.
+All paths are built in `config.R` from two roots, which each machine sets in a git-ignored `config.local.R` in the project root: `SECURE_DIR`, the survey's folder on the secure drive (`.../wave_1_2026`), and `DROPBOX_DIR`, the Dropbox folder that holds `public_data_dropbox/`. Nothing else differs between machines.
+
+```r
+SECURE_DIR <- "I:/.../energy_experts_survey/wave_1_2026"
+DROPBOX_DIR <- "C:/Users/<you>/Dropbox/Heating Transition/analysis_survey"
+```
+
+`SECURE_DIR` holds `260909_raw_energy_expert_survey_data/` (the raw exports, with `limesurvey-syntax/`), `260909_cleaned_energy_expert_survey_data/`, `260915_scraped_data/` (the sampling frame) and `output/`.
 
 | | Holds | Shared with |
 |---|---|---|
@@ -23,7 +29,14 @@ wave_1_2026/output/                  on the secure drive
     m4pe/                            model.rds  results.rds  results.xlsx
     m6pe/                            one folder per model
     model_comparison/                model_comparison.xlsx  model_comparison.rds
+    run_info.rds                     the sample, arm and outcomes, for R/run_output.R
   no_district_heating/               the same
+  district_heating_grouped/          the same, with gas and oil as one outcome: the main run
+  no_district_heating_grouped/       the same
+  exhibits/                          R/run_output.R: the exhibits of the models for the paper
+    district_heating_grouped/        tables/  figures/  maps/  exhibits.pdf, one folder per run
+    across_runs/                     the arms side by side; gas and oil as one outcome or apart
+    numbers.tex                      the numbers the text quotes, as LaTeX macros
 ```
 
 ## How to run
@@ -33,41 +46,50 @@ renv::restore()                                  # once per computer
 source("R/run_cleaning.R")                       # raw exports to experts.rds, vignettes.rds, the report
 source("tests/selftest.R")                       # checks on the result
 source("R/run_summary_statistics.R")             # the full sample, with response rates
-source("R/estimation/district_heating.R")        # sample, summary statistics, models, comparison
-source("R/estimation/no_district_heating.R")     # the same for the other arm
+source("R/estimation/district_heating_grouped.R")     # main run, arm fw: sample, summary statistics, models, comparison
+source("R/estimation/no_district_heating_grouped.R")  # main run, arm nofw
+source("R/estimation/district_heating.R")        # kept: gas and oil heating apart, arm fw
+source("R/estimation/no_district_heating.R")     # kept: the same for arm nofw
+source("R/check_results.R")                      # a text summary of every run, to share for checking
+source("R/run_output.R")                         # the exhibits of the models: tables, figures, maps, decks
 ```
+
+`R/check_results.R` writes `check_results.txt` to the output folder: for every estimation folder it finds, each model's formula, fit, convergence and coefficients, the comparison, and every set of effects with its checks, side by side. It needs no change when the estimation scripts change. It prints aggregates only, with anything that rests on fewer than 10 experts shown as `<10`, so the file can be shared with someone who has no access to the secure drive.
+
+`R/run_output.R` writes the exhibits of the models for the paper to `exhibits/` in the output folder. For every estimation folder these are the tables, figures and maps of each model and of the models compared; across the folders, the arms side by side. Each folder has a deck, `exhibits.pdf`, to check them. The script reads only what the estimation scripts saved, so it takes minutes, and a run with nothing changed writes nothing. Its settings at the top say which runs are the main ones, which model is the main specification, which models to compare and which numbers the text quotes. It finds the rest itself; a new term or effect only needs its label in `R/functions/labels.R`. See `docs/results_contract.md`, "The output script".
 
 Open `energy_expert_survey.Rproj` first, or run `Rscript <file>` from this folder. Requires R 4.6.2. The decks need `pdflatex` (MiKTeX) on R's PATH: if `Sys.which("pdflatex")` is empty, the run skips them with a message, and the rest runs. A re-run reloads every model, result and set of summary statistics whose inputs have not changed, so changing one model re-estimates that model only.
 
-**A first run to see that everything runs:** set `QUICK_RUN <- TRUE` in `config.R`. The models then use 100 draws, the AMEs 1,000 and Krinsky-Robb 200, nothing is cross-validated, and everything goes to `output_quick/`, so that it is never taken for the real output. Set it back to `FALSE` for the real run, which estimates every model again. The full run cross-validates every model, which adds five estimations per model; on four sessions that is several hours per script.
+**A first run to see that everything runs:** set `QUICK_RUN <- TRUE` in `config.R`. The models then use 100 draws, the AMEs 1,000 and Krinsky-Robb 200, nothing is cross-validated, and everything goes to `output_quick/`, so that it is never taken for the real output. Set it back to `FALSE` for the real run, which estimates every model again. To make a quick run while a full run is going, do not edit `config.R`: the full run's next script would read it when it starts. Start a second R session with the environment variable `EES_QUICK_RUN=1` instead (in PowerShell `$env:EES_QUICK_RUN = "1"` before `Rscript`). The full run cross-validates every model, which adds five estimations per model; on four sessions that is several hours per script.
 
 ## An estimation script is yours to edit
 
 There is one script per data set in `R/estimation/`. Each goes through the same steps in plain sight:
 
-1. **The sample.** Load the cleaned data, one `filter()` per step.
+1. **The sample.** Load the cleaned data, one `filter()` per step, and save `run_info.rds`, which tells the output script what the run is.
 2. **Summary statistics** of exactly that sample.
 3. **`make_regressors()`**, one function that turns source variables into regressors. The same function builds the data and the states of the AMEs, so nothing is coded twice.
-4. **The reference state and the effects**: `at` and the lists of `changes`, in the source variables.
-5. **The models.** You write each formula, then call `fit_mixed_logit()`, `post_estimation()` and
-   `compute_ames()`, with the reference state and the effects you choose for that call.
-6. **`compare_models()`** at the end.
+4. **The reference state and the effects**: `at_neutral`, the households, the lists of `changes` and the populations, in the source variables.
+5. **The models.** You write each formula, then call `fit_mixed_logit()` and `post_estimation()`.
+6. **The effects of every model**: one loop calls `compute_ames()` for each set of effects of each model, with the changes of that model's terms (`changes_of_model`); then the main model's probabilities by state, for the maps (`observed_states`).
+7. **`compare_models()`** at the end.
 
-To add a variable: one line in `make_regressors()`, one term in a formula, and its reference value in `at`;
-`compute_ames()` stops and names it if you forget. Models that do not use it stay loaded. To study another sample: copy a script and change its filters and its folder name.
+To add a variable: one line in `make_regressors()`, one term in a formula, its reference value in `at_neutral`, and, for a variable of the expert, its name in `expert_variables`, which both populations carry. Its effect is a change in one of the lists, and that list goes into `changes_of_model` for every model that has the term. Models that do not use it stay loaded. To study another sample: copy a script and change its filters and its folder name.
+
+A variant of a script carries a suffix, writes to its own folder and keeps the sample label of its data set (Max, 2026-11-12). The variants so far, `*_grouped.R`, group the outcomes (Max, 2026-11-14): the gas and the oil heating are one outcome, `Gas- oder Ölheizung`, priced by gas, as oil is recommended too rarely for a coefficient of its own on every term. The grouping happens in the script; `vig_rec` stays as it is. Since 2026-11-16 the grouped scripts are the main run in both arms, and the ungrouped scripts are kept (Max, 2026-11-16). In the quick run on the real data, the random constants of the gas and the oil heating were almost perfectly correlated in arm fw. Grouping them also gives both arms the same outcomes. The grouped and the ungrouped models have different outcomes, so `compare_models()` cannot compare the two: they compare only descriptively, through the effects on the outcomes they share. In the ungrouped scripts, the effect on the gas heating plus that on the oil heating is the effect on the two together.
 
 | Function | What it does |
 |---|---|
-| `fit_mixed_logit()` | Estimates your formula with `mlogit`. Keeps the fixes that a direct call would miss: the order of the random constants, starting values from a nested model, Halton primes by group, the restart after code 3, the re-evaluation at code 2. Stops before estimating, and names the term, if a term has missing values or no finite estimate |
+| `fit_mixed_logit()` | Estimates your formula with `mlogit`. Keeps the fixes that a direct call would miss: the order of the random constants, starting values from a nested model, Halton primes by group, the restart after code 2 or 3 (code 2 since 2026-11-15, as it can stop below the maximum), the re-evaluation at code 2. Stops before estimating, and names the term, if a term has missing values or no finite estimate |
 | `post_estimation()` | Standard errors clustered by expert, Krinsky-Robb draws, standard deviations and correlations of the constants, fit and diagnostics. Writes `results.rds` and `results.xlsx` |
-| `compute_ames()` | The change in every probability for any change, of attributes or covariates, at any reference state and for any profile, with Krinsky-Robb standard errors and percentile intervals |
+| `compute_ames()` | The change in every probability for any change, of attributes or covariates, for any profile, with Krinsky-Robb standard errors and percentile intervals: at one reference expert, or averaged over the observed experts or their answers (`population`), at any reference vignette (`at`). Four kinds of effect, one function: `docs/results_contract.md` |
 | `compare_models()` | The protocol below. Writes `model_comparison.xlsx` |
 | `run_summary_statistics()` | All tables, figures and maps of a sample, and the deck |
 
 `results.xlsx` starts with the sheets to read: overview and fit, coefficients by technology, standard
-deviations and correlations of the constants, and the AMEs in percentage points. The long sheets with every digit follow, with grey tabs. The fields of `results.rds` are in `docs/results_contract.md`, so that later scripts can build any table or figure from them.
+deviations and correlations of the constants, then one sheet `ame_<name>` per set of effects, the main set (`observed_reference`, `MAIN_AMES` in `config.R`) first: the probabilities at the baseline in %, then every effect in percentage points with its Krinsky-Robb standard error and 95% interval, with filters. The long sheets with every digit follow, with grey tabs. The fields of `results.rds` are in `docs/results_contract.md`, so that later scripts can build any table or figure from them.
 
-On a model with 113 parameters and 1,500 simulated experts, on an 8-core laptop, a Hessian takes at most about 11 minutes, against about 2 hours before, and all AMEs of a model about a minute; `mlogit()` itself takes as long as it takes. Lower `N_WORKERS` in `config.R` if something else runs on the computer. The cross-validation runs on four sessions, as a fold of (6pe) needs an estimated 3 to 4 GB per session.
+On a model with 113 parameters and 1,500 simulated experts, on an 8-core laptop, a Hessian takes at most about 11 minutes, against about 2 hours before, and all AMEs of a model at a reference expert about a minute; the effects over the observed experts take about 125 times as long as in a quick run, some hours per set (per 1,000 experts about 1.5 to 3 hours on eight sessions at 5,000 prediction draws, `docs/results_contract.md`). The main set of every model uses 5,000 prediction draws, the other households and the answers 1,000 (`N_DRAWS_PREDICTION_OTHER`), which together take about a quarter of the time, and less since the households lost the attribute changes (2026-11-16). With four models per script, a full run of both scripts was estimated at about 25 hours on eight sessions. With the eight steps of the covariates (12 models in arm fw, 11 in nofw), the effects alone take about five times as long, scaled from the synthetic runs, so a full run takes several days; none of this is measured on the real data yet. The two `*_grouped.R` scripts, the main run since 2026-11-16, take roughly two thirds of that, by their parameters ((4pe) has 90 instead of 111 in arm fw, 70 instead of 90 in nofw) and one outcome fewer; running the ungrouped scripts as well adds the full amount. Both are estimates, not measured. `mlogit()` itself takes as long as it takes. Lower `N_WORKERS` in `config.R` if something else runs on the computer. The cross-validation runs on four sessions, as a fold of (6pe) needs an estimated 3 to 4 GB per session.
 
 ## How models are compared
 
@@ -88,6 +110,15 @@ No single measure settles it. Among the seminar's models, the LR test preferred 
 **The rule, fixed before results are read.** A larger model is accepted only if it is valid, the robust test rejects at 5% after Holm, the gain survives fresh draws, and cross-validation improves by more than one paired standard error (BIC falls, if it was not run or a fold failed). If tests and parsimony disagree, the smaller stays. If all agree but no AME moves by 1 percentage point, the smaller stays as the main model and the larger is reported as robustness. An AME that only the larger model has, such as a price effect in (4p) against (4), counts as moving from 0, if its 95% interval excludes 0. Of two models that do not nest each other, one is preferred only if Vuong's test and cross-validation (or BIC) agree on it; otherwise the data cannot decide. The rule proposes and the researchers decide: the column `final_decision` of the sheet `decision` is theirs, also for
 terms of direct research interest that stay regardless. A nested test that cannot be computed, because its restrictions are not independent at the estimates, is not compared. The reason warns if the robust test rests on few experts.
 
+**The main model** (Max, 2026-11-23) is `m4pe_s`, (4pe) with steps 1, 2, 6 and 7, in both arms, chosen after reading the model comparison of the full run of the grouped scripts; one specification for both arms. As the steps add up, none of them was that model: (4pe)_7 also holds steps 3 to 5. `m4pe_s` starts from (4pe)_2, which it nests, is cross-validated like every model, and gets every set of effects and the probabilities by state (`observed_states`) for the maps; the Wald tests of the blocks are made in it (`final_model`). It enters no question of the rule, so the decision sheet stays as it was read. Its step 7, the heat pump share of the past year, may take over part of the associations of the expert's other characteristics (`docs/open_issues.md`, section 4). A run of a script whose other models are saved estimates only this model, its effects and its cross-validation. (4pe) keeps the `observed_states` it had as the main model in its saved results until it is estimated again; the exhibits read that set only from the main model. The ungrouped scripts need a run with `m4pe_s` before the output script sets the gas and the oil heating as one outcome against apart; until then that comparison is left out and named on the last page of the deck.
+
+**Changes to the rule.** On 2026-11-14 (Max), after the quick run on the real data had been read, the AME step switched from the effects at a reference expert (`neutral`) to the main AME, `observed_reference`, the average over the observed experts at the reference vignette, read for the three groups and not for the pooled row, whose narrower interval could let an added effect count on its own. A change to what the rule reads is recorded here, with name and date.
+On 2026-11-14, with the eight steps of the covariates (Claude's proposals, agreed by Max on 2026-11-16): the sets of (4), (4p), (4pe) and (6pe) gain the joint change of year and demand (`built_2000_demand_70`), and those of (4pe) and (6pe) the large expected rise of each fuel (`expects_large_rise_<fuel>`, there equal to the rise of up to 10%), which count as added AMEs where the smaller model lacks them and as shared ones otherwise; and an effect leaves out the units whose regressors its change does not move, so that a row that was an exact 0 is blank and drops out of the comparison. With the steps, the Holm family grows from three questions to eleven in arm fw and from two to ten in nofw, so the earlier questions face a stricter level.
+On 2026-11-15, with the price relative to gas (Claude's proposal, agreed by Max): the price changes keep their definition, each fuel's reported price from its 25th to its 75th percentile, but `price_gas` now moves every technology other than the gas heating and no recommendation, where it moved only the gas heating before. The price effects that (4p) adds over (4) change with it.
+On 2026-11-15, with the heat pump share no longer required (Claude's proposal, agreed by Max): every model's sample widens by the experts without the share of their group. The sets of steps 7 and 8 gain the effect `hp_share_na`, from the mean share to none, which counts as an added AME in step 7. The share effects average over the experts with a share.
+On 2026-11-17, with each technology's own log price (Max): `price_gas` moves only the gas heating, as it did in the ungrouped scripts before 2026-11-15, and in the grouped scripts only the gas or oil heating. The price effects that (4p) adds over (4) change with it.
+On 2026-11-23, with the main model `m4pe_s` (Max): no question is added, so the Holm family stays as it was. The validity step compares each model with every model of its folder that it nests, so (4pe)_7 and (4pe)_8, which nest `m4pe_s`, must now also end at least as high as it does; that is what the change can hit, and a model that fails it is not compared in its tests. The Wald tests of the blocks move from (4pe) to `m4pe_s`, and the block of the expectations holds all four categories of Q17 (Claude's proposal, 2026-11-23, open).
+
 The gates are not redundant. In one run on synthetic data, with equal covariances by group and 100 draws per expert, the robust test wrongly rejected them (LR 61.2, robust p 0.006), and only the fresh draws (mean LR 39.9) and cross-validation caught it. That is one draw, not an error rate, and at 1,000 draws the fresh-draw gate will bind less often.
 
 ## Summary statistics
@@ -107,9 +138,11 @@ Tables are LaTeX fragments: numbers with N, mean, SD and quartiles, answers with
 - **`NA` in `own_heating` and `heat_pump_at_home`** means the expert stopped before Q20; `Keine Angabe` means Q20 was left blank. Completers all reached Q20, so the estimation samples hold no `NA` there.
 - **`vig_rec` has seven levels:** the six technologies and `Keine Empfehlung`, the pre-registered seventh option. Free text without a coded answer counts as `Keine Empfehlung`. `NA` means the vignette was not answered.
 - **Soft launch.** Q6 had no "bundesweit" option, and Q7 was a different ranking task. Filter on `is_softlaunch` before pooling those.
-- **Design.** No house built in 2000 is unrenovated (200 kWh/m²) or has oil heating, so a reference state or an effect that combines these extrapolates. `att_heat_demand` is the same split as `att_renovation`.
+- **Design.** No house built in 2000 is unrenovated (200 kWh/m²) or has oil heating. `compute_ames()` leaves out of an effect every expert or answer that the change takes into such a house, and every one whose regressors it does not move (a household that already has the level named; a covariate that enters only for another group, such as the heat pump share installed for anyone but HVAC installers): such effects are blank, and `n_experts` says how many an effect averages over (Max, 2026-11-14; the regressors rather than the variables: Claude's proposal, 2026-11-14, open). A reference state itself is not checked. `att_heat_demand` is the same split as `att_renovation`.
 - **Vignettes are nested in experts.** All standard errors are clustered by expert.
-- **"AME"** here means the change at a reference expert and vignette, averaged over the random constants only, not over the sample of experts.
+- **The sample of the models** (Max, 2026-11-14): completers with a group, age and year of training, in every model, as all models share one sample. Until 2026-11-15 it also required the heat pump share of the expert's group. That dropped about 18% of the experts, almost all of whom were never asked Q10b: offices that ticked only engineering or only "other", and advisers and sweeps with no household in Q10a (`docs/data_contract.md`). Since then a missing share is set to the mean of the group, with a dummy `hp_share_na` per technology in steps 7 and 8, read as "not asked or no answer" (Claude's proposal, agreed by Max, 2026-11-15). After (4pe) eight steps add the covariates one block at a time, each model `m4pe_<k>` tested against the one before: year × demand, Q17 in four categories, the heating at home in four groups, the years since training, age, a course on heat pumps, the heat pump share of the past year, and the chimney sweeps' own slope of that share (`docs/open_issues.md`, section 1). The main model, `m4pe_s`, is (4pe) with steps 1, 2, 6 and 7 (Max, 2026-11-23; "How models are compared").
+- **Prices** (Max, 2026-11-17): the term `log_price` holds, in each technology's rows, the log of its fuel's price, 0 at the fuel's mean, and 0 for no recommendation, the option without a price, with one coefficient for all technologies. A logit compares utilities, so the heat pump against the gas heating moves with the log of the electricity price over the gas price: the relative price is in the model without a ratio as a regressor. In logs the COP is a constant in the rows of the heat pump and the hybrid, which the constants of the technologies take up, so no COP enters the models. A blank price counts as the fuel's mean, with one dummy per fuel in its own technology's rows (electricity in the heat pump's and the hybrid's), exactly where its filled price enters. Read the effects of those dummies (`price_na_<fuel>`) as "price not known", not as price effects (Claude's proposal, agreed by Max, 2026-11-15). A price change moves the reported price from its 25th to its 75th percentile, and with it only the technologies that use that fuel. From 2026-11-15 to 2026-11-17 the term was the log price relative to gas, which priced no recommendation as if it used gas (`docs/open_issues.md`, section 1).
+- **"AME"** has two meanings here, always averaged over the random constants. The main one (Max, 2026-11-14), set `observed_reference`: over the observed experts (`population` of `compute_ames()`), each expert keeps their own characteristics, the change is made to each of them at the reference vignette, and the changes in probability are averaged over the experts (a profile is a group of them; "All experts" weights the groups by their share of the sample). At a reference expert (no `population`, set `neutral`, kept to compare with earlier results): one fictitious expert, e.g. with mean prices, which is an effect at representative values. In a nonlinear model the two differ; the first is what Stata's `margins` computes for the observed experts (`margins, at()` for the reference vignette). The random constants are averaged over their distribution in the population, not conditioned on each expert's own answers. Prices, expected rises, a heat pump at home and degree days are not randomised, so their effects are associations either way.
 
 ## The code
 
@@ -119,6 +152,9 @@ R/setup.R                      packages, figure settings, sources all functions
 R/run_cleaning.R               step 1, runs R/cleaning/
 R/run_summary_statistics.R     step 2, the full sample
 R/estimation/                  step 3, one script per data set; these are the files to edit
+R/check_results.R              after a run, a text summary of every estimation folder, to share
+R/run_output.R                 step 4, the exhibits of the models for the paper; settings at the top
+R/model_output/                the functions of the output script
 R/functions/                   the estimation functions, labels and colours, table and figure helpers
 R/summary_statistics/          one function per block of the summary statistics, and the deck
 R/geodata/                     builds the postcode lookup, once
@@ -126,7 +162,7 @@ tests/                         synthetic data and tests
 docs/                          the columns of the cleaned data, the results, notes on the data, open issues
 ```
 
-Every data decision is made once, in `R/cleaning/06_experts_vignettes.R`, with its reason and date in the comments. English labels and colours are in `R/functions/labels.R`. More on the data, such as how the waves are merged and how the state is derived from the postcode, is in `docs/data_notes.md`. `docs/open_issues.md` holds what the rebuild left for the researchers: the decisions taken, what to check on the first real run, and the statistical and identification issues to keep in mind for the paper.
+Every data decision is made once, in `R/cleaning/06_experts_vignettes.R`, with its reason and date in the comments. English labels and colours are in `R/functions/labels.R`. More on the data, such as how the waves are merged and how the state is derived from the postcode, is in `docs/data_notes.md`. `docs/open_issues.md` holds what the rebuild left for the researchers: the decisions taken, what to check on the real runs, and the statistical and identification issues to keep in mind for the paper.
 
 ## Testing without the real data
 
@@ -141,6 +177,7 @@ Every data decision is made once, in `R/cleaning/06_experts_vignettes.R`, with i
 | `test_compute_ames.R`                                   | AMEs against a computation by hand                                                      |
 | `test_compare_models.R`                                 | The protocol reaches the right verdict where the truth is known                         |
 | `test_sections.R`, `test_deck.R`                        | Every exhibit in every sample, the minimum cell, the deck                               |
+| `test_output.R`                                         | The output script: every exhibit, the minimum cell, a missing label or model, numbers by hand |
 
 `selftest.R` is the only one meant for the real data.
 

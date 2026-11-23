@@ -10,8 +10,16 @@
     summary_statistics/             tables/ figures/ maps/ exhibits.csv summary_statistics.pdf fingerprint.rds
     m4pe/                           model.rds  results.rds  results.xlsx  cross_validation.rds
     model_comparison/               model_comparison.rds  model_comparison.xlsx
+    run_info.rds                    sample_label, arm, variant: what the run is, for R/run_output.R
   no_district_heating/              the same
+  district_heating_grouped/         the same, with gas and oil as one outcome: the main run
+  no_district_heating_grouped/      the same
+  exhibits/                         R/run_output.R, see "The output script" at the end
 ```
+
+The outcomes of a model are in `results$outcomes`: in the `*_grouped.R` scripts the gas and the oil
+heating are one outcome, `Gas- oder Ölheizung` (label "Gas or oil heating", `OUTCOME_LABELS` in
+`labels.R`, which orders and names the outcomes of `results.xlsx`).
 
 `model.rds` holds the fitted `mlogit` object, with the data in it. `results.rds` holds
 aggregates only. `cross_validation.rds` exists for the models of `cv_models` in
@@ -27,7 +35,10 @@ A quick run (`QUICK_RUN` in `config.R`) writes the same tree to `output_quick/`.
 
 Written and tested; see `R/functions/`. The fitted model has `$name` and `$fit_info`
 (`reference`, `outcomes`, `random`, `fixed_parameters`, `start_from`, `log_likelihood_start`,
-`n_draws`, `minutes`, `fingerprint`).
+`n_draws`, `minutes`, `fingerprint`, `restarts_at_code_2`). `restarts_at_code_2` marks a model
+estimated since `fit_mixed_logit()` restarts after code 2 as after code 3 (2026-11-15): a saved
+model without it that ended with code 2 is estimated again, and with it every model that starts
+from it; the others load.
 
 ## `results.rds`: a list
 
@@ -45,6 +56,7 @@ Written and tested; see `R/functions/`. The fitted model has `$name` and `$fit_i
 | `diagnostics` | list: `code`, `iterations`, `max_gradient`, `scaled_gradient`, `smallest_eigenvalue`, `condition_number`, `start_from`, `log_likelihood_start`, `minutes_estimation` |
 | `choice_counts`, `sample_hash` | recommendations in the sample; hash of the experts, to check that models share one sample |
 | `ames` | named list, one element per call of `compute_ames()`; see below |
+| `term_support`, `constant_support` | the experts behind each coefficient: `parameter`, `column`, `technology`, `experts_with_term` (a value other than 0 in a row of its technology, in any row for a term with one coefficient), `experts_choosing` (of them, those who chose the coefficient's technology; for a term with one coefficient, an alternative in whose row it is not 0); and behind each group's constants: `group`, `technology`, `experts`, `experts_choosing`. Counts, for the minimum cell of the output script; added to saved results when they load (2026-11-16) |
 | `n_draws_kr`, `fingerprint`, `git_commit`, `date` | how it was made |
 
 ## `compute_ames()`
@@ -61,19 +73,22 @@ ames <- compute_ames(
   ),
   profiles = c("Energy advisers", "HVAC installers", "Chimney sweeps"),
   n_draws = N_DRAWS_PREDICTION,
+  keep_draws = TRUE,  # FALSE: no Krinsky-Robb draws saved (sets other than the main one)
   n_workers = N_WORKERS,
   force = FALSE
 )
 ```
 
-- `name`: at most 22 characters, as an Excel sheet name holds 31.
-- `at`: the reference state in the source variables of `make_regressors()`, one value each.
-- `changes`: named list. Each change sets `from` (optional, default: `at`) and `to`, on top of
-  `at`. Several variables may change together. The effect is P(`to`) - P(`from`), for every
-  outcome. A state is built in this order: `at`, the profile's columns, the change's, so a change
-  can also move the group.
-- `profiles`: a character vector sets `expert_group`; or a named list of lists for any other
-  column, e.g. `list("All experts" = list(expert_group = "Energy advisers"))`.
+- `name`: at most 27 characters, as the sheet `ame_<name>` may hold 31.
+- `at`: source variables of `make_regressors()`, one value each, set for every unit. Without a `population`, the whole reference state; with one, only what is the same for everyone, usually the reference vignette.
+- `changes`: named list. Each change sets `from` (optional, default: the unit as it is, that is `at` and the profile's columns without a population) and `to`, on top of the unit. Several variables may change together. The effect is P(`to`) - P(`from`), for every outcome, each the average over the profile's units. A state is built in this order: the unit (`at` and the profile's columns without a population), then the change's, so a change can also move the group. `to` does not build on `from`: both are set on the unit, so a change with `from` must set the same variables on both sides, and stops otherwise.
+- **What an effect leaves out** (Max, 2026-11-14): every unit whose regressors the change does not move, because it already has the level named or because the variable enters the model only for another group or not at all (the regressors rather than the variables: Claude's proposal, 2026-11-14, open), and every unit that `from` or `to` takes outside the design of the vignettes (`is_in_design()` in `labels.R`: no house built in 2000 is unrenovated or has oil heating). At a household such a change is blank; over the answers it averages over the answers that remain, and `n_units` and `n_experts` say how many. Without the attributes `att_build_year`, `att_current_heating` and `att_heat_demand` among the columns, every state counts as inside the design.
+- `profiles`: without a population a character vector sets `expert_group`, or a named list of lists sets any column, e.g. `list("All experts" = list(expert_group = "Energy advisers"))`. With one the same lists select the units whose value is among the given ones: `list("All experts" = list())` is everyone, `list("Advisers with a heat pump" = list(expert_group = "Energy advisers", heat_pump_at_home = 1))` those.
+- `population`: `NULL` (a reference expert per profile), or a table with one row per unit: `resp_uid` and the source variables of `make_regressors()` that `at` does not set. Keep only these columns, as each is copied for every state. A unit is an expert (one row per expert) or an answer (one row per expert x vignette).
+- `exclude_na` (default `TRUE`): with a population, an effect leaves out the units whose own value of a variable it sets is missing, unless it sets that variable to `NA` in `from` or `to`. A price change from the 25th to the 75th percentile is thus averaged over the experts who reported that price; `n_experts` in the table says how many. `FALSE`: nobody is left out.
+- `check_sample` (default `TRUE`): stops if the experts of the population are not those of the model's estimation sample (`sample_hash`). `FALSE` for another population on purpose.
+- `n_draws`: Halton draws of the prediction. The Krinsky-Robb draws are those of the results (`N_DRAWS_KR`, 5,000 in a real run). The main set uses `N_DRAWS_PREDICTION` (5,000 in a real run); the other households and the answers `N_DRAWS_PREDICTION_OTHER` (1,000) (Max, 2026-11-14): against 20,000 draws, at standard deviations of the constants as large as the models', 1,000 draws move an effect by at most 0.16 percentage points and a baseline probability by 0.36, 5,000 draws by 0.05 and 0.11 (synthetic (4pe), 2026-11-14).
+- `keep_draws` (default `TRUE`): save the Krinsky-Robb draws of the averages in `draws`, for differences between effects later. The estimation scripts keep them for the main set only, as they take about 70 MB per set over observed experts at 5,000 draws, and the file is read and written by every call.
 - States go through `make_regressors()`, the same function that built the data, so no variable
   is coded twice. It must keep the columns it is given, make one row per state x alternative
   with the column `alternative`, and must not use `vig_rec`.
@@ -87,22 +102,72 @@ ames <- compute_ames(
 - The Krinsky-Robb loop runs on `n_workers` R sessions (`rscript_args = "--vanilla"`), in
   chunks of draws.
 
+### Four kinds of effect, one function
+
+What the units are decides what an effect is. Every probability is the average of the model's probability over the profile's units, at the Halton draws of the random constants; an effect is the difference of two such averages.
+
+| | `population` | `at` | An effect is |
+|---|---|---|---|
+| A | `NULL` | the whole reference state | the change at one fictitious reference expert per profile (the earlier "AME") |
+| B | the experts | the reference vignette | the average change over the observed experts, each keeping their own characteristics, as if all had seen the reference vignette |
+| C | the answers (expert x vignette) | `list()` | the same over the vignettes the experts answered, which is the design's mix of households |
+| D | the experts | another household | as B for that household |
+
+```r
+# B, and D by another `at`: observed experts, the reference vignette set for everyone
+population_experts <- experts %>%
+  filter(resp_uid %in% decisions$resp_uid) %>%
+  select(resp_uid, all_of(expert_variables))   # the expert's source variables
+results_m4pe <- compute_ames(
+  results_m4pe, make_regressors, name = "observed_reference",
+  at = at_vignette,                      # only the att_* variables
+  changes = c(attribute_changes, price_changes, expectation_changes, expert_changes),
+  profiles = c(list("All experts" = list()),
+               list("Energy advisers" = list(expert_group = "Energy advisers")),
+               list("HVAC installers" = list(expert_group = "HVAC installers")),
+               list("Chimney sweeps" = list(expert_group = "Chimney sweeps"))),
+  population = population_experts
+)
+# C: the answers, nothing set; each attribute change with `from` at its reference level
+# (attribute_changes_answers in the estimation scripts), see the notes below
+population_answers <- decisions %>% select(resp_uid, vig_num, all_of(expert_variables), starts_with("att_"))
+results_m4pe <- compute_ames(results_m4pe, make_regressors, name = "answers", at = list(),
+                             changes = attribute_changes_answers, population = population_answers,
+                             profiles = list("All experts" = list()),
+                             n_draws = N_DRAWS_PREDICTION_OTHER, keep_draws = FALSE)
+```
+
+**The sets of the estimation scripts** (Max, 2026-11-14), for every model, each over the experts of the sample by group and pooled, in section 8 of each script: `observed_reference` (B, the main set, `MAIN_AMES` in `config.R`, which leads the workbook and which `compare_models()` reads for the three groups), `observed_inefficient` (oil heating and 200 kWh), `observed_efficient` (built in 2000, 70 kWh, underfloor heating), `observed_old_poor` (a couple in their 60s with an income below 40,000; all D; these three with the changes of the expert's terms only, not of the attributes, since 2026-11-16, Max), `answers` (C, the attribute changes only) and `neutral` (A, one reference expert per group, to compare with earlier results, at the draws of the main set, as it takes about a minute). Each model has the changes of its own terms (`changes_of_model`), so that `compare_models()` counts an effect only the larger model has as an added one. The joint change of all expected rises is dropped (Max, 2026-11-14). For the main model only, `observed_states`: every expert at the reference household, one profile per federal state with experts, the probabilities only (no changes), for the maps of the output script (Claude's proposal, agreed by Max, 2026-11-16).
+
+Notes on the units:
+
+- The change of a variable sets it for every unit that the effect includes: `from = list(price_gas_kwh = q25), to = list(price_gas_kwh = q75)` puts every included expert at the 25th and then at the 75th percentile, whatever they reported; `to` alone moves each expert from their own value, and a unit already at that value is left out. For the usual AME over the answers, give `from` the reference level, as the estimation scripts do for version C. For the effect of not answering, give `from` the reference value (as the lists in the estimation scripts do), so that it is a reporter at the mean against a non-reporter, whatever the unit's own answer. With a population, a variable that one side sets to `NA` has to be set by the other side too: the call stops otherwise, as the experts who did not answer would add an effect of 0 to the average.
+- An expert in no profile costs nothing; a profile that selects nobody stops.
+- The probabilities are averaged inside the Krinsky-Robb loop, in blocks of units over `n_workers` sessions: `results.rds` holds the averages and nothing at the level of experts or answers. The size of the design matrix (units x states x outcomes x coefficients) is printed, and the call stops above 8 GB.
+- The work is about units x states x outcomes x prediction draws x Krinsky-Robb draws, so a call at the 5,000 and 5,000 draws of a real run costs about 125 times the same call in a quick run (`QUICK_RUN` in `config.R`, 1,000 and 200 draws). Timing the quick run on the real data and multiplying by 125 is the best estimate. Measured on synthetic data (2026-11-12), (4pe) of `district_heating.R`: 703 experts, 7 outcomes, 31 changes (52 states per expert), quick-run draws, two sessions: about 130 seconds per call, up to 300 with other jobs on the computer. At full draws that is about 4.5 hours on two sessions and 1 to 1.5 on eight; per 1,000 experts about 1.5 to 3 hours per call on eight sessions. Each estimation script makes five such calls per model, four households and the answers, the main set at 5,000 prediction draws and the other four at 1,000, which costs about a fifth, and less since the households carry only the expert's changes (2026-11-16). The effects over the answers cost two states per answer and change (with `from`), so the attributes alone cost about twice as much as all changes over the experts. The effects of (4) and (4p) cost less over the experts, as they have fewer changes (9 and 29 states per expert, against 52). A reference expert costs a minute; `n_draws` can be lowered per call. Estimated for a full run of both scripts, all sets of every model, eight sessions: about 25 hours; with 5,000 prediction draws for every set, about 65.
+- Over all the answers of the sample, the average probabilities need not equal the shares of the recommendations. A multinomial logit with a constant for every outcome reproduces the shares exactly. In a mixed logit, at the maximum, the average of each expert's probabilities given their own answers (their posterior) matches the shares, while `compute_ames()` averages the unconditional probabilities, over the population's distribution of the constants. With large standard deviations of the constants the two can differ by a few points in a correct model, so no message is given (2026-11-14).
+- The log says which effects leave experts out of the average (`exclude_na`) and by how many at most, and which effects leave out every unit of every profile and are blank (no change there, outside the design, or not answered). `results.rds` and `results.xlsx` show every count, however small (Max, 2026-11-12): they stay on the secure drive and are not shared. The output script that makes the exhibits applies the minimum cell.
+
 Adds to `results$ames[[name]]` a list:
 
 | Field | Content |
 |---|---|
-| `table` | `profile`, `effect`, `outcome`, `p_from`, `p_to`, `ame`, `se`, `z`, `p`, `ci_low`, `ci_high` (ame +- 1.96 se), `ci_low_kr`, `ci_high_kr` (percentiles) |
-| `baseline` | `profile`, `outcome`, `probability`, `se`, `ci_low_kr`, `ci_high_kr`, at `at` |
-| `draws` | per profile: states x outcomes x Krinsky-Robb draws, states named `baseline`, `<effect>\|from`, `<effect>\|to` |
-| `at`, `changes`, `profiles`, `n_draws`, `fingerprint`, `date` | how it was made |
+| `table` | `profile`, `effect`, `outcome`, `p_from`, `p_to`, `ame`, `se`, `z`, `p`, `ci_low`, `ci_high` (ame +- 1.96 se), `ci_low_kr`, `ci_high_kr` (percentiles), `n_units`, `n_experts` (the units and distinct experts the effect averages over: 1 and `NA` for a reference expert, 0 and blank numbers if no unit of the profile is included) |
+| `baseline` | `profile`, `outcome`, `probability`, `se`, `ci_low_kr`, `ci_high_kr`, `n_units`, `n_experts`: the units as they are (at `at`) |
+| `draws` | per profile: states x outcomes x Krinsky-Robb draws of the averages, states named `baseline`, `<effect>\|from`, `<effect>\|to` (`NaN` for a state that leaves out every unit); `NULL` with `keep_draws = FALSE` |
+| `moved_terms` | per effect, the columns of `make_regressors()` that its change moves for at least one unit, so that the output script can hide the effects of a term that few experts carry; added to saved sets when they load (2026-11-16) |
+| `at`, `changes`, `profiles`, `n_draws`, `n_draws_kr`, `fingerprint`, `date` | how it was made |
+| `population` | `NULL` without a population; otherwise `experts`, `units` and `exclude_na`, no data |
 
 It saves `results.rds` and rewrites `results.xlsx`, and returns the updated `results`. A call with
 the same arguments on the same coefficients loads instead of computing.
 
 ## `results.xlsx`
 
-The sheets to read come first, rounded, with frozen headers: `overview`,
-`coefficients_by_technology`, `constants_sd`, `constants_correlations`, `pp_<name>` (the effects in percentage points, one per call of `compute_ames()`), `effect_definitions`, `choice_counts`. The long sheets with every digit follow, with grey tabs: `fit`, `coefficients`, `ame_<name>`, `baseline_<name>`.
+The sheets to read come first, with frozen headers: `overview`,
+`coefficients_by_technology`, `constants_sd`, `constants_correlations`, then one sheet `ame_<name>` per set of effects (Max, 2026-11-14), the main set (`MAIN_AMES` in `config.R`) first and the others in the order they were first computed, then `effect_definitions` and `choice_counts`. The long sheets with every digit follow, with grey tabs: `fit`, `coefficients`.
+
+An `ame_<name>` sheet has one row per profile x effect x outcome, the probabilities at the baseline first in each profile (`effect` "Probability at the baseline"). Columns: `profile`, `effect`, `outcome`, `experts` (over observed experts or answers: how many the row averages over), `answers` (over answers only), `estimate` (% for a probability, percentage points for an effect), `se` (Krinsky-Robb), `ci_low` and `ci_high` (the 95% Krinsky-Robb percentile interval), `excludes_0` (`yes` or `no`, for an effect), `p_from` and `p_to` (%). Every digit is kept and two are shown; filters are on. A blank effect left out every unit of its profile.
 
 ## `compare_models()`
 
@@ -118,6 +183,7 @@ comparison <- compare_models(
   blocks = list(prices = c("price", "gas_price_na")),  # optional, Wald tests in the final model
   final_model = "m4pe",                                # optional
   ame_name = "at_means",                               # optional, the AMEs to compare
+  ame_profiles = EXPERT_GROUPS,                        # optional, the profiles they are read for
   cv_models = c("m4", "m4p", "m4pl", "m4pe", "m6pe"),  # optional, the models to cross-validate
   ame_threshold = 0.01,   # an AME moving by less than this (1 pp) counts as immaterial
   alpha = 0.05,
@@ -137,4 +203,39 @@ change between them; `AME the larger model adds`, the effects only the larger mo
 change from 0; and `baseline probability`. The rule's 1 pp step counts the rows of the first two
 that move by 1 pp, an added AME only if its 95% Krinsky-Robb interval (`ci_low_kr`, `ci_high_kr`)
 excludes 0 (Max, 2026-11-09). An effect of the same name that the two models define differently
-counts in neither.
+counts in neither. The estimation scripts compare the main set, `observed_reference`, for the
+three groups only (`ame_profiles = EXPERT_GROUPS`, Max, 2026-11-14): the pooled row's interval is
+narrower than its groups', so it could let an added AME count where no group's would.
+
+## The output script: `R/run_output.R`
+
+The exhibits of the models for the paper, from what the estimation scripts saved (Max, 2026-11-16): the settings in `R/run_output.R`, the functions in `R/model_output/` (not `R/output/`, as `.gitignore` ignores every folder of that name). Run it after the estimation scripts; it reads no `model.rds` and computes no effect again, so it takes minutes, and a run with nothing changed writes nothing (`fingerprint.rds`).
+
+```text
+<OUTPUT_DIR>/exhibits/
+  <estimation folder>/   tables/ figures/ maps/ exhibits.csv exhibits.pdf   one per run
+  across_runs/           the same, for the arms and the outcomes as one or apart
+  numbers.tex            LaTeX macros of the numbers the text quotes
+  log.txt                every message and warning of the last run
+```
+
+**What it reads.** `run_info.rds` of each estimation folder (`sample_label`, `arm`, `variant`; section 2 of every estimation script writes it since 2026-11-16, and a folder without it is left out and named; a new variant script gives its run a `variant` of its own, with its label in `VARIANT_LABELS`), `results.rds` of every model, `model_comparison.rds`, and the column `final_decision` of `model_comparison.xlsx`, which only the workbook holds. After a new run of `compare_models()` your decisions are in the dated copy of the workbook and show as "open" until entered again.
+
+**What you set**, at the top of `R/run_output.R`: the main run of each arm (`main_runs`), the runs with the gas and the oil heating apart (`separate_runs`), the main model, the models that get every exhibit (`full_models`), the comparisons within a run (`models_compared`), and the numbers the text quotes (`text_numbers`). Everything else it finds: runs, models, sets of effects, profiles, outcomes, effects and terms. A new model gets its own exhibits and enters a comparison once it is named there; a model a run does not have is left out of that comparison and named. A term, effect, set, model or outcome without a label in `labels.R` (`TERM_LABELS`, `EFFECT_LABELS` with its block and unit, `SET_LABELS`, `MODEL_LABELS`, `OUTCOME_LABELS`, `OUTCOME_COLOURS`) stops it, with the list of every label missing.
+
+**The exhibits.** Each folder has a deck, `exhibits.pdf`, one frame per exhibit, with what was left out, and why, on its last page.
+
+| Block | Exhibits |
+|---|---|
+| A. The main model | its coefficients (each group's own constant, the terms by technology, the terms with one coefficient, the spread of the random constants); the standard deviations and correlations of the constants; the effects of the main set as a table per profile and per outcome, and as figures by block, for all experts and by group; the effects over the answers; the expert's terms at the four households; the probabilities at the four households |
+| B. Robustness of its effects | the attribute effects under three definitions (a reference expert, the observed experts, the answers); the differences between the groups, from the Krinsky-Robb draws of the main set |
+| C. The models compared | per comparison of the settings: fit and the test against the model before with the rule's proposal and your decision; the terms with one coefficient and the spread of the constants; the coefficients of each outcome; the effects of the main set in each model; then every question of the rule, how each estimation ended, and the predicted against the observed shares |
+| D. Every other model | its coefficients, constants, and the effects of the main set for all experts |
+| E. Maps | the probability of each recommendation at the reference household by state, from the set `observed_states` of the main model: any set of the main model whose profiles are all federal states is drawn as maps |
+| Across runs | the arms side by side (figures by block, a table per outcome, the models and the rule's questions, the households); in each arm the gas and the oil heating as one outcome or apart, on the outcomes both have, and the grouped outcome against the sum of its parts |
+
+**Conventions** (Max, 2026-11-16). Tables give standard errors in parentheses and stars at 10, 5 and 1% (for the effects from the Krinsky-Robb standard error), figures the 95% Krinsky-Robb percentile interval. A row shows a group's own value: the constant plus the group's shift, its standard error from the clustered covariance of the sum. The models are numbered (1), (2), ... in a table, each with what it adds (`MODEL_LABELS`). The arms are compared side by side, without a test of their difference, as they are not randomised. The correlations of the constants are a table. The gas or oil heating has the gas heating's colour. The notes of every table and figure that shows a term of the expert (its characteristics, reported prices or price expectations) say that only the household's attributes are assigned at random, so the estimates of those terms are associations, not causal effects (Max, 2026-11-17; `association_note()` in `estimate_exhibits.R`). Since 2026-11-23 (Claude's proposals, agreed by Max): the notes of a table of effects say that its stars take the effect over its Krinsky-Robb standard error as normal, while the figures show the percentile interval of the same draws, which can differ where the draws are skewed (`set_note()`); the stars of the differences between groups are after Holm's correction over the three pairs of each effect and outcome, where a pair counts if the change applies to both groups, also when the minimum cell hides it; the notes and captions call the main model "the main model" rather than giving its code, and every table that lists models by their code (every question of the rule, in each run and in both arms; how each estimation ended) explains the codes in its notes (`MODEL_CODES_NOTE` in `labels.R`).
+
+**The minimum cell** is applied once, in `collect_results()`, before anything is computed from the cells: an effect or probability over observed experts or answers needs 10 experts behind it (`n_experts`); a difference between groups and a sum of outcomes need every cell they use. Coefficients, the spread of the constants, effects at a reference expert, fit and tests rest on the whole sample and are shown (an exception of the project profile, Max, 2026-11-16), except a coefficient that fewer than 10 experts carry: fewer than 10 have its term in the rows of its technology, or fewer than 10 of them recommended that technology (`term_support`, `constant_support`). Such a coefficient is hidden, and so is every effect that moves its term (`moved_terms`), in every set, on every outcome: each of those effects depends on the hidden coefficient, and as the effects of one change sum to zero over the outcomes, the others would give the hidden one away (kept as it is, Claude's recommendation, agreed by Max, 2026-11-23). The predicted against the observed shares use cells of at least 60 decisions, which hold at least 10 experts, as `compare_models()` counts decisions. The rule's largest change of an effect is not shown, as `compare_models()` takes that maximum over every cell.
+
+**Krinsky-Robb draws** are paired only within one model, for the differences between groups and the sums of outcomes: every model draws them from the same seed (`post_estimation()`), so the draws of two models are tied in a way that has nothing to do with their sampling.

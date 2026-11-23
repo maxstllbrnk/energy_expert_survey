@@ -9,10 +9,10 @@
 ################################################################################
 # Q11c is free text. At most this many manufacturers are shown by name.
 N_BRANDS_SHOWN <- 10
-# Free text that names no manufacturer, as spelled after the harmonisation below;
-# it counts as "Other". This list cannot be complete: another German word with at
-# least MIN_N mentions would reach the table, so read the panel of Q11c of the
-# first real run, and add the word here.
+# Free text that names no manufacturer, in any case; it counts as "Other". This
+# list cannot be complete: another German word with at least MIN_N mentions would
+# reach the table, so read the panel of Q11c of each real run, and add the word
+# here.
 NOT_A_BRAND <- c("Sonstige", "Sonstiges", "Other", "Andere", "Keine", "Keiner",
                  "Keine Angabe", "Keine Ahnung", "K.a.", "K. A.", "Ka", "Weiß Nicht",
                  "Weiss Nicht", "Weiß Ich Nicht", "Weiss Ich Nicht", "Nicht Bekannt",
@@ -48,18 +48,45 @@ section_market <- function(experts, dirs) {
   check_listed_answers(market_rows, experts)
   market_notes <- paste(
     "Shares among the experts who answered. Q8 and Q10a: firms with energy",
-    "advice, engineering or chimney sweeping. Households advised on replacing the",
+    "advice or chimney sweeping. Households advised on replacing the",
     "heating, without negative answers and without the",
     paste0(100 * TRIM_QUANTILES[1], "% lowest and highest answers of all experts."),
     "Q7: the customer groups for energy services; in one soft-launch wave a ranking",
     "of six places with the answer \"don't know\", which counts as not answered, so",
     "the question is not like for like across the waves; all waves are pooled. Q11c:",
     "HVAC firms, which manufacturer they sell most of the technology they",
-    "install most; free text, harmonized in case and spacing only. Manufacturers",
-    "with at least", MIN_N, "mentions, at most", N_BRANDS_SHOWN, "of them. Other:",
+    "install most; free text, harmonized in case and spacing only: a",
+    "manufacturer is in capitals if more answers write it so than with capital",
+    "first letters, and with capital first letters otherwise.",
+    "Manufacturers with at least", MIN_N, "mentions, at most", N_BRANDS_SHOWN,
+    "of them. Other:",
     "the rest, and answers that name no manufacturer, which stay in N.",
     cell_note()
   )
+
+  # One spelling per manufacturer, the same in every version (2026-11-23): answers
+  # that differ only in case and spacing are one manufacturer, written in capitals
+  # if more of its answers write it so than with capital first letters (BWT,
+  # where capital first letters alone gave Bwt), and with capital first letters
+  # otherwise. Only these two forms, so that no answer's own spelling is printed,
+  # and none from a list in the code, which would be free text from the data
+  # (project profile).
+  brand_spelling <- tibble(key = character(0), shown = character(0))
+  if ("brand_top1" %in% names(experts)) {
+    # str_squish(): no spaces at the ends, one space within; str_to_lower(),
+    # str_to_upper(), str_to_title(): in small letters, in capitals, with capital
+    # first letters
+    brand_spelling <- tibble(spelling = str_squish(experts$brand_top1)) %>%
+      filter(!is.na(spelling)) %>%
+      mutate(key = str_to_lower(spelling)) %>%
+      group_by(key) %>%
+      summarise(in_capitals = sum(spelling == str_to_upper(key)),
+                in_title_case = sum(spelling == str_to_title(key))) %>%
+      ungroup() %>%
+      mutate(shown = if_else(in_capitals > in_title_case, str_to_upper(key),
+                             str_to_title(key))) %>%
+      select(key, shown)
+  }
 
   for (group in c(ALL_EXPERTS, EXPERT_GROUPS)) {
     group_experts <- subset_group(experts, group)
@@ -68,12 +95,11 @@ section_market <- function(experts, dirs) {
     # describe too few experts
     brand_rows <- tibble()
     if ("brand_top1" %in% names(group_experts)) {
-      # str_squish(): no spaces at the ends, one space within; str_to_title():
-      # capital first letters
-      brand <- str_to_title(str_squish(group_experts$brand_top1))
-      # desc(): from most to fewest; row_number(): the place after sorting
-      brands_shown <- tibble(brand = brand) %>%
-        filter(!is.na(brand), !(brand %in% NOT_A_BRAND)) %>%
+      # match(): the row of brand_spelling with each answer's key
+      key <- str_to_lower(str_squish(group_experts$brand_top1))
+      brand <- brand_spelling$shown[match(key, brand_spelling$key)]
+      brands_shown <- tibble(brand = brand, key = key) %>%
+        filter(!is.na(brand), !(key %in% str_to_lower(NOT_A_BRAND))) %>%
         count(brand) %>%
         filter(n >= MIN_N) %>%
         arrange(desc(n), brand) %>%
@@ -107,8 +133,9 @@ section_market <- function(experts, dirs) {
   # 2. The technologies, table -------------------------------------------------
   shares_notes <- paste(
     "Q10b: share of each technology among the firm's recommendations of heating",
-    "systems in the last year, asked of firms with energy advice, engineering or",
-    "chimney sweeping. Q11b: share among the heating systems the firm installed",
+    "systems in the last year, asked of firms with energy advice or chimney",
+    "sweeping that advised at least one household (Q10a). Q11b: share among the",
+    "heating systems the firm installed",
     "in 2025, asked of HVAC firms. In percent. A blank counts as 0 for an expert",
     "who gave other shares. As reported, also where the shares do not sum to 100.",
     "Each firm counts once: the mean is not weighted by the number of",
@@ -178,7 +205,8 @@ section_market <- function(experts, dirs) {
       if_else(group == ALL_EXPERTS, "main", "appendix"),
       note = paste(
         "Mean share among the firm's recommendations in the last year (Q10b, firms",
-        "with energy advice, engineering or chimney sweeping) and installations in",
+        "with energy advice or chimney sweeping that advised at least one household)",
+        "and installations in",
         "2025 (Q11b, HVAC firms). Each firm counts once. n: experts who gave",
         "shares. A bar of fewer than", MIN_N, "experts is left out."
       )

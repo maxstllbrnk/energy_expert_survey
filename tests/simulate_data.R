@@ -2,12 +2,13 @@
 # simulate_data.R — synthetic data, so that code can be tested without the real
 #                   data (project profile: Claude Code may not touch them)
 # Inputs : design matrix and postcode lookups (PUBLIC_DATA_DIR, non-sensitive)
-# Outputs: in SECURE_DIR of a synthetic run (config.R):
-#            clean/survey_main.rds, clean/vignettes_long.rds   as written by
+# Outputs: in SECURE_DIR of a synthetic run (config.R), in the folders of the
+#          secure drive:
+#            CLEAN_DATA_DIR/survey_main.rds, vignettes_long.rds   as written by
 #              R/cleaning/05_main.R: the real column names and answer levels,
 #              with invented values
-#            frame/frame.rds    a sampling frame with invented e-mail addresses
-#            truth.rds          the parameters behind the recommendations
+#            FRAME_FILE   a sampling frame with invented e-mail addresses
+#            truth.rds    the parameters behind the recommendations
 # Checks : none; this is test code
 ################################################################################
 # From the project root, in a session with CLAUDECODE=1:
@@ -24,7 +25,7 @@ if (!USE_SYNTHETIC_DATA) {
 }
 set.seed(20261109)
 N_EXPERTS <- as.integer(Sys.getenv("EES_N_EXPERTS", unset = "1500"))
-dir.create(file.path(SECURE_DIR, "frame"), recursive = TRUE, showWarnings = FALSE)
+dir.create(dirname(FRAME_FILE), recursive = TRUE, showWarnings = FALSE)
 
 # 1. Helpers -------------------------------------------------------------------
 draw_factor <- function(n, levels, probabilities = NULL) {
@@ -127,14 +128,22 @@ main$resp_is_owner <- blank_unless(draw_factor(n, c("Ja", "Nein"), c(.8, .2)), r
 main$resp_role <- blank_unless(rep("Mitarbeiter", n), reached("time_resp_role") & coalesce(main$resp_is_owner == "Nein", FALSE))
 
 # Q2, several ticks possible. A few experts submit the page without any tick, a few
-# fill in only "Sonstige".
+# fill in only "Sonstige". One adviser in five works in an engineering office that
+# does not tick energy advice, and so is not asked Q8 and Q10 (logic file,
+# 2026-11-15): every fifth row, without a random draw, so that every other answer
+# keeps the draws it had before. %%: the remainder of a division.
+is_engineering_office <- seq_len(n) %% 5 == 0
 main <- main %>%
   mutate(
     firm_cat_hvac = factor(if_else(true_group == "HVAC installers", "Ja", "Nicht Gewählt"), levels = TICK_LEVELS),
     firm_cat_chimney = factor(if_else(true_group == "Chimney sweeps", "Ja", "Nicht Gewählt"), levels = TICK_LEVELS),
-    # energy advice is ticked by every adviser and by some of the trades too
-    firm_cat_energyadvice = factor(if_else(true_group == "Energy advisers" | runif(n) < .15, "Ja", "Nicht Gewählt"), levels = TICK_LEVELS),
-    firm_cat_engineering = factor(if_else(runif(n) < .12, "Ja", "Nicht Gewählt"), levels = TICK_LEVELS),
+    # energy advice is ticked by the advisers outside engineering offices and by
+    # some of the trades too
+    firm_cat_energyadvice = factor(if_else((true_group == "Energy advisers" & !is_engineering_office) |
+                                             (true_group != "Energy advisers" & runif(n) < .15),
+                                           "Ja", "Nicht Gewählt"), levels = TICK_LEVELS),
+    firm_cat_engineering = factor(if_else((true_group == "Energy advisers" & is_engineering_office) | runif(n) < .12,
+                                          "Ja", "Nicht Gewählt"), levels = TICK_LEVELS),
     firm_cat_other = NA_character_
   )
 no_tick <- runif(n) < .01
@@ -148,7 +157,9 @@ for (column in c("firm_cat_hvac", "firm_cat_chimney", "firm_cat_energyadvice", "
   main[[column]] <- blank_unless(main[[column]], is_at_q2)
 }
 answered_shk <- coalesce(main$firm_cat_hvac == "Ja", FALSE)
-answered_advice <- coalesce(main$firm_cat_energyadvice == "Ja" | main$firm_cat_chimney == "Ja" | main$firm_cat_engineering == "Ja", FALSE)
+# Q8 and Q10a: firms with energy advice or chimney sweeping, not engineering offices
+# (logic file, 2026-11-15)
+answered_advice <- coalesce(main$firm_cat_energyadvice == "Ja" | main$firm_cat_chimney == "Ja", FALSE)
 
 main$firm_employees <- blank_unless(round(exp(rnorm(n, 1.2, 1.1))), reached("time_firm_employees"))
 main$firm_employees[sample(n, 3)] <- 250000
@@ -220,7 +231,23 @@ for (service in names(SERVICE_LABELS)) {
   main[[service]] <- blank_unless(draw_factor(n, TICK_LEVELS, c(.5, .5)), reached("time_svc") & answered_advice)
 }
 main$adv_households <- blank_unless(round(exp(rnorm(n, 3.5, 1.1))), reached("time_adv_households") & answered_advice)
-main$adv_households[sample(n, 2)] <- 900000
+# Q10a: some advised no household, some leave it blank, in fixed rows without a
+# random draw (as the engineering offices above). Two answers far out, for the
+# outlier rule of step 06, among those who answered.
+main$adv_households[seq_len(n) %% 7 == 1 & !is.na(main$adv_households)] <- 0
+main$adv_households[seq_len(n) %% 20 == 2] <- NA
+outlier_rows <- sample(n, 2)
+outlier_rows <- outlier_rows[!is.na(main$adv_households[outlier_rows])]
+# a draw on an expert without an answer moves to the first expert with at least
+# one household, so that two answers always lie far out
+answered_rows <- setdiff(which(main$adv_households >= 1), outlier_rows)
+outlier_rows <- c(outlier_rows, answered_rows)[1:2]
+main$adv_households[outlier_rows] <- 900000
+# Q10b only with at least one household in Q10a (logic file, 2026-11-15)
+asked_q10b <- answered_advice & coalesce(main$adv_households >= 1, FALSE)
+for (suffix in share_suffixes) {
+  main[[paste0("adv_share_", suffix)]][!asked_q10b] <- NA
+}
 
 # 6. Staircases ----------------------------------------------------------------
 # Every expert walks down one branch, up to the last page they submitted. The time
@@ -287,7 +314,11 @@ for (i in which(reached("time_crit_rank"))) {
 birth_year <- round(rnorm(n, 1970, 11))
 birth_year[sample(n, 8)] <- sample(c(65, 72, -1957, 197, 19700), 8, replace = TRUE)
 main$dem_birthyear <- blank_unless(birth_year, reached("time_dem_birthyear") & runif(n) > .05)
-training_year <- pmin(round(rnorm(n, 1995, 11)), 2026)
+# Training completed some 15 to 35 years after birth; for four persons before the
+# age of 15, which the cleaning sets to missing (Max, 2026-11-14)
+training_year <- pmin(birth_year + round(rnorm(n, 24, 4)), 2026)
+too_young <- sample(n, 4)
+training_year[too_young] <- birth_year[too_young] + 10
 training_year[sample(n, 6)] <- sample(c(95, 88, 1, 20255), 6, replace = TRUE)
 main$dem_training_year <- blank_unless(training_year, reached("time_dem_training_year") & runif(n) > .05)
 main$dem_education <- blank_unless(
@@ -312,7 +343,7 @@ routes <- list(
   time_resp_role = !is.na(main$resp_role),
   time_mix25 = answered_shk, time_brand_top1 = answered_shk,
   time_svc = answered_advice, time_adv_households = answered_advice,
-  time_adv_share = answered_advice,
+  time_adv_share = asked_q10b,
   time_co2_est = coalesce(main$co2_heard == "Ja", FALSE),
   time_cpd_other_text = !is.na(main$cpd_other_text)
 )

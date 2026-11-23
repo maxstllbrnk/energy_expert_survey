@@ -343,6 +343,10 @@ for (k in seq_len(nrow(outlier_counts))) {
     reversed_rule <- paste0(" Then a range whose lower end lies above its upper ",
                             "end: both missing.")
   }
+  if (variable_name == "dem_training_year") {
+    reversed_rule <- paste0(" Then a training completed before the age of ",
+                            TRAINING_MIN_AGE, ": missing.")
+  }
   outlier_sheet <- bind_rows(outlier_sheet, tibble(
     variable = variable_name, label = OUTLIER_LABELS[[variable_name]],
     new_column = paste0(variable_name, "_clean"), impossible_if = impossible_text,
@@ -350,6 +354,7 @@ for (k in seq_len(nrow(outlier_counts))) {
     answered = outlier_counts$answered[k],
     impossible = outlier_counts$impossible[k],
     trimmed = outlier_counts$trimmed[k], reversed = outlier_counts$reversed[k],
+    too_young = outlier_counts$too_young[k],
     used = outlier_counts$used[k],
     rule = paste0("Answers ", impossible_text, ": impossible.", reversed_rule,
                   " ", trim_rule)
@@ -525,9 +530,32 @@ rules <- bind_rows(
   outlier_sheet %>%
     transmute(rule = "Outlier rule", new_column,
               answers_seen = answered, changed = 0,
-              set_to_missing = impossible + trimmed + reversed,
+              set_to_missing = impossible + trimmed + reversed + too_young,
               note = paste0("Missing: impossible, in the ", 100 * TRIM_QUANTILES[1],
-                            "% tails, or a reversed range")),
+                            "% tails, a reversed range, or a training before the ",
+                            "age of ", TRAINING_MIN_AGE)),
+  tibble(rule = "Heating at home in four groups", new_column = "own_heating_group",
+         answers_seen = nrow(experts), changed = 0, set_to_missing = 0,
+         note = paste0("Heat pump; other renewable (pellets, district heating, ",
+                       "hybrid); conventional (gas, oil); other or not stated, ",
+                       "also who never saw Q20")),
+  tibble(rule = "Heat pump share of the expert's group (Q11b, Q10b)",
+         new_column = "hp_share_installed, hp_share_recommended",
+         answers_seen = sum(!is.na(experts$expert_group)), changed = 0,
+         set_to_missing = sum(!is.na(experts$expert_group) &
+                                is.na(experts$hp_share_installed) &
+                                is.na(experts$hp_share_recommended)),
+         note = paste0("Installed (Q11b) for HVAC installers, recommended (Q10b) ",
+                       "for advisers and sweeps. Missing: with a group, but not ",
+                       "the share of its question")),
+  tibble(rule = "Course on heat pumps (Q24)", new_column = "hp_course",
+         answers_seen = sum(!is.na(experts$cpd_hp) |
+                              !is.na(experts$cpd_hp_electrician)),
+         changed = sum(is.na(experts$cpd_hp) & is.na(experts$cpd_hp_electrician)),
+         set_to_missing = 0,
+         note = paste0("1: a course on heat pumps or as an electrician for heat ",
+                       "pumps in the last three years. Changed: both blank, ",
+                       "counted as no")),
   shares_sheet %>%
     group_by(question) %>%
     summarise(answers_seen = sum(answered), changed = sum(blank_set_to_0),
@@ -557,6 +585,7 @@ settings <- tribble(
   "trim_lower_percent", as.character(100 * TRIM_QUANTILES[1]),                "Answers below this quantile of the valid ones are trimmed, for the variables trimmed",
   "trim_upper_percent", as.character(100 * TRIM_QUANTILES[2]),                "Answers above this quantile of the valid ones are trimmed, for the variables trimmed",
   "survey_year",        as.character(SURVEY_YEAR),                            "Age is this year minus the year of birth",
+  "training_min_age",   as.character(TRAINING_MIN_AGE),                       "A training completed before this age is missing",
   "hdd_year",           as.character(HDD_YEAR),                               "The year of the heating degree days",
   "min_n",              as.character(MIN_N),                                  "The fewest answers behind a statistic"
 )
@@ -602,7 +631,12 @@ derived_columns <- tribble(
   "own_heating",            "Answer of Q20, \"Keine Angabe\" if left blank; NA for those who stopped before Q20",
   "heat_pump_at_home",      "1 if a heat pump heats the expert's home, else 0; \"Sonstiges\" and no answer count as no heat pump; NA for those who stopped before Q20",
   "hdd",                    paste0("Heating degree days of the expert's NUTS3 region in ", HDD_YEAR, " (Eurostat); NA without nuts3"),
+  "own_heating_group",      "own_heating in four groups: heat pump; other renewable (pellets, district heating, hybrid); conventional (gas, oil); other or not stated (Sonstiges, Keine Angabe, and who stopped before Q20)",
   "age",                    paste0(SURVEY_YEAR, " minus dem_birthyear_clean"),
+  "years_since_training",   paste0(SURVEY_YEAR, " minus dem_training_year_clean"),
+  "hp_share_installed",     "HVAC installers: mix25_hp_filled, the heat pumps' share of the systems installed in 2025 (Q11b); NA for the other groups and without an answer",
+  "hp_share_recommended",   "Energy advisers and chimney sweeps: adv_share_hp_filled, the heat pumps' share of the recommendations of the last year (Q10b); NA for HVAC installers and without an answer",
+  "hp_course",              "1 if the expert completed a course on heat pumps, or as an electrician for heat pumps, in the last three years (Q24); a blank counts as no",
   "interview_minutes",      "LimeSurvey's total time in minutes; for a break-off, the time until the break-off. Not trimmed: use medians and quartiles",
   "vig_group_cost_time",    "Time on the page of the cost question of the last vignette, in seconds"
 )

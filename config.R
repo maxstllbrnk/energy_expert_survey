@@ -1,55 +1,77 @@
 ################################################################################
-# config.R — the roots, every path derived from them, and the constants of the
-#            survey. The only file to edit on a new machine.
-# Inputs : config.local.R, if it exists (per-machine roots, git-ignored)
-# Outputs: creates the output folder if it is missing
-# Checks : the inputs exist
+# config.R — the two roots, every path derived from them, and the constants of
+#            the survey
+# Inputs : config.local.R (git-ignored): SECURE_DIR and DROPBOX_DIR of this
+#          machine
+# Outputs: creates the cleaned-data and output folders if they are missing
+# Checks : the roots are set, the secure folder and the public inputs exist
 ################################################################################
 # The project lives in three places:
-#   SECURE   raw exports, cleaned data, sampling frame and all output. Personal
-#            data, and the fitted models contain them. Claude Code has no access.
-#   DROPBOX  non-sensitive inputs only (public_data_dropbox/): design matrix,
-#            batch overview, geodata, degree days.
+#   SECURE   SECURE_DIR, one folder on the secure drive. Personal data: the raw
+#            exports, the cleaned data, the sampling frame and all output, as
+#            the fitted models contain the data. Claude Code has no access.
+#            SECURE_DIR/
+#              260909_raw_energy_expert_survey_data/      raw LimeSurvey exports
+#                limesurvey-syntax/                       and the syntax files
+#              260909_cleaned_energy_expert_survey_data/  R/run_cleaning.R
+#              260915_scraped_data/                       the sampling frame
+#              output/                                    all output
+#              output_quick/                              a quick run's output
+#   DROPBOX  DROPBOX_DIR. Non-sensitive inputs only (public_data_dropbox/):
+#            design matrix, batch overview, geodata, degree days.
 #   PROJECT  this folder: code only, shared through GitHub. Nothing is written
 #            here.
 
 # 1. The roots -----------------------------------------------------------------
-# Forward slashes: R reads "\" in a string as an escape character.
-RAW_DIR <- "I:/Projekte/Stiftungs- und Industrieprojekte/SFB UniMA/Daten/energy_experts_survey/wave_1_2026/260909_raw_energy_expert_survey_data"
-CLEAN_DATA_DIR <- "I:/Projekte/Stiftungs- und Industrieprojekte/SFB UniMA/Daten/energy_experts_survey/wave_1_2026/260909_cleaned_energy_expert_survey_data"
-DROPBOX_DIR <- "C:/Users/msk/Dropbox/Heating Transition/analysis_survey"
+# The only two settings that differ between machines. Set both in config.local.R
+# in the project root, with forward slashes (R reads "\" in a string as an
+# escape character):
+#   SECURE_DIR <- "I:/.../energy_experts_survey/wave_1_2026"
+#   DROPBOX_DIR <- "C:/Users/<you>/Dropbox/Heating Transition/analysis_survey"
+SECURE_DIR <- NA
+DROPBOX_DIR <- NA
+if (file.exists("config.local.R")) {
+  source("config.local.R")
+}
 
 # A first run on the real data to see that everything runs: few draws, no
 # cross-validation, the output in output_quick/ so that it is never taken for the
 # real one. A run with FALSE estimates every model again.
 QUICK_RUN <- FALSE
-
-# config.local.R holds only the assignments above that differ on this machine
-if (file.exists("config.local.R")) {
-  source("config.local.R")
+# A quick run next to a full run, without editing this file while the full run
+# still has scripts to start: start that R session with the environment variable
+# EES_QUICK_RUN=1. Sys.getenv(): the value of an environment variable, "" if unset.
+if (Sys.getenv("EES_QUICK_RUN") == "1") {
+  QUICK_RUN <- TRUE
 }
 
 # 2. Secure paths --------------------------------------------------------------
 # A session of Claude Code (CLAUDECODE=1) may not touch the real data (project
 # profile). It reads and writes synthetic data in a temporary folder instead, set
-# by EES_SYNTHETIC_DIR, which tests/simulate_data.R fills. A run on the real data
-# never takes this branch.
+# by EES_SYNTHETIC_DIR, which tests/simulate_data.R fills with the same folders
+# as the secure drive. A run on the real data never takes this branch.
 USE_SYNTHETIC_DATA <- Sys.getenv("CLAUDECODE") == "1"
 if (USE_SYNTHETIC_DATA) {
   SECURE_DIR <- Sys.getenv("EES_SYNTHETIC_DIR",
                            unset = file.path(Sys.getenv("TEMP"), "ees", "synthetic"))
-  RAW_DIR <- file.path(SECURE_DIR, "raw")
-  CLEAN_DATA_DIR <- file.path(SECURE_DIR, "clean")
-  FRAME_FILE <- file.path(SECURE_DIR, "frame", "frame.rds")
-} else {
-  SECURE_DIR <- dirname(CLEAN_DATA_DIR)
-  # The sampling frame: every expert and firm that was contacted, with e-mail,
-  # postcode and the list they were drawn from. The denominator of the response
-  # rates.
-  FRAME_FILE <- file.path(dirname(RAW_DIR), "260915_scraped_data",
-                          "260513_allexperts_unique_PLZ.rds")
 }
+if (is.na(SECURE_DIR) || is.na(DROPBOX_DIR)) {
+  stop("Set SECURE_DIR and DROPBOX_DIR in config.local.R (see config.R, section 1).")
+}
+# A mistyped root would otherwise create the folders below in the wrong place and
+# write personal data there
+if (!USE_SYNTHETIC_DATA && !dir.exists(SECURE_DIR)) {
+  stop("SECURE_DIR does not exist: ", SECURE_DIR,
+       "\nFix it in config.local.R, or connect the secure drive.")
+}
+RAW_DIR <- file.path(SECURE_DIR, "260909_raw_energy_expert_survey_data")
 SYNTAX_DIR <- file.path(RAW_DIR, "limesurvey-syntax")
+CLEAN_DATA_DIR <- file.path(SECURE_DIR, "260909_cleaned_energy_expert_survey_data")
+# The sampling frame: every expert and firm that was contacted, with e-mail,
+# postcode and the list they were drawn from. The denominator of the response
+# rates.
+FRAME_FILE <- file.path(SECURE_DIR, "260915_scraped_data",
+                        "260513_allexperts_unique_PLZ.rds")
 
 # All output, one folder per estimation script (R/estimation/), plus the cleaning
 # and the summary statistics of the full sample
@@ -101,15 +123,25 @@ MIN_CONTACTS <- 30
 # so that each 2.5% tail rests on 125 draws. Fewer in a synthetic run, which only
 # tests the code, and in a quick run. N_WORKERS: the R sessions for the Hessian
 # and the Krinsky-Robb loop; lower it if something else runs on this computer.
+# N_DRAWS_PREDICTION_OTHER: the prediction draws of the sets of effects other than
+# the main one (Max, 2026-11-14). Against 20,000 draws, at standard deviations of
+# the constants as large as the models', 1,000 draws move an effect by at most
+# 0.16 percentage points and 5,000 by 0.05 (synthetic (4pe), 2026-11-14).
 if (USE_SYNTHETIC_DATA || QUICK_RUN) {
   N_DRAWS_MODEL <- 100
   N_DRAWS_PREDICTION <- 1000
+  N_DRAWS_PREDICTION_OTHER <- 1000
   N_DRAWS_KR <- 200
 } else {
   N_DRAWS_MODEL <- 1000
   N_DRAWS_PREDICTION <- 5000
+  N_DRAWS_PREDICTION_OTHER <- 1000
   N_DRAWS_KR <- 5000
 }
+# The main set of effects, which leads every results workbook and which
+# compare_models() reads: every expert of the sample at the reference vignette
+# (Max, 2026-11-14)
+MAIN_AMES <- "observed_reference"
 N_WORKERS <- parallel::detectCores()
 if (USE_SYNTHETIC_DATA) {
   N_WORKERS <- 2

@@ -34,7 +34,8 @@
 # The AMEs are those both models compute, and those only the larger model has,
 # which count as moving from 0, their value in the smaller model, if their 95%
 # Krinsky-Robb interval excludes 0 (Max, 2026-11-09): a larger model passes if its
-# new terms or its other effects move by ame_threshold.
+# new terms or its other effects move by ame_threshold. The estimation scripts read
+# the main set (MAIN_AMES in config.R) for the three groups (Max, 2026-11-14).
 # For models that do not nest each other: prefer a model if Vuong's test and
 # cross-validation (or BIC, as above) agree on it, otherwise data cannot decide.
 # A model that did not converge, or whose Hessian is not positive definite, never
@@ -213,12 +214,19 @@ fresh_log_likelihood <- function(set, theta, prepared, halton_sequences, primes,
 
 #' One fold of the cross-validation, on an R session of its own: estimate on the
 #' other folds from the full-sample estimates, then evaluate the held-out experts.
-#' Restarts after code 3 as fit_mixed_logit() does.
+#' Restarts after code 2 or 3, at most three times, as fit_mixed_logit() does: a
+#' fold that stopped with code 2 below its maximum would evaluate the held-out
+#' experts at other parameters than the fold's estimates, so that their
+#' log-likelihood would be off, in either direction (Claude's proposal, agreed by
+#' Max, 2026-11-16; until then after code 3 only).
+#' The re-evaluation that fit_mixed_logit() makes at code 2 is not needed: the fold
+#' uses only the coefficients, which are those of the last iterate.
 #'
 #' @param job list: model_name, fold, fingerprint; arguments of mlogit();
 #'   training_data, held_out_data
 #' @return list: model_name, fold, fingerprint, expert, log_likelihood (one per
-#'   held-out expert), code, iterations, minutes, error; also saved to
+#'   held-out expert), code, iterations (of the last estimation), restarts (0 to
+#'   3), minutes, error; also saved to
 #'   job$fold_file, so that a run that is cut off resumes with the folds it had
 cross_validate_fold <- function(job) {
   start_time <- Sys.time()
@@ -249,11 +257,13 @@ cross_validate_fold <- function(job) {
     arguments$data <- quote(training_data)
     arguments <- fix_terms_without_variation(arguments)
     fit <- do.call("mlogit", arguments)
+    restarts <- 0
     for (restart in 1:3) {
-      if (fit$est.stat$code != 3) break
+      if (!(fit$est.stat$code %in% c(2, 3))) break
       arguments$start <- setNames(as.numeric(fit$coefficients),
                                   names(fit$coefficients))
       fit <- do.call("mlogit", arguments)
+      restarts <- restart
     }
     # iterlim = 0: the log-likelihood at these parameters, on the draws mlogit gives
     # the held-out experts. fitted(): the expert's probability, once per decision.
@@ -270,10 +280,10 @@ cross_validate_fold <- function(job) {
     list(expert = expert_of_decision[is_first_decision],
          log_likelihood = log(as.numeric(fitted(held_out)))[is_first_decision],
          code = fit$est.stat$code, iterations = fit$est.stat$nb.iter,
-         error = NA_character_)
+         restarts = restarts, error = NA_character_)
   }, error = function(e) {
     list(expert = character(0), log_likelihood = numeric(0), code = NA_real_,
-         iterations = NA_real_, error = conditionMessage(e))
+         iterations = NA_real_, restarts = NA_real_, error = conditionMessage(e))
   })
   fold_result$model_name <- job$model_name
   fold_result$fold <- job$fold
@@ -320,6 +330,10 @@ p_text <- function(p_value) {
 #'                      coefficient per technology
 #' @param final_model   NULL, or the name of the model of the block tests
 #' @param ame_name      NULL, or the name of a set of AMEs in results$ames
+#' @param ame_profiles  NULL: every profile of the set; or the profiles the AME
+#'                      step reads, e.g. EXPERT_GROUPS, so that a pooled row, whose
+#'                      interval is narrower than its groups', does not let an
+#'                      added AME count on its own (Max, 2026-11-14)
 #' @param cv_models     NULL, or the names of the models to cross-validate
 #' @param ame_threshold an AME moving by less than this (0.01: 1 pp) is immaterial
 #' @param alpha         the level of the tests
@@ -327,8 +341,8 @@ p_text <- function(p_value) {
 #' @param n_workers     R sessions for the fresh draws and the folds
 #' @return the sheets, a named list of tibbles
 compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
-                           ame_name = NULL, cv_models = NULL, ame_threshold = 0.01,
-                           alpha = 0.05, n_fresh_draws = 12,
+                           ame_name = NULL, ame_profiles = NULL, cv_models = NULL,
+                           ame_threshold = 0.01, alpha = 0.05, n_fresh_draws = 12,
                            n_workers = N_WORKERS) {
   start_time <- Sys.time()
 
@@ -856,7 +870,9 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
     # (b) The jobs. Starting values for every parameter, also those fixed by
     # constPar. The call of a model evaluated again at code 2 holds iterlim = 0,
     # which goes. A model whose folds ran on the same estimates and folds is loaded,
-    # and so is each fold of a run that was cut off.
+    # and so is each fold of a run that was cut off. The fingerprint also names how
+    # a fold restarts and that it counts its restarts, so that folds saved before
+    # either (2026-11-16) run again.
     # hash(): a short code that changes whenever its object does.
     jobs <- list()
     cv_saved <- list()
@@ -865,7 +881,8 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
       model <- models[[model_name]]
       fingerprint <- rlang::hash(list(results_list[[model_name]]$coefficients,
                                       expert_folds$expert, expert_folds$fold,
-                                      prepared_list[[model_name]]$n_draws))
+                                      prepared_list[[model_name]]$n_draws,
+                                      "restart after code 2 or 3, restarts counted"))
       saved_file <- file.path(est_dir, model_name, "cross_validation.rds")
       if (file.exists(saved_file)) {
         saved <- readRDS(saved_file)
@@ -947,6 +964,7 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
           fold = fold_result$fold,
           code = fold_result$code,
           iterations = fold_result$iterations,
+          restarts = fold_result$restarts,
           minutes = fold_result$minutes,
           error = fold_result$error
         ))
@@ -973,6 +991,11 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
         question = NA_character_,
         experts = nrow(per_expert),
         folds_converged = sum(folds_of_model$code %in% c(1, 2)),
+        # Restarts after code 2 or 3 over the folds, at most three per fold: a fold
+        # that took all three and still ended with code 2 may have stopped below its
+        # maximum (Max, 2026-11-16)
+        fold_restarts = sum(folds_of_model$restarts, na.rm = TRUE),
+        folds_with_three_restarts = sum(folds_of_model$restarts == 3, na.rm = TRUE),
         held_out_log_likelihood = sum(per_expert$log_likelihood),
         held_out_per_expert = mean(per_expert$log_likelihood),
         minutes = sum(folds_of_model$minutes),
@@ -1029,7 +1052,8 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
     }
     cv_note <- sprintf(paste0(
       "%d folds by expert, %s, the same folds for all models. Estimated on the other ",
-      "folds with mlogit from the full-sample estimates, then the log-likelihood of ",
+      "folds with mlogit from the full-sample estimates, restarted up to three times ",
+      "after code 2 or 3, then the log-likelihood of ",
       "the held-out experts with iterlim = 0, on the draws mlogit gives them. Gain: ",
       "larger minus smaller, mean per expert, with its SE over experts; the folds ",
       "share experts in training, so this SE is rather too small. A model is favoured ",
@@ -1182,6 +1206,24 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
       if (is.null(ames_smaller) || is.null(ames_larger) ||
           !identical(ames_smaller$at, ames_larger$at)) {
         next
+      }
+      if (!is.null(ame_profiles)) {
+        # A misspelled profile would leave no rows, and the rule would then read as
+        # if no AME moved
+        unknown_profiles <- setdiff(ame_profiles, c(ames_smaller$table$profile,
+                                                    ames_larger$table$profile))
+        if (length(unknown_profiles) > 0) {
+          stop("ame_profiles: no profile of the set ", ame_name, " is called ",
+               paste(unknown_profiles, collapse = ", "))
+        }
+        ames_smaller$table <- ames_smaller$table %>%
+          filter(profile %in% ame_profiles)
+        ames_smaller$baseline <- ames_smaller$baseline %>%
+          filter(profile %in% ame_profiles)
+        ames_larger$table <- ames_larger$table %>%
+          filter(profile %in% ame_profiles)
+        ames_larger$baseline <- ames_larger$baseline %>%
+          filter(profile %in% ame_profiles)
       }
       # A model has the effects of its terms, so the sets of effects can differ. An
       # effect that both have counts only if both define it alike; an effect of the
@@ -1519,7 +1561,9 @@ compare_models <- function(est_dir, tests, blocks = NULL, final_model = NULL,
       "0; the rule counts the rows of both kinds of AME, not the baselines. A test ",
       "without ",
       "a row: a model does not have this set, or has it at another reference state ",
-      "(at)."
+      "(at).",
+      if (is.null(ame_profiles)) " Every profile of the set." else
+        paste0(" Only the profiles ", paste(ame_profiles, collapse = ", "), ".")
     )
   }
   sheets <- list(

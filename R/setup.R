@@ -1,7 +1,7 @@
 ################################################################################
 # setup.R — packages, paths, figure style and shared functions. Sourced at the
 #           top of every script; no other script loads packages or sets options.
-# Inputs : config.R, R/functions/, R/summary_statistics/
+# Inputs : config.R, R/functions/, R/summary_statistics/, R/model_output/
 # Outputs: none
 # Checks : scripts run from the project root
 ################################################################################
@@ -52,7 +52,8 @@ options(
 # 5. Shared functions ----------------------------------------------------------
 function_files <- c(
   list.files(file.path("R", "functions"), pattern = "\\.R$", full.names = TRUE),
-  list.files(file.path("R", "summary_statistics"), pattern = "\\.R$", full.names = TRUE)
+  list.files(file.path("R", "summary_statistics"), pattern = "\\.R$", full.names = TRUE),
+  list.files(file.path("R", "model_output"), pattern = "\\.R$", full.names = TRUE)
 )
 for (function_file in function_files) {
   source(function_file, encoding = "UTF-8")

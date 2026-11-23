@@ -35,6 +35,15 @@
 #'                            approximation of the Hessian, which can be poor near
 #'                            the maximum. A restart from the last iterate builds
 #'                            it anew, at most three times.
+#'   restart after code 2     the steps had become too small to go on, which can
+#'                            happen below the maximum too: (4pe)_6 of
+#'                            district_heating_grouped.R stopped 3.5 points
+#'                            below it on synthetic data, with a Hessian that
+#'                            was not positive definite, and one restart
+#'                            reached it. So code 2 gets the same restarts as
+#'                            code 3 (Max, 2026-11-15). If all three end with
+#'                            code 3, the model stops as not converged, where
+#'                            before it went on at code 2.
 #'   re-evaluation at code 2  mlogit then returns the coefficients of the last
 #'                            iterate but the gradient and log-likelihood of a
 #'                            trial point one small step further
@@ -82,9 +91,15 @@ fit_mixed_logit <- function(name, formula, data, reference, est_dir,
     rlang::hash(as.data.frame(idx(data))),
     reference, group_constants, n_draws, start_coefficients
   ))
+  # A model that ended with code 2 and was saved before code 2 was restarted
+  # (2026-11-15) may lie below its maximum, so it is estimated again. The others
+  # come out the same either way, so they still load.
   if (!force && file.exists(model_file)) {
     saved_model <- readRDS(model_file)
-    if (identical(saved_model$fit_info$fingerprint, fingerprint)) {
+    stopped_before_restart <- saved_model$est.stat$code == 2 &&
+      is.null(saved_model$fit_info$restarts_at_code_2)
+    if (identical(saved_model$fit_info$fingerprint, fingerprint) &&
+        !stopped_before_restart) {
       message("Model ", name, ": nothing changed, loaded from ", model_file)
       return(saved_model)
     }
@@ -302,8 +317,8 @@ fit_mixed_logit <- function(name, formula, data, reference, est_dir,
   # (g) Estimate
   model <- do.call("mlogit", arguments)
   for (restart in 1:3) {
-    if (model$est.stat$code != 3) break
-    message("Code 3 after ", model$est.stat$nb.iter,
+    if (!(model$est.stat$code %in% c(2, 3))) break
+    message("Code ", model$est.stat$code, " after ", model$est.stat$nb.iter,
             " iterations, log-likelihood ",
             round(as.numeric(logLik(model)), 2), "; restart ", restart)
     # starting values for every parameter, also those fixed by constPar
@@ -335,7 +350,8 @@ fit_mixed_logit <- function(name, formula, data, reference, est_dir,
     start_from = start_from_name,
     log_likelihood_start = log_likelihood_start,
     n_draws = n_draws,
-    minutes = round(minutes, 1)
+    minutes = round(minutes, 1),
+    restarts_at_code_2 = TRUE
   )
   saveRDS(model, model_file)
   cat("Model", name, ": log-likelihood", round(as.numeric(logLik(model)), 3),
